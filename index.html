@@ -170,6 +170,10 @@
     user-select: none; -webkit-user-select: none; cursor: pointer;
   }
   .day-strip span.hot { background: var(--ink); color: #fff; font-weight: 600; }
+  .day-strip span.today::after {
+    content: ""; display: inline-block; width: 4px; height: 4px;
+    margin-left: 3px; border-radius: 50%; background: #FF3B30; vertical-align: middle;
+  }
 
   .sheet textarea {
     width: 100%; font-family: var(--font); font-size: 16px; line-height: 1.5;
@@ -329,7 +333,7 @@ let entries = loadEntries();
 let view = "week";
 let wk = getISOWeek(now);
 let mo = { year: now.getFullYear(), month: now.getMonth() };
-const currentWk = getISOWeek(new Date());
+const currentWk = getISOWeek(now);
 
 // ---------- grouping + markdown ----------
 function activeEntries() {
@@ -459,7 +463,9 @@ const sheetRoot = document.getElementById("sheetRoot");
 function openComposer(existing) {
   let text = existing ? existing.text : "";
   let tags = existing ? [...existing.tags] : [];
-  let cw = existing ? { year: existing.year, week: existing.week } : getISOWeek(new Date());
+  let cw = existing
+    ? { year: existing.year, week: existing.week }
+    : (view === "week" ? { year: wk.year, week: wk.week } : getISOWeek(new Date()));
   let day = existing ? entryDay(existing) : weekdayIndex(new Date());
   const nowWk = getISOWeek(new Date());
 
@@ -481,9 +487,11 @@ function openComposer(existing) {
 
     function openStrip() {
       if (strip) return;
+      const todayIdx = weekdayIndex(new Date());
       strip = el("div", { class: "day-strip" });
       DAY_TOKENS.forEach((tok, i) => {
-        const s = el("span", { class: i === hot ? "hot" : "" }, tok);
+        const cls = [i === hot ? "hot" : "", i === todayIdx ? "today" : ""].filter(Boolean).join(" ");
+        const s = el("span", { class: cls }, tok);
         s.addEventListener("click", ev => {
           ev.stopPropagation();
           day = i;
