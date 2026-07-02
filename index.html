@@ -40,11 +40,6 @@
   }
   .header-row { display: flex; justify-content: space-between; align-items: baseline; }
   .header h1 { font-size: 22px; font-weight: 700; margin: 0; }
-  .export-btn {
-    font-size: 13px; color: var(--subtle);
-    background: none; border: none; padding: 4px;
-  }
-  .export-btn.copied { color: #2E7D3A; }
 
   .seg {
     display: flex; background: #E4E4E9; border-radius: 10px;
@@ -119,7 +114,12 @@
     border: none; box-shadow: 0 6px 20px rgba(0,0,0,0.25);
     display: flex; align-items: center; justify-content: center;
     line-height: 1; z-index: 40;
+    transition: background 0.2s ease;
+    user-select: none; -webkit-user-select: none;
+    -webkit-touch-callout: none; touch-action: manipulation;
   }
+  .fab svg { width: 22px; height: 22px; }
+  .fab.copied { background: #2E7D3A; font-size: 22px; }
 
   /* sheet */
   .overlay {
@@ -224,7 +224,6 @@
   <div class="header">
     <div class="header-row">
       <h1>deposits</h1>
-      <button class="export-btn" id="exportBtn">export md</button>
     </div>
     <div class="seg">
       <button id="segWeek" class="active">week</button>
@@ -304,7 +303,12 @@ function monthLabel(year, month) {
 function pad2(n) { return String(n).padStart(2, "0"); }
 function weekdayIndex(date) { return (date.getDay() + 6) % 7; } // Mon=0 … Sun=6
 function entryDay(e) {
-  return (e.day == null) ? weekdayIndex(new Date(e.createdAt)) : e.day;
+  if (e.day === undefined) return weekdayIndex(new Date(e.createdAt)); // legacy entries
+  return e.day; // may be null = no day chosen
+}
+function daySortKey(e) {
+  const d = entryDay(e);
+  return d == null ? DAY_TOKENS.length : d; // no-day entries sort after Sunday
 }
 
 // ---------- storage ----------
@@ -340,7 +344,7 @@ function activeEntries() {
   if (view === "week") {
     return entries
       .filter(e => e.year === wk.year && e.week === wk.week)
-      .sort((a, b) => (entryDay(a) - entryDay(b)) || a.createdAt.localeCompare(b.createdAt));
+      .sort((a, b) => (daySortKey(a) - daySortKey(b)) || a.createdAt.localeCompare(b.createdAt));
   }
   return entries
     .filter(e => {
@@ -349,7 +353,7 @@ function activeEntries() {
       thu.setUTCDate(mon.getUTCDate() + 3); // week belongs to the month its Thursday is in
       return thu.getUTCFullYear() === mo.year && thu.getUTCMonth() === mo.month;
     })
-    .sort((a, b) => (a.week - b.week) || (entryDay(a) - entryDay(b)) || a.createdAt.localeCompare(b.createdAt));
+    .sort((a, b) => (a.week - b.week) || (daySortKey(a) - daySortKey(b)) || a.createdAt.localeCompare(b.createdAt));
 }
 function groupByTopic(list) {
   const groups = {};
@@ -374,9 +378,10 @@ function toMarkdown(list, heading) {
     md += "## " + groupLabel(g.key) + "\n\n";
     for (const e of g.entries) {
       const modes = e.tags.filter(t => modeById[t]).map(t => modeById[t].label);
+      const d = entryDay(e);
       md += "- " + e.text
         + (modes.length ? " _(" + modes.join(", ") + ")_" : "")
-        + " \u2014 " + DAY_TOKENS[entryDay(e)] + ", W" + pad2(e.week) + "\n";
+        + " \u2014 " + (d == null ? "" : DAY_TOKENS[d] + ", ") + "W" + pad2(e.week) + "\n";
     }
     md += "\n";
   }
@@ -442,8 +447,10 @@ function render() {
       const entry = el("div", { class: "entry", onclick: () => openComposer(e) });
       entry.appendChild(el("p", null, e.text));
       const meta = el("div", { class: "entry-meta" });
-      meta.appendChild(el("span", { class: "entry-day" },
-        DAY_TOKENS[entryDay(e)] + (view === "month" ? " \u00B7 W" + pad2(e.week) : "")));
+      const d = entryDay(e);
+      const dayBits = [d == null ? "" : DAY_TOKENS[d], view === "month" ? "W" + pad2(e.week) : ""]
+        .filter(Boolean).join(" \u00B7 ");
+      if (dayBits) meta.appendChild(el("span", { class: "entry-day" }, dayBits));
       for (const tg of e.tags) {
         if (tg === g.key) continue;
         const tt = topicById[tg], mm = modeById[tg];
@@ -482,21 +489,27 @@ function openComposer(existing) {
     // ---- header: day scrubber | title | save ----
     const head = el("div", { class: "sheet-head" });
 
-    const dayPill = el("button", { class: "day-pill" }, DAY_TOKENS[day]);
-    let strip = null, dragging = false, moved = false, hot = day, startX = 0;
+    // strip = 7 day tokens + a trailing "–" cell meaning "no day"
+    const NO_DAY = DAY_TOKENS.length;
+    const stripTokens = [...DAY_TOKENS, "–"];
+    const dayPill = el("button", { class: "day-pill" }, day == null ? "–" : DAY_TOKENS[day]);
+    let strip = null, dragging = false, moved = false, hot = (day == null ? NO_DAY : day), startX = 0;
 
+    function commitDay(i) {
+      day = (i === NO_DAY) ? null : i;
+      closeStrip();
+      build();
+    }
     function openStrip() {
       if (strip) return;
       const todayIdx = weekdayIndex(new Date());
       strip = el("div", { class: "day-strip" });
-      DAY_TOKENS.forEach((tok, i) => {
+      stripTokens.forEach((tok, i) => {
         const cls = [i === hot ? "hot" : "", i === todayIdx ? "today" : ""].filter(Boolean).join(" ");
         const s = el("span", { class: cls }, tok);
         s.addEventListener("click", ev => {
           ev.stopPropagation();
-          day = i;
-          closeStrip();
-          build();
+          commitDay(i);
         });
         strip.appendChild(s);
       });
@@ -510,14 +523,14 @@ function openComposer(existing) {
     }
     function idxFromX(x) {
       const r = strip.getBoundingClientRect();
-      const i = Math.floor((x - r.left) / (r.width / DAY_TOKENS.length));
-      return Math.max(0, Math.min(DAY_TOKENS.length - 1, i));
+      const i = Math.floor((x - r.left) / (r.width / stripTokens.length));
+      return Math.max(0, Math.min(stripTokens.length - 1, i));
     }
 
     dayPill.addEventListener("pointerdown", ev => {
       ev.preventDefault();
       if (strip && !dragging) { closeStrip(); return; } // second tap toggles closed
-      dragging = true; moved = false; hot = day; startX = ev.clientX;
+      dragging = true; moved = false; hot = (day == null ? NO_DAY : day); startX = ev.clientX;
       openStrip();
       try { dayPill.setPointerCapture(ev.pointerId); } catch (e) {}
     });
@@ -529,11 +542,7 @@ function openComposer(existing) {
     dayPill.addEventListener("pointerup", () => {
       if (!dragging) return;
       dragging = false;
-      if (moved) {
-        day = hot;
-        closeStrip();
-        build();
-      }
+      if (moved) commitDay(hot);
       // no movement: strip stays open for tapping a day
     });
     dayPill.addEventListener("pointercancel", () => { dragging = false; closeStrip(); });
@@ -643,19 +652,36 @@ function openComposer(existing) {
   }, 120);
 }
 
-// ---------- export ----------
-const exportBtn = document.getElementById("exportBtn");
-exportBtn.addEventListener("click", async () => {
+// ---------- fab: tap = new entry, long-press = swap to export ----------
+const fab = document.getElementById("fab");
+const EXPORT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3.5"/><path d="M7.5 7.5 12 3l4.5 4.5"/><path d="M5 13v5.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V13"/></svg>';
+let fabMode = "add";
+let fabHoldTimer = null, fabLongFired = false, fabRevertTimer = null;
+
+function setFabMode(mode) {
+  fabMode = mode;
+  clearTimeout(fabRevertTimer);
+  fab.classList.remove("copied");
+  if (mode === "export") {
+    fab.innerHTML = EXPORT_ICON;
+    fab.setAttribute("aria-label", "Export markdown");
+    fabRevertTimer = setTimeout(() => setFabMode("add"), 5000); // untouched: fall back to +
+  } else {
+    fab.textContent = "+";
+    fab.setAttribute("aria-label", "New entry");
+  }
+}
+
+async function doExport() {
   const md = toMarkdown(activeEntries(), exportHeading());
+  clearTimeout(fabRevertTimer);
   try {
     await navigator.clipboard.writeText(md);
-    exportBtn.textContent = "copied \u2713";
-    exportBtn.classList.add("copied");
-    setTimeout(() => {
-      exportBtn.textContent = "export md";
-      exportBtn.classList.remove("copied");
-    }, 1600);
+    fab.classList.add("copied");
+    fab.textContent = "\u2713";
+    setTimeout(() => setFabMode("add"), 1200);
   } catch (e) {
+    setFabMode("add");
     const overlay = el("div", { class: "overlay", onclick: () => sheetRoot.innerHTML = "" });
     const sheet = el("div", { class: "sheet", onclick: ev => ev.stopPropagation() });
     sheet.appendChild(el("div", { class: "grabber" }));
@@ -667,10 +693,26 @@ exportBtn.addEventListener("click", async () => {
     overlay.appendChild(sheet);
     sheetRoot.appendChild(overlay);
   }
+}
+
+fab.addEventListener("pointerdown", () => {
+  fabLongFired = false;
+  clearTimeout(fabHoldTimer);
+  fabHoldTimer = setTimeout(() => {
+    fabLongFired = true;
+    setFabMode(fabMode === "add" ? "export" : "add");
+  }, 500);
+});
+["pointerup", "pointerleave", "pointercancel"].forEach(evt =>
+  fab.addEventListener(evt, () => clearTimeout(fabHoldTimer)));
+fab.addEventListener("contextmenu", e => e.preventDefault());
+fab.addEventListener("click", () => {
+  if (fabLongFired) { fabLongFired = false; return; } // swallow the click after a long press
+  if (fabMode === "add") openComposer(null);
+  else doExport();
 });
 
 // ---------- wiring ----------
-document.getElementById("fab").addEventListener("click", () => openComposer(null));
 segWeek.addEventListener("click", () => { view = "week"; render(); });
 segMonth.addEventListener("click", () => { view = "month"; render(); });
 document.getElementById("prevBtn").addEventListener("click", () => {
