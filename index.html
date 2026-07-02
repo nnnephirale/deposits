@@ -108,6 +108,10 @@
     border: 1px solid var(--hairline); color: var(--subtle); font-weight: 400;
   }
   .entry-day { font-family: var(--mono); font-size: 11px; color: #C7C7CC; }
+  .entry-toplabel {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+    text-transform: uppercase; font-weight: 600; margin-bottom: 5px;
+  }
   .group.dense { margin-bottom: 12px; }
 
   /* group drag reorder */
@@ -433,13 +437,19 @@ function el(tag, attrs, ...children) {
 // ---------- layout experiment (temporary — pick one, then strip the rest) ----------
 // "topic" = current baseline.
 // day = day headers (week) / week headers (month). mix = day in week view, topic in month view.
-// dense = topic groups, tighter, single-entry groups lose their header.
+// dense = topic groups, tighter. Tapping dense cycles two tag-position variants:
+//   "top" (dense↑) = single-entry groups get the topic as a label inside the card, above the text
+//   "bottom" (dense↓) = no group headers at all, every entry carries its topic pill in the meta row
 const LAYOUT_KEY = "weekly-deposits-layout";
+const DENSE_VARIANT_KEY = "weekly-deposits-dense-variant";
 const LAYOUT_OPTIONS = ["day", "mix", "dense"];
 let layout = "topic";
+let denseVariant = "top";
 try {
   const savedLayout = localStorage.getItem(LAYOUT_KEY);
   if (LAYOUT_OPTIONS.includes(savedLayout)) layout = savedLayout;
+  const savedVariant = localStorage.getItem(DENSE_VARIANT_KEY);
+  if (savedVariant === "top" || savedVariant === "bottom") denseVariant = savedVariant;
 } catch (e) {}
 
 // topic-group display order: manual drag order wins; otherwise latest-updated group first
@@ -472,9 +482,20 @@ const layoutBtns = document.getElementById("layoutBtns");
 
 for (const name of LAYOUT_OPTIONS) {
   layoutBtns.appendChild(el("button", {
+    "data-name": name,
     onclick: () => {
-      layout = (layout === name) ? "topic" : name; // tap active again = back to baseline
-      try { localStorage.setItem(LAYOUT_KEY, layout); } catch (e) {}
+      if (name === "dense") {
+        // cycle: off -> dense↑ (tag top) -> dense↓ (tag bottom) -> off
+        if (layout !== "dense") { layout = "dense"; denseVariant = "top"; }
+        else if (denseVariant === "top") denseVariant = "bottom";
+        else layout = "topic";
+      } else {
+        layout = (layout === name) ? "topic" : name; // tap active again = back to baseline
+      }
+      try {
+        localStorage.setItem(LAYOUT_KEY, layout);
+        localStorage.setItem(DENSE_VARIANT_KEY, denseVariant);
+      } catch (e) {}
       render();
     }
   }, name));
@@ -483,6 +504,13 @@ for (const name of LAYOUT_OPTIONS) {
 function entryEl(e, opts) {
   opts = opts || {};
   const entry = el("div", { class: "entry", onclick: () => openComposer(e) });
+  if (opts.topLabelKey) {
+    const tl = topicById[opts.topLabelKey];
+    entry.appendChild(el("div", {
+      class: "entry-toplabel",
+      style: { color: tl ? tl.fg : "var(--subtle)" }
+    }, groupLabel(opts.topLabelKey)));
+  }
   entry.appendChild(el("p", null, e.text));
   const meta = el("div", { class: "entry-meta" });
   const d = entryDay(e);
@@ -549,12 +577,13 @@ function makeDragHandle(group) {
   return handle;
 }
 
-function renderTopicGroups(list, dense) {
+function renderTopicGroups(list, denseMode) { // null = baseline, "top" / "bottom" = dense variants
   for (const g of orderGroupsForDisplay(groupByTopic(list))) {
     const t = topicById[g.key];
-    const single = dense && g.entries.length === 1;
-    const group = el("div", { class: "group" + (dense ? " dense" : ""), "data-key": g.key });
-    if (!single) {
+    const singleTop = denseMode === "top" && g.entries.length === 1;
+    const headless = denseMode === "bottom" || singleTop;
+    const group = el("div", { class: "group" + (denseMode ? " dense" : ""), "data-key": g.key });
+    if (!headless) {
       const head = el("div", { class: "group-head" });
       if (t) head.appendChild(el("span", { class: "group-dot", style: { background: t.dot } }));
       head.appendChild(el("span", { class: "group-label", style: { color: t ? t.fg : "var(--subtle)" } }, groupLabel(g.key)));
@@ -564,7 +593,11 @@ function renderTopicGroups(list, dense) {
     }
     const card = el("div", { class: "group-card" });
     for (const e of g.entries) {
-      card.appendChild(entryEl(e, { skipTag: single ? null : g.key, showWeek: view === "month" }));
+      card.appendChild(entryEl(e, {
+        skipTag: denseMode === "bottom" ? null : g.key,
+        topLabelKey: singleTop ? g.key : null,
+        showWeek: view === "month"
+      }));
     }
     group.appendChild(card);
     entriesRoot.appendChild(group);
@@ -597,7 +630,11 @@ function renderDayGroups(list) {
 function render() {
   segWeek.classList.toggle("active", view === "week");
   segMonth.classList.toggle("active", view === "month");
-  Array.from(layoutBtns.children).forEach(b => b.classList.toggle("on", b.textContent === layout));
+  Array.from(layoutBtns.children).forEach(b => {
+    const name = b.getAttribute("data-name");
+    b.classList.toggle("on", name === layout);
+    if (name === "dense") b.textContent = layout === "dense" ? (denseVariant === "top" ? "dense↑" : "dense↓") : "dense";
+  });
 
   periodLabel.innerHTML = "";
   if (view === "week") {
@@ -620,7 +657,7 @@ function render() {
   }
   const mode = layout === "mix" ? (view === "week" ? "day" : "topic") : layout;
   if (mode === "day") renderDayGroups(list);
-  else renderTopicGroups(list, mode === "dense");
+  else renderTopicGroups(list, mode === "dense" ? denseVariant : null);
 }
 
 // ---------- composer ----------
