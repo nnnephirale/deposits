@@ -108,12 +108,17 @@
     border: 1px solid var(--hairline); color: var(--subtle); font-weight: 400;
   }
   .entry-day { font-family: var(--mono); font-size: 11px; color: #C7C7CC; }
-  .run-label {
-    font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
-    text-transform: uppercase; font-weight: 600;
-  }
-  .entry.run-start { border-top: 1px solid #D1D1D6; }
   .group.dense { margin-bottom: 12px; }
+
+  /* group drag reorder */
+  .drag-handle {
+    margin-left: auto; padding: 2px 6px;
+    font-family: var(--mono); font-size: 13px; color: #C7C7CC;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    cursor: grab;
+  }
+  .group.dragging { position: relative; z-index: 5; }
+  .group.dragging .group-card { box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
 
   .empty {
     text-align: center; color: var(--subtle); font-size: 14px;
@@ -324,7 +329,10 @@ function entryDay(e) {
 }
 function daySortKey(e) {
   const d = entryDay(e);
-  return d == null ? DAY_TOKENS.length : d; // no-day entries sort after Sunday
+  return d == null ? -1 : d; // sorted descending, so no-day entries land last
+}
+function entryStamp(e) {
+  return Date.parse(e.updatedAt || e.createdAt);
 }
 
 // ---------- storage ----------
@@ -360,7 +368,7 @@ function activeEntries() {
   if (view === "week") {
     return entries
       .filter(e => e.year === wk.year && e.week === wk.week)
-      .sort((a, b) => (daySortKey(a) - daySortKey(b)) || a.createdAt.localeCompare(b.createdAt));
+      .sort((a, b) => (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
   }
   return entries
     .filter(e => {
@@ -369,7 +377,7 @@ function activeEntries() {
       thu.setUTCDate(mon.getUTCDate() + 3); // week belongs to the month its Thursday is in
       return thu.getUTCFullYear() === mo.year && thu.getUTCMonth() === mo.month;
     })
-    .sort((a, b) => (a.week - b.week) || (daySortKey(a) - daySortKey(b)) || a.createdAt.localeCompare(b.createdAt));
+    .sort((a, b) => (b.week - a.week) || (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
 }
 function groupByTopic(list) {
   const groups = {};
@@ -423,16 +431,37 @@ function el(tag, attrs, ...children) {
 }
 
 // ---------- layout experiment (temporary — pick one, then strip the rest) ----------
-// "topic" = current baseline. flat = one card, topic runs divided.
+// "topic" = current baseline.
 // day = day headers (week) / week headers (month). mix = day in week view, topic in month view.
 // dense = topic groups, tighter, single-entry groups lose their header.
 const LAYOUT_KEY = "weekly-deposits-layout";
-const LAYOUT_OPTIONS = ["flat", "day", "mix", "dense"];
+const LAYOUT_OPTIONS = ["day", "mix", "dense"];
 let layout = "topic";
 try {
   const savedLayout = localStorage.getItem(LAYOUT_KEY);
   if (LAYOUT_OPTIONS.includes(savedLayout)) layout = savedLayout;
 } catch (e) {}
+
+// topic-group display order: manual drag order wins; otherwise latest-updated group first
+const GROUP_ORDER_KEY = "weekly-deposits-group-order";
+let groupOrder = null;
+try {
+  const savedOrder = JSON.parse(localStorage.getItem(GROUP_ORDER_KEY));
+  if (Array.isArray(savedOrder)) groupOrder = savedOrder;
+} catch (e) {}
+
+function orderGroupsForDisplay(groups) {
+  const stamp = g => Math.max(...g.entries.map(entryStamp));
+  return [...groups].sort((a, b) => {
+    if (groupOrder) {
+      const ia = groupOrder.indexOf(a.key), ib = groupOrder.indexOf(b.key);
+      if (ia !== -1 && ib !== -1) return ia - ib;
+      if (ia !== -1) return 1;  // keys not yet in the manual order surface on top
+      if (ib !== -1) return -1;
+    }
+    return stamp(b) - stamp(a);
+  });
+}
 
 // ---------- main render ----------
 const entriesRoot = document.getElementById("entriesRoot");
@@ -456,13 +485,6 @@ function entryEl(e, opts) {
   const entry = el("div", { class: "entry", onclick: () => openComposer(e) });
   entry.appendChild(el("p", null, e.text));
   const meta = el("div", { class: "entry-meta" });
-  if (opts.runLabelKey) {
-    const t = topicById[opts.runLabelKey];
-    meta.appendChild(el("span", {
-      class: "run-label",
-      style: { color: t ? t.fg : "var(--subtle)" }
-    }, groupLabel(opts.runLabelKey)));
-  }
   const d = entryDay(e);
   const bits = [];
   if (opts.showDay !== false && d != null) bits.push(DAY_TOKENS[d]);
@@ -478,16 +500,66 @@ function entryEl(e, opts) {
   return entry;
 }
 
+function persistGroupOrder() {
+  const visible = Array.from(entriesRoot.children).map(g => g.getAttribute("data-key")).filter(Boolean);
+  const rest = (groupOrder || []).filter(k => !visible.includes(k));
+  groupOrder = [...visible, ...rest];
+  try { localStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(groupOrder)); } catch (e) {}
+}
+
+function makeDragHandle(group) {
+  const handle = el("span", { class: "drag-handle" }, "≡");
+  let active = false, startY = 0;
+  handle.addEventListener("pointerdown", ev => {
+    ev.preventDefault();
+    active = true; startY = ev.clientY;
+    group.classList.add("dragging");
+    try { handle.setPointerCapture(ev.pointerId); } catch (e) {}
+  });
+  handle.addEventListener("pointermove", ev => {
+    if (!active) return;
+    group.style.transform = "translateY(" + (ev.clientY - startY) + "px)";
+    const r = group.getBoundingClientRect();
+    const center = r.top + r.height / 2;
+    const shift = (sib, before) => {
+      const from = group.offsetTop;
+      entriesRoot.insertBefore(group, before ? sib : sib.nextElementSibling);
+      startY += group.offsetTop - from; // keep the lifted card under the finger
+      group.style.transform = "translateY(" + (ev.clientY - startY) + "px)";
+    };
+    const prev = group.previousElementSibling, next = group.nextElementSibling;
+    if (prev) {
+      const pr = prev.getBoundingClientRect();
+      if (center < pr.top + pr.height / 2) { shift(prev, true); return; }
+    }
+    if (next) {
+      const nr = next.getBoundingClientRect();
+      if (center > nr.top + nr.height / 2) shift(next, false);
+    }
+  });
+  const endDrag = () => {
+    if (!active) return;
+    active = false;
+    group.classList.remove("dragging");
+    group.style.transform = "";
+    persistGroupOrder();
+  };
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
+  return handle;
+}
+
 function renderTopicGroups(list, dense) {
-  for (const g of groupByTopic(list)) {
+  for (const g of orderGroupsForDisplay(groupByTopic(list))) {
     const t = topicById[g.key];
     const single = dense && g.entries.length === 1;
-    const group = el("div", { class: "group" + (dense ? " dense" : "") });
+    const group = el("div", { class: "group" + (dense ? " dense" : ""), "data-key": g.key });
     if (!single) {
       const head = el("div", { class: "group-head" });
       if (t) head.appendChild(el("span", { class: "group-dot", style: { background: t.dot } }));
       head.appendChild(el("span", { class: "group-label", style: { color: t ? t.fg : "var(--subtle)" } }, groupLabel(g.key)));
       head.appendChild(el("span", { class: "group-count" }, String(g.entries.length)));
+      head.appendChild(makeDragHandle(group));
       group.appendChild(head);
     }
     const card = el("div", { class: "group-card" });
@@ -499,28 +571,10 @@ function renderTopicGroups(list, dense) {
   }
 }
 
-function renderFlat(list) {
-  const card = el("div", { class: "group-card" });
-  let firstRun = true;
-  for (const g of groupByTopic(list)) {
-    g.entries.forEach((e, i) => {
-      const node = entryEl(e, {
-        skipTag: g.key,
-        runLabelKey: i === 0 ? g.key : null,
-        showWeek: view === "month"
-      });
-      if (i === 0 && !firstRun) node.classList.add("run-start");
-      card.appendChild(node);
-    });
-    firstRun = false;
-  }
-  entriesRoot.appendChild(el("div", { class: "group" }, card));
-}
-
 function renderDayGroups(list) {
   const buckets = [];
   if (view === "week") {
-    for (let d = 0; d < DAY_TOKENS.length; d++) {
+    for (let d = DAY_TOKENS.length - 1; d >= 0; d--) {
       buckets.push({ label: DAY_TOKENS[d], entries: list.filter(e => entryDay(e) === d), opts: { showDay: false } });
     }
     buckets.push({ label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false } });
@@ -565,8 +619,7 @@ function render() {
     return;
   }
   const mode = layout === "mix" ? (view === "week" ? "day" : "topic") : layout;
-  if (mode === "flat") renderFlat(list);
-  else if (mode === "day") renderDayGroups(list);
+  if (mode === "day") renderDayGroups(list);
   else renderTopicGroups(list, mode === "dense");
 }
 
@@ -663,12 +716,13 @@ function openComposer(existing) {
         if (!text.trim()) return;
         if (existing) {
           entries = entries.map(e => e.id === existing.id
-            ? { ...e, text: text.trim(), tags, year: cw.year, week: cw.week, day }
+            ? { ...e, text: text.trim(), tags, year: cw.year, week: cw.week, day, updatedAt: new Date().toISOString() }
             : e);
         } else {
+          const stamp = new Date().toISOString();
           entries = [...entries, {
             id: Date.now().toString(36),
-            createdAt: new Date().toISOString(),
+            createdAt: stamp, updatedAt: stamp,
             text: text.trim(), tags, year: cw.year, week: cw.week, day
           }];
         }
