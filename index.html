@@ -41,6 +41,15 @@
   .header-row { display: flex; justify-content: space-between; align-items: baseline; }
   .header h1 { font-size: 22px; font-weight: 700; margin: 0; }
 
+  /* layout experiment toggles (temporary) */
+  .layout-btns { display: flex; gap: 12px; }
+  .layout-btns button {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+    text-transform: uppercase; color: var(--subtle);
+    background: none; border: none; padding: 4px 0;
+  }
+  .layout-btns button.on { color: var(--ink); font-weight: 700; }
+
   .seg {
     display: flex; background: #E4E4E9; border-radius: 10px;
     padding: 2px; margin-top: 12px;
@@ -99,6 +108,12 @@
     border: 1px solid var(--hairline); color: var(--subtle); font-weight: 400;
   }
   .entry-day { font-family: var(--mono); font-size: 11px; color: #C7C7CC; }
+  .run-label {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+    text-transform: uppercase; font-weight: 600;
+  }
+  .entry.run-start { border-top: 1px solid #D1D1D6; }
+  .group.dense { margin-bottom: 12px; }
 
   .empty {
     text-align: center; color: var(--subtle); font-size: 14px;
@@ -224,6 +239,7 @@
   <div class="header">
     <div class="header-row">
       <h1>deposits</h1>
+      <div class="layout-btns" id="layoutBtns"></div>
     </div>
     <div class="seg">
       <button id="segWeek" class="active">week</button>
@@ -406,15 +422,128 @@ function el(tag, attrs, ...children) {
   return node;
 }
 
+// ---------- layout experiment (temporary — pick one, then strip the rest) ----------
+// "topic" = current baseline. flat = one card, topic runs divided.
+// day = day headers (week) / week headers (month). mix = day in week view, topic in month view.
+// dense = topic groups, tighter, single-entry groups lose their header.
+const LAYOUT_KEY = "weekly-deposits-layout";
+const LAYOUT_OPTIONS = ["flat", "day", "mix", "dense"];
+let layout = "topic";
+try {
+  const savedLayout = localStorage.getItem(LAYOUT_KEY);
+  if (LAYOUT_OPTIONS.includes(savedLayout)) layout = savedLayout;
+} catch (e) {}
+
 // ---------- main render ----------
 const entriesRoot = document.getElementById("entriesRoot");
 const periodLabel = document.getElementById("periodLabel");
 const segWeek = document.getElementById("segWeek");
 const segMonth = document.getElementById("segMonth");
+const layoutBtns = document.getElementById("layoutBtns");
+
+for (const name of LAYOUT_OPTIONS) {
+  layoutBtns.appendChild(el("button", {
+    onclick: () => {
+      layout = (layout === name) ? "topic" : name; // tap active again = back to baseline
+      try { localStorage.setItem(LAYOUT_KEY, layout); } catch (e) {}
+      render();
+    }
+  }, name));
+}
+
+function entryEl(e, opts) {
+  opts = opts || {};
+  const entry = el("div", { class: "entry", onclick: () => openComposer(e) });
+  entry.appendChild(el("p", null, e.text));
+  const meta = el("div", { class: "entry-meta" });
+  if (opts.runLabelKey) {
+    const t = topicById[opts.runLabelKey];
+    meta.appendChild(el("span", {
+      class: "run-label",
+      style: { color: t ? t.fg : "var(--subtle)" }
+    }, groupLabel(opts.runLabelKey)));
+  }
+  const d = entryDay(e);
+  const bits = [];
+  if (opts.showDay !== false && d != null) bits.push(DAY_TOKENS[d]);
+  if (opts.showWeek) bits.push("W" + pad2(e.week));
+  if (bits.length) meta.appendChild(el("span", { class: "entry-day" }, bits.join(" · ")));
+  for (const tg of e.tags) {
+    if (tg === opts.skipTag) continue;
+    const tt = topicById[tg], mm = modeById[tg];
+    if (tt) meta.appendChild(el("span", { class: "pill", style: { background: tt.bg, color: tt.fg } }, tt.label));
+    else if (mm) meta.appendChild(el("span", { class: "pill mode" }, mm.label));
+  }
+  if (meta.children.length) entry.appendChild(meta);
+  return entry;
+}
+
+function renderTopicGroups(list, dense) {
+  for (const g of groupByTopic(list)) {
+    const t = topicById[g.key];
+    const single = dense && g.entries.length === 1;
+    const group = el("div", { class: "group" + (dense ? " dense" : "") });
+    if (!single) {
+      const head = el("div", { class: "group-head" });
+      if (t) head.appendChild(el("span", { class: "group-dot", style: { background: t.dot } }));
+      head.appendChild(el("span", { class: "group-label", style: { color: t ? t.fg : "var(--subtle)" } }, groupLabel(g.key)));
+      head.appendChild(el("span", { class: "group-count" }, String(g.entries.length)));
+      group.appendChild(head);
+    }
+    const card = el("div", { class: "group-card" });
+    for (const e of g.entries) {
+      card.appendChild(entryEl(e, { skipTag: single ? null : g.key, showWeek: view === "month" }));
+    }
+    group.appendChild(card);
+    entriesRoot.appendChild(group);
+  }
+}
+
+function renderFlat(list) {
+  const card = el("div", { class: "group-card" });
+  let firstRun = true;
+  for (const g of groupByTopic(list)) {
+    g.entries.forEach((e, i) => {
+      const node = entryEl(e, {
+        skipTag: g.key,
+        runLabelKey: i === 0 ? g.key : null,
+        showWeek: view === "month"
+      });
+      if (i === 0 && !firstRun) node.classList.add("run-start");
+      card.appendChild(node);
+    });
+    firstRun = false;
+  }
+  entriesRoot.appendChild(el("div", { class: "group" }, card));
+}
+
+function renderDayGroups(list) {
+  const buckets = [];
+  if (view === "week") {
+    for (let d = 0; d < DAY_TOKENS.length; d++) {
+      buckets.push({ label: DAY_TOKENS[d], entries: list.filter(e => entryDay(e) === d), opts: { showDay: false } });
+    }
+    buckets.push({ label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false } });
+  } else {
+    for (const w of [...new Set(list.map(e => e.week))]) {
+      buckets.push({ label: "W" + pad2(w), entries: list.filter(e => e.week === w), opts: {} });
+    }
+  }
+  for (const b of buckets) {
+    if (!b.entries.length) continue;
+    const head = el("div", { class: "group-head" },
+      el("span", { class: "group-label", style: { color: "var(--ink)" } }, b.label),
+      el("span", { class: "group-count" }, String(b.entries.length)));
+    const card = el("div", { class: "group-card" });
+    for (const e of b.entries) card.appendChild(entryEl(e, b.opts));
+    entriesRoot.appendChild(el("div", { class: "group" }, head, card));
+  }
+}
 
 function render() {
   segWeek.classList.toggle("active", view === "week");
   segMonth.classList.toggle("active", view === "month");
+  Array.from(layoutBtns.children).forEach(b => b.classList.toggle("on", b.textContent === layout));
 
   periodLabel.innerHTML = "";
   if (view === "week") {
@@ -435,33 +564,10 @@ function render() {
     entriesRoot.appendChild(empty);
     return;
   }
-  for (const g of groupByTopic(list)) {
-    const t = topicById[g.key];
-    const head = el("div", { class: "group-head" });
-    if (t) head.appendChild(el("span", { class: "group-dot", style: { background: t.dot } }));
-    head.appendChild(el("span", { class: "group-label", style: { color: t ? t.fg : "var(--subtle)" } }, groupLabel(g.key)));
-    head.appendChild(el("span", { class: "group-count" }, String(g.entries.length)));
-
-    const card = el("div", { class: "group-card" });
-    for (const e of g.entries) {
-      const entry = el("div", { class: "entry", onclick: () => openComposer(e) });
-      entry.appendChild(el("p", null, e.text));
-      const meta = el("div", { class: "entry-meta" });
-      const d = entryDay(e);
-      const dayBits = [d == null ? "" : DAY_TOKENS[d], view === "month" ? "W" + pad2(e.week) : ""]
-        .filter(Boolean).join(" \u00B7 ");
-      if (dayBits) meta.appendChild(el("span", { class: "entry-day" }, dayBits));
-      for (const tg of e.tags) {
-        if (tg === g.key) continue;
-        const tt = topicById[tg], mm = modeById[tg];
-        if (tt) meta.appendChild(el("span", { class: "pill", style: { background: tt.bg, color: tt.fg } }, tt.label));
-        else if (mm) meta.appendChild(el("span", { class: "pill mode" }, mm.label));
-      }
-      entry.appendChild(meta);
-      card.appendChild(entry);
-    }
-    entriesRoot.appendChild(el("div", { class: "group" }, head, card));
-  }
+  const mode = layout === "mix" ? (view === "week" ? "day" : "topic") : layout;
+  if (mode === "flat") renderFlat(list);
+  else if (mode === "day") renderDayGroups(list);
+  else renderTopicGroups(list, mode === "dense");
 }
 
 // ---------- composer ----------
