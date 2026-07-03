@@ -84,13 +84,14 @@
   .group-head {
     display: flex; align-items: center; gap: 7px;
     margin-bottom: 8px; padding-left: 4px;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    cursor: grab;
   }
   .group-dot { width: 8px; height: 8px; border-radius: 4px; display: inline-block; }
   .group-label {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
     text-transform: uppercase; font-weight: 600;
   }
-  .group-count { font-family: var(--mono); font-size: 11px; color: #C7C7CC; }
   .group-card { background: var(--card); border-radius: 16px; overflow: hidden; }
 
   .entry { padding: 13px 16px; cursor: pointer; }
@@ -111,18 +112,15 @@
   .entry-toplabel {
     font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
     text-transform: uppercase; font-weight: 600; margin-bottom: 5px;
-  }
-  .group.dense { margin-bottom: 12px; }
-
-  /* group drag reorder */
-  .drag-handle {
-    margin-left: auto; padding: 2px 6px;
-    font-family: var(--mono); font-size: 13px; color: #C7C7CC;
     touch-action: none; user-select: none; -webkit-user-select: none;
     cursor: grab;
   }
+  .group.dense { margin-bottom: 12px; }
+
+  /* group drag reorder (drag by the group label / in-card topic label) */
   .group.dragging { position: relative; z-index: 5; }
   .group.dragging .group-card { box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
+  .layout-btns .reset-order { font-size: 13px; letter-spacing: 0; padding: 4px 2px; }
 
   .empty {
     text-align: center; color: var(--subtle); font-size: 14px;
@@ -435,24 +433,16 @@ function el(tag, attrs, ...children) {
 }
 
 // ---------- layout experiment (temporary — pick one, then strip the rest) ----------
-// "topic" = current baseline.
-// day = day headers (week) / week headers (month). mix = day in week view, topic in month view.
-// dense = topic groups, tighter. Tapping dense cycles two tag-position variants:
-//   "top" (dense↑) = single-entry groups get the topic as a label inside the card, above the text
-//   "bottom" (dense↓) = no group headers at all, every entry carries its topic pill in the meta row
-const LAYOUT_KEY = "weekly-deposits-layout";
-const DENSE_VARIANT_KEY = "weekly-deposits-dense-variant";
+// "topic" = baseline. day = day headers (week) / week headers (month).
+// mix = day in week view, topic in month view.
+// dense = topic groups, tighter; single-entry groups get the topic as a label
+// inside the card, above the text. Dense is the default on every open (deliberate:
+// layout choice does not persist across launches).
 const LAYOUT_OPTIONS = ["day", "mix", "dense"];
-let layout = "topic";
-let denseVariant = "top";
-try {
-  const savedLayout = localStorage.getItem(LAYOUT_KEY);
-  if (LAYOUT_OPTIONS.includes(savedLayout)) layout = savedLayout;
-  const savedVariant = localStorage.getItem(DENSE_VARIANT_KEY);
-  if (savedVariant === "top" || savedVariant === "bottom") denseVariant = savedVariant;
-} catch (e) {}
+let layout = "dense";
 
-// topic-group display order: manual drag order wins; otherwise latest-updated group first
+// group display order: manual drag order wins; otherwise latest-updated first
+// (topic groups) / chronological (day and week groups)
 const GROUP_ORDER_KEY = "weekly-deposits-group-order";
 let groupOrder = null;
 try {
@@ -460,17 +450,19 @@ try {
   if (Array.isArray(savedOrder)) groupOrder = savedOrder;
 } catch (e) {}
 
+function applyManualOrder(groups) { // stable: keys not in the manual order keep default order, on top
+  if (!groupOrder) return groups;
+  return [...groups].sort((a, b) => {
+    const ia = groupOrder.indexOf(a.key), ib = groupOrder.indexOf(b.key);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return 1;
+    if (ib !== -1) return -1;
+    return 0;
+  });
+}
 function orderGroupsForDisplay(groups) {
   const stamp = g => Math.max(...g.entries.map(entryStamp));
-  return [...groups].sort((a, b) => {
-    if (groupOrder) {
-      const ia = groupOrder.indexOf(a.key), ib = groupOrder.indexOf(b.key);
-      if (ia !== -1 && ib !== -1) return ia - ib;
-      if (ia !== -1) return 1;  // keys not yet in the manual order surface on top
-      if (ib !== -1) return -1;
-    }
-    return stamp(b) - stamp(a);
-  });
+  return applyManualOrder([...groups].sort((a, b) => stamp(b) - stamp(a)));
 }
 
 // ---------- main render ----------
@@ -480,22 +472,22 @@ const segWeek = document.getElementById("segWeek");
 const segMonth = document.getElementById("segMonth");
 const layoutBtns = document.getElementById("layoutBtns");
 
+const resetOrderBtn = el("button", {
+  class: "reset-order",
+  "aria-label": "Reset group order",
+  onclick: () => {
+    groupOrder = null;
+    try { localStorage.removeItem(GROUP_ORDER_KEY); } catch (e) {}
+    render();
+  }
+}, "↺");
+layoutBtns.appendChild(resetOrderBtn);
+
 for (const name of LAYOUT_OPTIONS) {
   layoutBtns.appendChild(el("button", {
     "data-name": name,
     onclick: () => {
-      if (name === "dense") {
-        // cycle: off -> dense↑ (tag top) -> dense↓ (tag bottom) -> off
-        if (layout !== "dense") { layout = "dense"; denseVariant = "top"; }
-        else if (denseVariant === "top") denseVariant = "bottom";
-        else layout = "topic";
-      } else {
-        layout = (layout === name) ? "topic" : name; // tap active again = back to baseline
-      }
-      try {
-        localStorage.setItem(LAYOUT_KEY, layout);
-        localStorage.setItem(DENSE_VARIANT_KEY, denseVariant);
-      } catch (e) {}
+      layout = (layout === name) ? "topic" : name; // tap active again = back to baseline
       render();
     }
   }, name));
@@ -533,19 +525,24 @@ function persistGroupOrder() {
   const rest = (groupOrder || []).filter(k => !visible.includes(k));
   groupOrder = [...visible, ...rest];
   try { localStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(groupOrder)); } catch (e) {}
+  resetOrderBtn.style.display = ""; // surface the reset control without a re-render
 }
 
-function makeDragHandle(group) {
-  const handle = el("span", { class: "drag-handle" }, "≡");
-  let active = false, startY = 0;
-  handle.addEventListener("pointerdown", ev => {
-    ev.preventDefault();
-    active = true; startY = ev.clientY;
-    group.classList.add("dragging");
-    try { handle.setPointerCapture(ev.pointerId); } catch (e) {}
+// drag a group by its label (group header, or the in-card topic label on dense singles);
+// a small vertical threshold keeps plain taps working (e.g. tap-to-edit on dense singles)
+function makeDraggable(surface, group) {
+  let active = false, moved = false, startY = 0;
+  surface.addEventListener("pointerdown", ev => {
+    active = true; moved = false; startY = ev.clientY;
+    try { surface.setPointerCapture(ev.pointerId); } catch (e) {}
   });
-  handle.addEventListener("pointermove", ev => {
+  surface.addEventListener("pointermove", ev => {
     if (!active) return;
+    if (!moved) {
+      if (Math.abs(ev.clientY - startY) < 6) return;
+      moved = true;
+      group.classList.add("dragging");
+    }
     group.style.transform = "translateY(" + (ev.clientY - startY) + "px)";
     const r = group.getBoundingClientRect();
     const center = r.top + r.height / 2;
@@ -568,62 +565,69 @@ function makeDragHandle(group) {
   const endDrag = () => {
     if (!active) return;
     active = false;
-    group.classList.remove("dragging");
-    group.style.transform = "";
-    persistGroupOrder();
+    if (moved) {
+      group.classList.remove("dragging");
+      group.style.transform = "";
+      persistGroupOrder();
+    }
   };
-  handle.addEventListener("pointerup", endDrag);
-  handle.addEventListener("pointercancel", endDrag);
-  return handle;
+  surface.addEventListener("pointerup", endDrag);
+  surface.addEventListener("pointercancel", endDrag);
+  surface.addEventListener("click", ev => {
+    if (moved) { ev.stopPropagation(); ev.preventDefault(); moved = false; } // swallow tap-to-edit after a drag
+  });
 }
 
-function renderTopicGroups(list, denseMode) { // null = baseline, "top" / "bottom" = dense variants
+function renderTopicGroups(list, dense) {
   for (const g of orderGroupsForDisplay(groupByTopic(list))) {
     const t = topicById[g.key];
-    const singleTop = denseMode === "top" && g.entries.length === 1;
-    const headless = denseMode === "bottom" || singleTop;
-    const group = el("div", { class: "group" + (denseMode ? " dense" : ""), "data-key": g.key });
-    if (!headless) {
+    const single = dense && g.entries.length === 1;
+    const group = el("div", { class: "group" + (dense ? " dense" : ""), "data-key": g.key });
+    if (!single) {
       const head = el("div", { class: "group-head" });
       if (t) head.appendChild(el("span", { class: "group-dot", style: { background: t.dot } }));
       head.appendChild(el("span", { class: "group-label", style: { color: t ? t.fg : "var(--subtle)" } }, groupLabel(g.key)));
-      head.appendChild(el("span", { class: "group-count" }, String(g.entries.length)));
-      head.appendChild(makeDragHandle(group));
+      makeDraggable(head, group);
       group.appendChild(head);
     }
     const card = el("div", { class: "group-card" });
     for (const e of g.entries) {
       card.appendChild(entryEl(e, {
-        skipTag: denseMode === "bottom" ? null : g.key,
-        topLabelKey: singleTop ? g.key : null,
+        skipTag: g.key,
+        topLabelKey: single ? g.key : null,
         showWeek: view === "month"
       }));
     }
     group.appendChild(card);
+    if (single) {
+      const toplabel = card.querySelector(".entry-toplabel");
+      if (toplabel) makeDraggable(toplabel, group);
+    }
     entriesRoot.appendChild(group);
   }
 }
 
 function renderDayGroups(list) {
-  const buckets = [];
+  let buckets = [];
   if (view === "week") {
     for (let d = DAY_TOKENS.length - 1; d >= 0; d--) {
-      buckets.push({ label: DAY_TOKENS[d], entries: list.filter(e => entryDay(e) === d), opts: { showDay: false } });
+      buckets.push({ key: "day:" + d, label: DAY_TOKENS[d], entries: list.filter(e => entryDay(e) === d), opts: { showDay: false } });
     }
-    buckets.push({ label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false } });
+    buckets.push({ key: "day:anytime", label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false } });
   } else {
     for (const w of [...new Set(list.map(e => e.week))]) {
-      buckets.push({ label: "W" + pad2(w), entries: list.filter(e => e.week === w), opts: {} });
+      buckets.push({ key: "wk:" + w, label: "W" + pad2(w), entries: list.filter(e => e.week === w), opts: {} });
     }
   }
+  buckets = applyManualOrder(buckets.filter(b => b.entries.length));
   for (const b of buckets) {
-    if (!b.entries.length) continue;
     const head = el("div", { class: "group-head" },
-      el("span", { class: "group-label", style: { color: "var(--ink)" } }, b.label),
-      el("span", { class: "group-count" }, String(b.entries.length)));
+      el("span", { class: "group-label", style: { color: "var(--ink)" } }, b.label));
     const card = el("div", { class: "group-card" });
     for (const e of b.entries) card.appendChild(entryEl(e, b.opts));
-    entriesRoot.appendChild(el("div", { class: "group" }, head, card));
+    const group = el("div", { class: "group", "data-key": b.key }, head, card);
+    makeDraggable(head, group);
+    entriesRoot.appendChild(group);
   }
 }
 
@@ -632,9 +636,9 @@ function render() {
   segMonth.classList.toggle("active", view === "month");
   Array.from(layoutBtns.children).forEach(b => {
     const name = b.getAttribute("data-name");
-    b.classList.toggle("on", name === layout);
-    if (name === "dense") b.textContent = layout === "dense" ? (denseVariant === "top" ? "dense↑" : "dense↓") : "dense";
+    if (name) b.classList.toggle("on", name === layout);
   });
+  resetOrderBtn.style.display = groupOrder ? "" : "none";
 
   periodLabel.innerHTML = "";
   if (view === "week") {
@@ -657,7 +661,7 @@ function render() {
   }
   const mode = layout === "mix" ? (view === "week" ? "day" : "topic") : layout;
   if (mode === "day") renderDayGroups(list);
-  else renderTopicGroups(list, mode === "dense" ? denseVariant : null);
+  else renderTopicGroups(list, mode === "dense");
 }
 
 // ---------- composer ----------
