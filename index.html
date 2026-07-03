@@ -74,7 +74,11 @@
     border: 1px solid var(--hairline); border-radius: 10px;
     width: 40px; height: 40px; line-height: 1;
   }
-  .stepper-center { text-align: center; }
+  .stepper-center {
+    text-align: center;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    touch-action: manipulation; cursor: pointer;
+  }
   .wk-num { font-family: var(--mono); font-size: 26px; font-weight: 700; }
   .wk-num.month { font-size: 20px; }
   .wk-range { font-size: 13px; color: var(--subtle); margin-top: 2px; }
@@ -221,6 +225,50 @@
     color: #C43C36; background: #FBE3E1; border: none; border-radius: 12px;
     padding: 12px 0;
   }
+  .lock-btn {
+    display: block; width: 100%; margin-top: 22px; font-size: 15px;
+    color: var(--ink); background: var(--field); border: none; border-radius: 12px;
+    padding: 12px 0;
+  }
+  .lock-btn + .delete-btn { margin-top: 10px; }
+  .entry-lock { display: inline-flex; align-items: center; }
+  .entry-lock svg { display: block; }
+
+  /* calendar picker */
+  .cal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .cal-title {
+    font-family: var(--mono); font-size: 15px; font-weight: 700;
+    background: none; border: none; color: var(--ink); padding: 6px 10px;
+  }
+  .cal-row { display: flex; align-items: center; padding: 7px 4px; border-radius: 10px; }
+  .cal-row span { flex: 1; text-align: center; font-family: var(--mono); font-size: 13px; }
+  .cal-row .cal-wk { flex: 0 0 44px; font-size: 11px; color: var(--subtle); text-align: left; padding-left: 4px; }
+  .cal-dow span { font-size: 10px; color: #C7C7CC; }
+  .cal-row.wk-row { cursor: pointer; }
+  .cal-row.wk-row.current { background: var(--field); }
+  .cal-out { color: #C7C7CC; }
+  .cal-today {
+    color: #FF3B30; font-weight: 700;
+  }
+
+  /* confirm dialog */
+  .confirm-overlay {
+    position: fixed; inset: 0; z-index: 60;
+    background: rgba(0,0,0,0.35);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .confirm-box {
+    background: var(--card); border-radius: 16px; padding: 20px;
+    width: min(300px, 80vw); box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+  }
+  .confirm-box p { margin: 0 0 16px; font-size: 15px; line-height: 1.4; text-align: center; }
+  .confirm-actions { display: flex; gap: 10px; }
+  .confirm-actions button { flex: 1; padding: 10px 0; border-radius: 10px; border: none; font-size: 15px; }
+  .confirm-cancel { background: var(--field); color: var(--ink); }
+  .confirm-ok { background: var(--ink); color: #fff; font-weight: 600; }
 
   .export-area {
     width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.5;
@@ -436,6 +484,18 @@ function orderGroupsForDisplay(groups) {
   return [...groups].sort((a, b) => stamp(b) - stamp(a));
 }
 
+// ---------- confirm dialog ----------
+function confirmAction(message, okLabel, onConfirm) {
+  const ov = el("div", { class: "confirm-overlay", onclick: () => ov.remove() });
+  ov.appendChild(el("div", { class: "confirm-box", onclick: e => e.stopPropagation() },
+    el("p", null, message),
+    el("div", { class: "confirm-actions" },
+      el("button", { class: "confirm-cancel", onclick: () => ov.remove() }, "Cancel"),
+      el("button", { class: "confirm-ok", onclick: () => { ov.remove(); onConfirm(); } }, okLabel)
+    )));
+  document.body.appendChild(ov);
+}
+
 // ---------- main render ----------
 const entriesRoot = document.getElementById("entriesRoot");
 const periodLabel = document.getElementById("periodLabel");
@@ -453,11 +513,18 @@ for (const name of LAYOUT_OPTIONS) {
   }, name));
 }
 
+const LOCK_ICON = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><rect x="2.5" y="5.2" width="7" height="4.8" rx="1.2" fill="none" stroke="#C7C7CC" stroke-width="1.2"/><path d="M4 5.2V3.8a2 2 0 0 1 4 0v1.4" fill="none" stroke="#C7C7CC" stroke-width="1.2"/></svg>';
+
 function entryEl(e, opts) {
   opts = opts || {};
   const entry = el("div", { class: "entry", onclick: () => openComposer(e) });
   entry.appendChild(el("p", null, e.text));
   const meta = el("div", { class: "entry-meta" });
+  if (e.locked) {
+    const lock = el("span", { class: "entry-lock", "aria-label": "locked" });
+    lock.innerHTML = LOCK_ICON;
+    meta.appendChild(lock);
+  }
   const d = entryDay(e);
   const bits = [];
   if (opts.showDay !== false && d != null) bits.push(DAY_TOKENS[d]);
@@ -555,6 +622,7 @@ const sheetRoot = document.getElementById("sheetRoot");
 function openComposer(existing) {
   let text = existing ? existing.text : "";
   let tags = existing ? [...existing.tags] : [];
+  let locked = existing ? !!existing.locked : false;
   let cw = existing
     ? { year: existing.year, week: existing.week }
     : (view === "week" ? { year: wk.year, week: wk.week } : getISOWeek(new Date()));
@@ -636,25 +704,36 @@ function openComposer(existing) {
       if (strip && !strip.contains(ev.target) && ev.target !== dayPill) closeStrip();
     });
 
+    function doSave() {
+      if (existing) {
+        entries = entries.map(e => e.id === existing.id
+          ? { ...e, text: text.trim(), tags, year: cw.year, week: cw.week, day, locked, updatedAt: new Date().toISOString() }
+          : e);
+      } else {
+        const stamp = new Date().toISOString();
+        entries = [...entries, {
+          id: Date.now().toString(36),
+          createdAt: stamp, updatedAt: stamp,
+          text: text.trim(), tags, year: cw.year, week: cw.week, day, locked
+        }];
+      }
+      saveEntries(entries);
+      close();
+      render();
+    }
+
     const saveBtn = el("button", {
       class: "save",
       onclick: () => {
         if (!text.trim()) return;
-        if (existing) {
-          entries = entries.map(e => e.id === existing.id
-            ? { ...e, text: text.trim(), tags, year: cw.year, week: cw.week, day, updatedAt: new Date().toISOString() }
-            : e);
+        // moving an existing entry to a different week is easy to do by accident — confirm it
+        if (existing && (cw.year !== existing.year || cw.week !== existing.week)) {
+          const from = "W" + pad2(existing.week) + (existing.year !== cw.year ? " " + existing.year : "");
+          const to = "W" + pad2(cw.week) + (existing.year !== cw.year ? " " + cw.year : "");
+          confirmAction("Move this entry from " + from + " to " + to + "?", "Move", doSave);
         } else {
-          const stamp = new Date().toISOString();
-          entries = [...entries, {
-            id: Date.now().toString(36),
-            createdAt: stamp, updatedAt: stamp,
-            text: text.trim(), tags, year: cw.year, week: cw.week, day
-          }];
+          doSave();
         }
-        saveEntries(entries);
-        close();
-        render();
       }
     }, "Save");
     saveBtn.disabled = !text.trim();
@@ -714,15 +793,23 @@ function openComposer(existing) {
     }
 
     if (existing) {
+      // lock guards against accidental deletion: delete only shows while unlocked.
+      // the lock state itself saves with Save, like every other field.
       sheet.appendChild(el("button", {
-        class: "delete-btn",
-        onclick: () => {
-          entries = entries.filter(e => e.id !== existing.id);
-          saveEntries(entries);
-          close();
-          render();
-        }
-      }, "Delete entry"));
+        class: "lock-btn",
+        onclick: () => { locked = !locked; build(); }
+      }, locked ? "Unlock entry" : "Lock entry"));
+      if (!locked) {
+        sheet.appendChild(el("button", {
+          class: "delete-btn",
+          onclick: () => {
+            entries = entries.filter(e => e.id !== existing.id);
+            saveEntries(entries);
+            close();
+            render();
+          }
+        }, "Delete entry"));
+      }
     }
   }
 
@@ -737,6 +824,89 @@ function openComposer(existing) {
     if (ta && !existing) ta.focus();
   }, 120);
 }
+
+// ---------- calendar picker ----------
+// week view: long-press the W## label. month view: tap the month label.
+// tap a week row = jump to that week (week view); tap the month title = jump to that month (month view).
+function openCalendar() {
+  let cm;
+  if (view === "week") {
+    const mon = mondayOfISOWeek(wk.year, wk.week);
+    const thu = new Date(mon);
+    thu.setUTCDate(mon.getUTCDate() + 3);
+    cm = { year: thu.getUTCFullYear(), month: thu.getUTCMonth() };
+  } else {
+    cm = { ...mo };
+  }
+
+  sheetRoot.innerHTML = ""; // never stack a second sheet
+  const overlay = el("div", { class: "overlay", onclick: close });
+  const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
+  overlay.appendChild(sheet);
+  function close() { sheetRoot.innerHTML = ""; }
+
+  function build() {
+    sheet.innerHTML = "";
+    sheet.appendChild(el("div", { class: "grabber" }));
+
+    sheet.appendChild(el("div", { class: "cal-head" },
+      el("button", { class: "stepper-btn", onclick: () => { cm = cm.month === 0 ? { year: cm.year - 1, month: 11 } : { year: cm.year, month: cm.month - 1 }; build(); } }, "‹"),
+      el("button", {
+        class: "cal-title",
+        onclick: () => { mo = { ...cm }; view = "month"; close(); render(); }
+      }, monthLabel(cm.year, cm.month)),
+      el("button", { class: "stepper-btn", onclick: () => { cm = cm.month === 11 ? { year: cm.year + 1, month: 0 } : { year: cm.year, month: cm.month + 1 }; build(); } }, "›")
+    ));
+
+    const dow = el("div", { class: "cal-row cal-dow" }, el("span", { class: "cal-wk" }, ""));
+    DAY_TOKENS.forEach(t => dow.appendChild(el("span", null, t)));
+    sheet.appendChild(dow);
+
+    const lastDay = new Date(Date.UTC(cm.year, cm.month + 1, 0));
+    const first = new Date(Date.UTC(cm.year, cm.month, 1));
+    const start = new Date(first);
+    start.setUTCDate(first.getUTCDate() - ((first.getUTCDay() + 6) % 7)); // back to Monday
+    const today = new Date();
+
+    for (let mon = new Date(start); mon <= lastDay; mon.setUTCDate(mon.getUTCDate() + 7)) {
+      const rowMon = new Date(mon);
+      const iso = getISOWeek(new Date(rowMon.getUTCFullYear(), rowMon.getUTCMonth(), rowMon.getUTCDate()));
+      const current = view === "week" && iso.year === wk.year && iso.week === wk.week;
+      const row = el("div", {
+        class: "cal-row wk-row" + (current ? " current" : ""),
+        onclick: () => { wk = iso; view = "week"; close(); render(); }
+      });
+      row.appendChild(el("span", { class: "cal-wk" }, "W" + pad2(iso.week)));
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(rowMon);
+        d.setUTCDate(rowMon.getUTCDate() + i);
+        const isToday = d.getUTCFullYear() === today.getFullYear()
+          && d.getUTCMonth() === today.getMonth()
+          && d.getUTCDate() === today.getDate();
+        const cls = [d.getUTCMonth() !== cm.month ? "cal-out" : "", isToday ? "cal-today" : ""].filter(Boolean).join(" ");
+        row.appendChild(el("span", cls ? { class: cls } : null, String(d.getUTCDate())));
+      }
+      sheet.appendChild(row);
+    }
+  }
+
+  build();
+  sheetRoot.appendChild(overlay);
+}
+
+let calHoldTimer = null, calLongFired = false;
+periodLabel.addEventListener("pointerdown", () => {
+  calLongFired = false;
+  clearTimeout(calHoldTimer);
+  calHoldTimer = setTimeout(() => { calLongFired = true; openCalendar(); }, 500);
+});
+["pointerup", "pointerleave", "pointercancel"].forEach(evt =>
+  periodLabel.addEventListener(evt, () => clearTimeout(calHoldTimer)));
+periodLabel.addEventListener("contextmenu", e => e.preventDefault());
+periodLabel.addEventListener("click", () => {
+  if (calLongFired) { calLongFired = false; return; }
+  if (view === "month") openCalendar(); // month label opens on plain tap
+});
 
 // ---------- fab: tap = new entry, long-press = swap to export ----------
 const fab = document.getElementById("fab");
