@@ -111,11 +111,6 @@
   .entry-day { font-family: var(--mono); font-size: 11px; color: #C7C7CC; }
   .group.dense { margin-bottom: 12px; }
 
-  /* group drag reorder (drag by the group label / in-card topic label) */
-  .group.dragging { position: relative; z-index: 5; }
-  .group.dragging .group-card { box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
-  .layout-btns .reset-order { font-size: 13px; letter-spacing: 0; padding: 4px 2px; }
-
   .empty {
     text-align: center; color: var(--subtle); font-size: 14px;
     padding: 64px 24px; line-height: 1.6;
@@ -435,28 +430,10 @@ function el(tag, attrs, ...children) {
 const LAYOUT_OPTIONS = ["day", "mix", "dense"];
 let layout = "topic";
 
-// group display order: manual drag order wins; otherwise latest-updated first
-// (topic groups) / chronological (day and week groups)
-const GROUP_ORDER_KEY = "weekly-deposits-group-order";
-let groupOrder = null;
-try {
-  const savedOrder = JSON.parse(localStorage.getItem(GROUP_ORDER_KEY));
-  if (Array.isArray(savedOrder)) groupOrder = savedOrder;
-} catch (e) {}
-
-function applyManualOrder(groups) { // stable: keys not in the manual order keep default order, on top
-  if (!groupOrder) return groups;
-  return [...groups].sort((a, b) => {
-    const ia = groupOrder.indexOf(a.key), ib = groupOrder.indexOf(b.key);
-    if (ia !== -1 && ib !== -1) return ia - ib;
-    if (ia !== -1) return 1;
-    if (ib !== -1) return -1;
-    return 0;
-  });
-}
+// topic group display order: latest-updated first
 function orderGroupsForDisplay(groups) {
   const stamp = g => Math.max(...g.entries.map(entryStamp));
-  return applyManualOrder([...groups].sort((a, b) => stamp(b) - stamp(a)));
+  return [...groups].sort((a, b) => stamp(b) - stamp(a));
 }
 
 // ---------- main render ----------
@@ -465,17 +442,6 @@ const periodLabel = document.getElementById("periodLabel");
 const segWeek = document.getElementById("segWeek");
 const segMonth = document.getElementById("segMonth");
 const layoutBtns = document.getElementById("layoutBtns");
-
-const resetOrderBtn = el("button", {
-  class: "reset-order",
-  "aria-label": "Reset group order",
-  onclick: () => {
-    groupOrder = null;
-    try { localStorage.removeItem(GROUP_ORDER_KEY); } catch (e) {}
-    render();
-  }
-}, "↺");
-layoutBtns.appendChild(resetOrderBtn);
 
 for (const name of LAYOUT_OPTIONS) {
   layoutBtns.appendChild(el("button", {
@@ -507,73 +473,14 @@ function entryEl(e, opts) {
   return entry;
 }
 
-function persistGroupOrder() {
-  const visible = Array.from(entriesRoot.children).map(g => g.getAttribute("data-key")).filter(Boolean);
-  const rest = (groupOrder || []).filter(k => !visible.includes(k));
-  groupOrder = [...visible, ...rest];
-  try { localStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(groupOrder)); } catch (e) {}
-  resetOrderBtn.style.display = ""; // surface the reset control without a re-render
-}
-
-// drag a group by its label (group header, or the in-card topic label on dense singles);
-// a small vertical threshold keeps plain taps working (e.g. tap-to-edit on dense singles)
-function makeDraggable(surface, group) {
-  let active = false, moved = false, startY = 0;
-  surface.addEventListener("pointerdown", ev => {
-    active = true; moved = false; startY = ev.clientY;
-    try { surface.setPointerCapture(ev.pointerId); } catch (e) {}
-  });
-  surface.addEventListener("pointermove", ev => {
-    if (!active) return;
-    if (!moved) {
-      if (Math.abs(ev.clientY - startY) < 6) return;
-      moved = true;
-      group.classList.add("dragging");
-    }
-    group.style.transform = "translateY(" + (ev.clientY - startY) + "px)";
-    const r = group.getBoundingClientRect();
-    const center = r.top + r.height / 2;
-    const shift = (sib, before) => {
-      const from = group.offsetTop;
-      entriesRoot.insertBefore(group, before ? sib : sib.nextElementSibling);
-      startY += group.offsetTop - from; // keep the lifted card under the finger
-      group.style.transform = "translateY(" + (ev.clientY - startY) + "px)";
-    };
-    const prev = group.previousElementSibling, next = group.nextElementSibling;
-    if (prev) {
-      const pr = prev.getBoundingClientRect();
-      if (center < pr.top + pr.height / 2) { shift(prev, true); return; }
-    }
-    if (next) {
-      const nr = next.getBoundingClientRect();
-      if (center > nr.top + nr.height / 2) shift(next, false);
-    }
-  });
-  const endDrag = () => {
-    if (!active) return;
-    active = false;
-    if (moved) {
-      group.classList.remove("dragging");
-      group.style.transform = "";
-      persistGroupOrder();
-    }
-  };
-  surface.addEventListener("pointerup", endDrag);
-  surface.addEventListener("pointercancel", endDrag);
-  surface.addEventListener("click", ev => {
-    if (moved) { ev.stopPropagation(); ev.preventDefault(); moved = false; } // swallow tap-to-edit after a drag
-  });
-}
-
 function renderTopicGroups(list, dense) {
   for (const g of orderGroupsForDisplay(groupByTopic(list))) {
     const t = topicById[g.key];
-    const group = el("div", { class: "group" + (dense ? " dense" : ""), "data-key": g.key });
+    const group = el("div", { class: "group" + (dense ? " dense" : "") });
     if (!dense) {
       const head = el("div", { class: "group-head" });
       if (t) head.appendChild(el("span", { class: "group-dot", style: { background: t.dot } }));
       head.appendChild(el("span", { class: "group-label", style: { color: t ? t.fg : "var(--subtle)" } }, groupLabel(g.key)));
-      makeDraggable(head, group);
       group.appendChild(head);
     }
     const card = el("div", { class: "group-card" });
@@ -589,26 +496,24 @@ function renderTopicGroups(list, dense) {
 }
 
 function renderDayGroups(list) {
-  let buckets = [];
+  const buckets = [];
   if (view === "week") {
     for (let d = DAY_TOKENS.length - 1; d >= 0; d--) {
-      buckets.push({ key: "day:" + d, label: DAY_TOKENS[d], entries: list.filter(e => entryDay(e) === d), opts: { showDay: false } });
+      buckets.push({ label: DAY_TOKENS[d], entries: list.filter(e => entryDay(e) === d), opts: { showDay: false } });
     }
-    buckets.push({ key: "day:anytime", label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false } });
+    buckets.push({ label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false } });
   } else {
     for (const w of [...new Set(list.map(e => e.week))]) {
-      buckets.push({ key: "wk:" + w, label: "W" + pad2(w), entries: list.filter(e => e.week === w), opts: {} });
+      buckets.push({ label: "W" + pad2(w), entries: list.filter(e => e.week === w), opts: {} });
     }
   }
-  buckets = applyManualOrder(buckets.filter(b => b.entries.length));
   for (const b of buckets) {
+    if (!b.entries.length) continue;
     const head = el("div", { class: "group-head" },
       el("span", { class: "group-label", style: { color: "var(--ink)" } }, b.label));
     const card = el("div", { class: "group-card" });
     for (const e of b.entries) card.appendChild(entryEl(e, b.opts));
-    const group = el("div", { class: "group", "data-key": b.key }, head, card);
-    makeDraggable(head, group);
-    entriesRoot.appendChild(group);
+    entriesRoot.appendChild(el("div", { class: "group" }, head, card));
   }
 }
 
@@ -619,7 +524,6 @@ function render() {
     const name = b.getAttribute("data-name");
     if (name) b.classList.toggle("on", name === layout);
   });
-  resetOrderBtn.style.display = groupOrder ? "" : "none";
 
   periodLabel.innerHTML = "";
   if (view === "week") {
