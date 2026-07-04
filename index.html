@@ -39,7 +39,18 @@
     padding: calc(env(safe-area-inset-top) + 16px) 0 12px;
   }
   .header-row { display: flex; justify-content: space-between; align-items: baseline; }
-  .header h1 { font-size: 22px; font-weight: 700; margin: 0; }
+  .header h1 {
+    font-size: 22px; font-weight: 700; margin: 0;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+
+  /* settings sheet (long-press title) */
+  .key-input {
+    width: 100%; font-family: var(--mono); font-size: 13px;
+    color: var(--ink); border: none; outline: none;
+    background: var(--field); border-radius: 12px; padding: 12px 14px;
+  }
+  .settings-note { font-size: 12px; color: var(--subtle); line-height: 1.5; margin: 10px 0 0; }
 
   /* layout experiment toggles (temporary) */
   .layout-btns { display: flex; gap: 12px; }
@@ -401,6 +412,62 @@ let view = "week";
 let wk = getISOWeek(now);
 let mo = { year: now.getFullYear(), month: now.getMonth() };
 const currentWk = getISOWeek(now);
+let compactView = false; // pinch out on the list -> long entries collapse to summaries
+
+// ---------- summaries (zoomed-out view) ----------
+// Entries over SUMMARY_MIN_WORDS get a short LLM summary, generated once in the
+// background (on save, or backfilled from settings / on pinch) and cached on the
+// entry. No key or no summary yet -> compact view falls back to first-words
+// truncation. Key is user-supplied, stored only in this device's localStorage.
+const API_KEY_KEY = "weekly-deposits-anthropic-key";
+const SUMMARY_MIN_WORDS = 20;
+let apiKey = null;
+try { apiKey = localStorage.getItem(API_KEY_KEY) || null; } catch (e) {}
+
+function wordCount(t) { return t.trim().split(/\s+/).length; }
+function truncateWords(t, n) { return t.trim().split(/\s+/).slice(0, n).join(" "); }
+function compactText(e) { return e.summary || truncateWords(e.text, 12) + "…"; }
+function needsSummary(e) { return !e.summary && wordCount(e.text) > SUMMARY_MIN_WORDS; }
+
+const summariesInFlight = new Set();
+async function summarizeEntry(entry) {
+  if (!apiKey || !needsSummary(entry) || summariesInFlight.has(entry.id)) return;
+  summariesInFlight.add(entry.id);
+  const textAtRequest = entry.text;
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 60,
+        system: "You compress journal fragments. Reply with only the compressed version: under 10 words, keep the writer's key nouns and tone, lowercase unless a proper noun.",
+        messages: [{ role: "user", content: textAtRequest }]
+      })
+    });
+    if (!r.ok) throw new Error("api " + r.status);
+    const data = await r.json();
+    const s = ((data.content && data.content[0] && data.content[0].text) || "").trim();
+    if (!s) return;
+    // only attach if the entry still exists with the same text
+    entries = entries.map(e => (e.id === entry.id && e.text === textAtRequest) ? { ...e, summary: s } : e);
+    saveEntries(entries);
+    if (compactView) render();
+  } catch (err) {
+    console.warn("summary failed for " + entry.id, err); // stays null -> truncation fallback
+  } finally {
+    summariesInFlight.delete(entry.id);
+  }
+}
+function queueVisibleSummaries() {
+  if (!apiKey) return;
+  activeEntries().filter(needsSummary).forEach(summarizeEntry);
+}
 
 // ---------- grouping + markdown ----------
 function activeEntries() {
@@ -518,7 +585,8 @@ const LOCK_ICON = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="
 function entryEl(e, opts) {
   opts = opts || {};
   const entry = el("div", { class: "entry", onclick: () => openComposer(e) });
-  entry.appendChild(el("p", null, e.text));
+  const collapse = compactView && wordCount(e.text) > SUMMARY_MIN_WORDS;
+  entry.appendChild(el("p", null, collapse ? compactText(e) : e.text));
   const meta = el("div", { class: "entry-meta" });
   if (e.locked) {
     const lock = el("span", { class: "entry-lock", "aria-label": "locked" });
@@ -705,21 +773,29 @@ function openComposer(existing) {
     });
 
     function doSave() {
+      let savedId;
       if (existing) {
+        const textChanged = text.trim() !== existing.text;
+        savedId = existing.id;
         entries = entries.map(e => e.id === existing.id
-          ? { ...e, text: text.trim(), tags, year: cw.year, week: cw.week, day, locked, updatedAt: new Date().toISOString() }
+          ? { ...e, text: text.trim(), tags, year: cw.year, week: cw.week, day, locked,
+              summary: textChanged ? null : e.summary, // stale summaries die with their text
+              updatedAt: new Date().toISOString() }
           : e);
       } else {
         const stamp = new Date().toISOString();
+        savedId = Date.now().toString(36);
         entries = [...entries, {
-          id: Date.now().toString(36),
+          id: savedId,
           createdAt: stamp, updatedAt: stamp,
-          text: text.trim(), tags, year: cw.year, week: cw.week, day, locked
+          text: text.trim(), tags, year: cw.year, week: cw.week, day, locked, summary: null
         }];
       }
       saveEntries(entries);
       close();
       render();
+      const saved = entries.find(e => e.id === savedId);
+      if (saved) summarizeEntry(saved); // async, never blocks capture
     }
 
     const saveBtn = el("button", {
@@ -907,6 +983,94 @@ periodLabel.addEventListener("click", () => {
   if (calLongFired) { calLongFired = false; return; }
   if (view === "month") openCalendar(); // month label opens on plain tap
 });
+
+// ---------- pinch to zoom the list ----------
+// pinch out (fingers apart) = full text; pinch in = compact view with summaries.
+// only active on the list itself — ignored while any sheet is open.
+(() => {
+  let startDist = null;
+  const dist = touches => Math.hypot(
+    touches[0].clientX - touches[1].clientX,
+    touches[0].clientY - touches[1].clientY
+  );
+  document.addEventListener("touchstart", ev => {
+    if (ev.touches.length === 2 && !sheetRoot.childElementCount) startDist = dist(ev.touches);
+  }, { passive: true });
+  document.addEventListener("touchmove", ev => {
+    if (ev.touches.length !== 2 || startDist == null) return;
+    ev.preventDefault();
+    const ratio = dist(ev.touches) / startDist;
+    if (ratio < 0.75 && !compactView) {
+      compactView = true;
+      startDist = dist(ev.touches); // re-baseline so the same gesture doesn't flap
+      queueVisibleSummaries();
+      render();
+    } else if (ratio > 1.33 && compactView) {
+      compactView = false;
+      startDist = dist(ev.touches);
+      render();
+    }
+  }, { passive: false });
+  ["touchend", "touchcancel"].forEach(evt =>
+    document.addEventListener(evt, () => { startDist = null; }));
+})();
+
+// ---------- settings (long-press the title) ----------
+function openSettings() {
+  sheetRoot.innerHTML = "";
+  const overlay = el("div", { class: "overlay", onclick: () => sheetRoot.innerHTML = "" });
+  const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
+  overlay.appendChild(sheet);
+
+  function build() {
+    sheet.innerHTML = "";
+    sheet.appendChild(el("div", { class: "grabber" }));
+    sheet.appendChild(el("div", { class: "sheet-head" },
+      el("span", { class: "title" }, "Summaries"), el("span")));
+
+    sheet.appendChild(el("p", { class: "field-label" }, "anthropic api key"));
+    const input = el("input", { class: "key-input", type: "password", placeholder: "sk-ant-…", autocomplete: "off" });
+    input.value = apiKey || "";
+    input.addEventListener("input", () => {
+      apiKey = input.value.trim() || null;
+      try {
+        if (apiKey) localStorage.setItem(API_KEY_KEY, apiKey);
+        else localStorage.removeItem(API_KEY_KEY);
+      } catch (e) {}
+    });
+    sheet.appendChild(input);
+    sheet.appendChild(el("p", { class: "settings-note" },
+      "stored only on this device. entries over " + SUMMARY_MIN_WORDS + " words get a one-line summary (via haiku, fractions of a cent) for the zoomed-out view — pinch the list to toggle. without a key, zoomed-out falls back to the first few words."));
+
+    const pending = entries.filter(needsSummary).length;
+    if (apiKey && pending) {
+      const btn = el("button", {
+        class: "lock-btn",
+        onclick: async () => {
+          btn.textContent = "summarizing…";
+          await Promise.allSettled(entries.filter(needsSummary).map(summarizeEntry));
+          build();
+        }
+      }, "summarize " + pending + " pending");
+      sheet.appendChild(btn);
+    } else if (apiKey) {
+      sheet.appendChild(el("p", { class: "settings-note" }, "nothing pending — all long entries are summarized."));
+    }
+  }
+
+  build();
+  sheetRoot.appendChild(overlay);
+}
+
+const appTitle = document.querySelector(".header h1");
+let titleHoldTimer = null;
+appTitle.addEventListener("pointerdown", () => {
+  clearTimeout(titleHoldTimer);
+  titleHoldTimer = setTimeout(openSettings, 500);
+});
+["pointerup", "pointerleave", "pointercancel"].forEach(evt =>
+  appTitle.addEventListener(evt, () => clearTimeout(titleHoldTimer)));
+appTitle.addEventListener("contextmenu", e => e.preventDefault());
 
 // ---------- fab: tap = new entry, long-press = swap to export ----------
 const fab = document.getElementById("fab");
