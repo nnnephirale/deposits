@@ -38,6 +38,15 @@
     backdrop-filter: blur(12px);
     padding: calc(env(safe-area-inset-top) + 16px) 0 12px;
   }
+  .header::after { /* frosted gradient hanging under the header instead of a hard edge */
+    content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 22px;
+    background: rgba(242,242,247,0.85);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    -webkit-mask-image: linear-gradient(to bottom, black, transparent);
+    mask-image: linear-gradient(to bottom, black, transparent);
+    pointer-events: none;
+  }
   .header-row { display: flex; justify-content: space-between; align-items: baseline; }
   .header h1 {
     font-size: 22px; font-weight: 700; margin: 0;
@@ -112,6 +121,46 @@
   .entry { padding: 13px 16px; cursor: pointer; }
   .entry + .entry { border-top: 1px solid var(--hairline); }
   .entry p { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+
+  /* inline formatting */
+  .rt-b { font-weight: 600; }
+  .rt-i { font-style: italic; }
+  .rt-u { text-decoration: underline; text-underline-offset: 2px; }
+  .rt-m {
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--field); padding: 1px 5px; border-radius: 5px;
+  }
+  .redacted {
+    color: transparent; border-radius: 4px; cursor: pointer;
+    background:
+      repeating-linear-gradient(0deg, rgba(28,28,30,0.30) 0 2px, rgba(28,28,30,0.10) 2px 4px),
+      repeating-linear-gradient(90deg, rgba(28,28,30,0.26) 0 2px, rgba(28,28,30,0.08) 2px 4px);
+    background-size: 4px 4px;
+    animation: sparkle 0.9s steps(2) infinite;
+    transition: color 0.25s ease;
+    user-select: none; -webkit-user-select: none;
+  }
+  @keyframes sparkle {
+    0%   { background-position: 0 0, 0 0; }
+    50%  { background-position: 2px 1px, 1px 2px; }
+    100% { background-position: 0 0, 0 0; }
+  }
+  .redacted.revealed { color: inherit; background: var(--field); animation: none; }
+  @media (prefers-reduced-motion: reduce) { .redacted { animation: none; } }
+
+  /* format bar (shown while text is selected in the composer) */
+  .fmt-bar { display: none; gap: 8px; margin-top: 8px; }
+  .fmt-bar.show { display: flex; }
+  .fmt-btn {
+    flex: 1; font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
+    background: var(--field); color: var(--ink); border: none; border-radius: 8px;
+    padding: 9px 0; user-select: none; -webkit-user-select: none;
+  }
+  .fmt-btn:active { background: var(--ink); color: #fff; }
+  .fmt-b { font-weight: 700; }
+  .fmt-i { font-style: italic; }
+  .fmt-u { text-decoration: underline; text-underline-offset: 2px; }
+  .fmt-r { color: var(--subtle); }
   .entry-meta {
     display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center;
   }
@@ -129,6 +178,18 @@
   .empty {
     text-align: center; color: var(--subtle); font-size: 14px;
     padding: 64px 24px; line-height: 1.6;
+  }
+
+  /* subtle frost at the bottom edge — content softly fades behind the fab zone */
+  .bottom-frost {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    height: calc(env(safe-area-inset-bottom) + 64px);
+    background: linear-gradient(to top, rgba(242,242,247,0.72), rgba(242,242,247,0));
+    -webkit-backdrop-filter: blur(7px);
+    backdrop-filter: blur(7px);
+    -webkit-mask-image: linear-gradient(to top, black 30%, transparent);
+    mask-image: linear-gradient(to top, black 30%, transparent);
+    pointer-events: none; z-index: 30;
   }
 
   /* fab */
@@ -311,6 +372,7 @@
   <div id="entriesRoot"></div>
 </div>
 
+<div class="bottom-frost"></div>
 <button class="fab" id="fab" aria-label="New entry">+</button>
 <div id="sheetRoot"></div>
 
@@ -426,8 +488,47 @@ try { apiKey = localStorage.getItem(API_KEY_KEY) || null; } catch (e) {}
 
 function wordCount(t) { return t.trim().split(/\s+/).length; }
 function truncateWords(t, n) { return t.trim().split(/\s+/).slice(0, n).join(" "); }
-function compactText(e) { return e.summary || truncateWords(e.text, 12) + "…"; }
-function needsSummary(e) { return !e.summary && wordCount(e.text) > SUMMARY_MIN_WORDS; }
+
+// ---------- inline formatting (Bear-style: raw markers while editing, rendered in cards) ----------
+// dialect: **bold** *italic* __underline__ `mono` ||redact||
+// deliberately NO tilde rule — ~text~ renders literally (she likes her curly hyphens).
+const RICH_RE = /\*\*(.+?)\*\*|\*(.+?)\*|__(.+?)__|`(.+?)`|\|\|(.+?)\|\|/g;
+
+// flatten markers to plain text. redactedAs replaces redacted content ("keep" preserves it) —
+// so truncation shows ▓▓▓ and the summarizer never sees redacted content at all.
+function plainText(t, redactedAs) {
+  return t.replace(RICH_RE, (m0, b, i, u, mono, red) => {
+    if (red != null) return redactedAs === "keep" ? red : redactedAs;
+    return b != null ? b : i != null ? i : u != null ? u : mono;
+  });
+}
+
+function renderRich(text) {
+  const frag = document.createDocumentFragment();
+  let last = 0, m;
+  RICH_RE.lastIndex = 0;
+  while ((m = RICH_RE.exec(text))) {
+    if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+    if (m[1] != null) frag.appendChild(el("span", { class: "rt-b" }, m[1]));
+    else if (m[2] != null) frag.appendChild(el("span", { class: "rt-i" }, m[2]));
+    else if (m[3] != null) frag.appendChild(el("span", { class: "rt-u" }, m[3]));
+    else if (m[4] != null) frag.appendChild(el("span", { class: "rt-m" }, m[4]));
+    else {
+      const r = el("span", {
+        class: "redacted",
+        onclick: ev => { ev.stopPropagation(); r.classList.toggle("revealed"); } // reveal without opening the composer
+      }, m[5]);
+      frag.appendChild(r);
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+  return frag;
+}
+
+function compactText(e) { return e.summary || truncateWords(plainText(e.text, "▓▓▓"), 12) + "…"; }
+function entryWords(e) { return wordCount(plainText(e.text, "▓")); }
+function needsSummary(e) { return !e.summary && entryWords(e) > SUMMARY_MIN_WORDS; }
 
 const summariesInFlight = new Set();
 async function summarizeEntry(entry) {
@@ -447,7 +548,7 @@ async function summarizeEntry(entry) {
         model: "claude-haiku-4-5-20251001",
         max_tokens: 60,
         system: "You compress journal fragments. Reply with only the compressed version: under 10 words, keep the writer's key nouns and tone, lowercase unless a proper noun.",
-        messages: [{ role: "user", content: textAtRequest }]
+        messages: [{ role: "user", content: plainText(textAtRequest, "[…]") }]
       })
     });
     if (!r.ok) throw new Error("api " + r.status);
@@ -585,8 +686,11 @@ const LOCK_ICON = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="
 function entryEl(e, opts) {
   opts = opts || {};
   const entry = el("div", { class: "entry", onclick: () => openComposer(e) });
-  const collapse = compactView && wordCount(e.text) > SUMMARY_MIN_WORDS;
-  entry.appendChild(el("p", null, collapse ? compactText(e) : e.text));
+  const collapse = compactView && entryWords(e) > SUMMARY_MIN_WORDS;
+  const p = el("p");
+  if (collapse) p.textContent = compactText(e);
+  else p.appendChild(renderRich(e.text));
+  entry.appendChild(p);
   const meta = el("div", { class: "entry-meta" });
   if (e.locked) {
     const lock = el("span", { class: "entry-lock", "aria-label": "locked" });
@@ -824,6 +928,43 @@ function openComposer(existing) {
     ta.value = text;
     ta.addEventListener("input", () => { text = ta.value; saveBtn.disabled = !text.trim(); });
     sheet.appendChild(ta);
+
+    // ---- format bar: appears when text is selected, wraps/unwraps markers ----
+    const fmtBar = el("div", { class: "fmt-bar" });
+    const updateBar = () => fmtBar.classList.toggle("show", ta.selectionStart !== ta.selectionEnd);
+    ["select", "keyup", "pointerup", "touchend", "input", "blur"].forEach(evt => ta.addEventListener(evt, updateBar));
+
+    function wrapSel(pre, post) {
+      const s = ta.selectionStart, en = ta.selectionEnd;
+      if (s === en) return;
+      const v = ta.value, sel = v.slice(s, en);
+      let ns, ne;
+      if (sel.startsWith(pre) && sel.endsWith(post) && sel.length > pre.length + post.length) {
+        // selection includes the markers -> unwrap
+        ta.value = v.slice(0, s) + sel.slice(pre.length, sel.length - post.length) + v.slice(en);
+        ns = s; ne = en - pre.length - post.length;
+      } else if (v.slice(Math.max(0, s - pre.length), s) === pre && v.slice(en, en + post.length) === post) {
+        // markers sit just outside the selection -> unwrap
+        ta.value = v.slice(0, s - pre.length) + sel + v.slice(en + post.length);
+        ns = s - pre.length; ne = ns + sel.length;
+      } else {
+        ta.value = v.slice(0, s) + pre + sel + post + v.slice(en);
+        ns = s + pre.length; ne = ns + sel.length;
+      }
+      text = ta.value;
+      saveBtn.disabled = !text.trim();
+      ta.focus();
+      ta.setSelectionRange(ns, ne);
+      updateBar();
+    }
+
+    [["B", "**", "**", "fmt-b"], ["I", "*", "*", "fmt-i"], ["U", "__", "__", "fmt-u"],
+     ["M", "`", "`", "fmt-m"], ["R", "||", "||", "fmt-r"]].forEach(([label, pre, post, cls]) => {
+      const b = el("button", { class: "fmt-btn " + cls, onclick: () => wrapSel(pre, post) }, label);
+      b.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused + selection alive
+      fmtBar.appendChild(b);
+    });
+    sheet.appendChild(fmtBar);
 
     // ---- topics ----
     sheet.appendChild(el("p", { class: "field-label" }, "topic"));
