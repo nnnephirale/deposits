@@ -53,6 +53,26 @@
     user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
   }
 
+  .header-tools { display: flex; align-items: center; gap: 14px; }
+  .search-btn {
+    background: none; border: none; padding: 4px; line-height: 0;
+    color: var(--subtle);
+  }
+  .search-btn svg { width: 15px; height: 15px; }
+
+  /* search sheet */
+  .search-input {
+    width: 100%; font-family: var(--font); font-size: 16px;
+    color: var(--ink); border: none; outline: none;
+    background: var(--field); border-radius: 12px; padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .search-count {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; color: var(--subtle); margin: 0 0 8px 4px;
+  }
+  .search-hint { font-size: 13px; color: var(--subtle); margin: 8px 4px; }
+
   /* settings sheet (long-press title) */
   .key-input {
     width: 100%; font-family: var(--mono); font-size: 13px;
@@ -180,6 +200,21 @@
     padding: 64px 24px; line-height: 1.6;
   }
 
+  /* weekly AI summary — a different voice, so a different face (serif italic) */
+  .wsum { position: relative; margin: 0 0 22px; padding: 2px 30px 0 4px; min-height: 18px; }
+  .wsum-text {
+    font-family: ui-serif, Georgia, 'Times New Roman', serif;
+    font-style: italic; font-size: 15px; line-height: 1.65;
+    margin: 0; cursor: pointer;
+  }
+  .wsum-text.pending { color: var(--subtle); }
+  .wsum-eye {
+    position: absolute; top: 0; right: 0;
+    background: none; border: none; padding: 4px; line-height: 0;
+    color: #D6D6DB; /* barely there by design */
+  }
+  .wsum-eye svg { width: 15px; height: 15px; }
+
   /* subtle frost at the bottom edge — content softly fades behind the fab zone */
   .bottom-frost {
     position: fixed; left: 0; right: 0; bottom: 0;
@@ -266,6 +301,7 @@
     width: 100%; font-family: var(--font); font-size: 16px; line-height: 1.5;
     color: var(--ink); border: none; outline: none; resize: none;
     background: var(--field); border-radius: 14px; padding: 14px 16px;
+    min-height: 92px; max-height: 32vh; overflow-y: auto;
   }
   .field-label {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
@@ -355,7 +391,10 @@
   <div class="header">
     <div class="header-row">
       <h1>deposits</h1>
-      <div class="layout-btns" id="layoutBtns"></div>
+      <div class="header-tools">
+        <button class="search-btn" id="searchBtn" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15.5 15.5 5 5"/></svg></button>
+        <div class="layout-btns" id="layoutBtns"></div>
+      </div>
     </div>
     <div class="seg">
       <button id="segWeek" class="active">week</button>
@@ -387,9 +426,10 @@ const TOPICS = [
   { id: "watched", label: "watched/watching", bg: "#EEE7F9", fg: "#6C46A8", dot: "#9670D4" },
   { id: "internet", label: "internet things", bg: "#DFF2F2", fg: "#1F7A7A", dot: "#48A8A8" },
   { id: "shopping", label: "shopping", bg: "#FBE5EE", fg: "#B03A6B", dot: "#D8699A" },
-  { id: "relationship", label: "relationship", bg: "#FBE3E1", fg: "#B0403A", dot: "#D8706A" },
+  { id: "relationship", label: "relationships", bg: "#FBE3E1", fg: "#B0403A", dot: "#D8706A" },
   { id: "home", label: "home", bg: "#F2ECDF", fg: "#8A6D2F", dot: "#B39554" },
   { id: "listening", label: "listening to", bg: "#E5E7FB", fg: "#4A50A8", dot: "#7B80D4" },
+  { id: "discovered", label: "discovered ✨", bg: "#FFF6D9", fg: "#9C7A00", dot: "#E8C24A" },
 ];
 const MODES = [
   { id: "remember", label: "i want to remember" },
@@ -526,16 +566,35 @@ function renderRich(text) {
   return frag;
 }
 
-function compactText(e) { return e.summary || truncateWords(plainText(e.text, "▓▓▓"), 12) + "…"; }
+// per-entry LLM summaries were tried and removed (5 Jul 2026) — truncation is enough
+// for the zoomed-out view. old e.summary fields in stored data are simply ignored.
+function compactText(e) { return truncateWords(plainText(e.text, "▓▓▓"), 12) + "…"; }
 function entryWords(e) { return wordCount(plainText(e.text, "▓")); }
-function needsSummary(e) { return !e.summary && entryWords(e) > SUMMARY_MIN_WORDS; }
 
-const summariesInFlight = new Set();
-async function summarizeEntry(entry) {
-  if (!apiKey || !needsSummary(entry) || summariesInFlight.has(entry.id)) return;
-  summariesInFlight.add(entry.id);
-  const textAtRequest = entry.text;
+// ---------- weekly AI summary (Dot-style) ----------
+// auto-generates ONCE per week when entries span >= 3 distinct days (and a key is set),
+// cached in localStorage. eye icon toggles visibility; tap the text to edit or re-summarize.
+const WEEK_SUM_KEY = "weekly-deposits-week-summaries";
+const SHOW_WSUM_KEY = "weekly-deposits-show-week-summary";
+let weekSummaries = {};
+try { weekSummaries = JSON.parse(localStorage.getItem(WEEK_SUM_KEY)) || {}; } catch (e) {}
+let showWeekSummary = true;
+try { showWeekSummary = localStorage.getItem(SHOW_WSUM_KEY) !== "0"; } catch (e) {}
+function saveWeekSummaries() {
+  try { localStorage.setItem(WEEK_SUM_KEY, JSON.stringify(weekSummaries)); } catch (e) {}
+}
+function weekKey(year, week) { return year + "-" + pad2(week); }
+
+const weekSumInFlight = new Set();
+async function generateWeekSummary(year, week, list) {
+  const k = weekKey(year, week);
+  if (!apiKey || weekSumInFlight.has(k)) return;
+  weekSumInFlight.add(k);
   try {
+    const input = list.map(e => {
+      const labels = e.tags.map(tg => (topicById[tg] || modeById[tg] || {}).label).filter(Boolean).join(", ");
+      return "- " + plainText(e.text, "[…]") + (labels ? " (" + labels + ")" : "");
+    }).join("\n");
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -546,28 +605,23 @@ async function summarizeEntry(entry) {
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 60,
-        system: "You compress journal fragments. Reply with only the compressed version: under 10 words, keep the writer's key nouns and tone, lowercase unless a proper noun.",
-        messages: [{ role: "user", content: plainText(textAtRequest, "[…]") }]
+        max_tokens: 250,
+        system: "You summarize a week of personal journal fragments into a 2-3 sentence recap. lowercase, plain and warm, mention concrete specifics from the fragments, no lists, no preamble, no filler like 'a busy week'. Reply with only the summary.",
+        messages: [{ role: "user", content: input }]
       })
     });
     if (!r.ok) throw new Error("api " + r.status);
     const data = await r.json();
     const s = ((data.content && data.content[0] && data.content[0].text) || "").trim();
     if (!s) return;
-    // only attach if the entry still exists with the same text
-    entries = entries.map(e => (e.id === entry.id && e.text === textAtRequest) ? { ...e, summary: s } : e);
-    saveEntries(entries);
-    if (compactView) render();
+    weekSummaries[k] = { text: s, createdAt: new Date().toISOString(), edited: false };
+    saveWeekSummaries();
+    if (view === "week" && wk.year === year && wk.week === week) render();
   } catch (err) {
-    console.warn("summary failed for " + entry.id, err); // stays null -> truncation fallback
+    console.warn("week summary failed", err); // placeholder stays; next render retries
   } finally {
-    summariesInFlight.delete(entry.id);
+    weekSumInFlight.delete(k);
   }
-}
-function queueVisibleSummaries() {
-  if (!apiKey) return;
-  activeEntries().filter(needsSummary).forEach(summarizeEntry);
 }
 
 // ---------- grouping + markdown ----------
@@ -701,6 +755,7 @@ function entryEl(e, opts) {
   const bits = [];
   if (opts.showDay !== false && d != null) bits.push(DAY_TOKENS[d]);
   if (opts.showWeek) bits.push("W" + pad2(e.week));
+  if (opts.showWeek && e.year !== currentWk.year) bits.push(String(e.year));
   if (bits.length) meta.appendChild(el("span", { class: "entry-day" }, bits.join(" · ")));
   for (const tg of e.tags) {
     if (tg === opts.skipTag) continue;
@@ -783,6 +838,10 @@ function render() {
     entriesRoot.appendChild(empty);
     return;
   }
+  if (view === "week") {
+    const wsum = weekSummaryBlock(list);
+    if (wsum) entriesRoot.appendChild(wsum);
+  }
   const mode = layout === "mix" ? (view === "week" ? "day" : "topic") : layout;
   if (mode === "day") renderDayGroups(list);
   else renderTopicGroups(list, mode === "dense");
@@ -790,6 +849,22 @@ function render() {
 
 // ---------- composer ----------
 const sheetRoot = document.getElementById("sheetRoot");
+
+// pinned so the list behind a sheet can't scroll while it's open (iOS scroll-chaining fix)
+let composerScrollY = 0;
+function lockPageScroll() {
+  if (document.body.style.position === "fixed") return; // already locked (e.g. composer opened from search)
+  composerScrollY = window.scrollY;
+  document.body.style.position = "fixed";
+  document.body.style.top = -composerScrollY + "px";
+  document.body.style.width = "100%";
+}
+function unlockPageScroll() {
+  document.body.style.position = "";
+  document.body.style.top = "";
+  document.body.style.width = "";
+  window.scrollTo(0, composerScrollY);
+}
 
 function openComposer(existing) {
   let text = existing ? existing.text : "";
@@ -801,11 +876,13 @@ function openComposer(existing) {
   let day = existing ? entryDay(existing) : weekdayIndex(new Date());
   const nowWk = getISOWeek(new Date());
 
+  sheetRoot.innerHTML = ""; // never stack on another sheet (composer can open from search results)
+  lockPageScroll();
   const overlay = el("div", { class: "overlay", onclick: close });
   const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
   overlay.appendChild(sheet);
 
-  function close() { sheetRoot.innerHTML = ""; }
+  function close() { sheetRoot.innerHTML = ""; unlockPageScroll(); }
 
   function build() {
     sheet.innerHTML = "";
@@ -877,29 +954,22 @@ function openComposer(existing) {
     });
 
     function doSave() {
-      let savedId;
       if (existing) {
-        const textChanged = text.trim() !== existing.text;
-        savedId = existing.id;
         entries = entries.map(e => e.id === existing.id
           ? { ...e, text: text.trim(), tags, year: cw.year, week: cw.week, day, locked,
-              summary: textChanged ? null : e.summary, // stale summaries die with their text
               updatedAt: new Date().toISOString() }
           : e);
       } else {
         const stamp = new Date().toISOString();
-        savedId = Date.now().toString(36);
         entries = [...entries, {
-          id: savedId,
+          id: Date.now().toString(36),
           createdAt: stamp, updatedAt: stamp,
-          text: text.trim(), tags, year: cw.year, week: cw.week, day, locked, summary: null
+          text: text.trim(), tags, year: cw.year, week: cw.week, day, locked
         }];
       }
       saveEntries(entries);
       close();
       render();
-      const saved = entries.find(e => e.id === savedId);
-      if (saved) summarizeEntry(saved); // async, never blocks capture
     }
 
     const saveBtn = el("button", {
@@ -926,8 +996,12 @@ function openComposer(existing) {
     // ---- text ----
     const ta = el("textarea", { rows: "4", placeholder: "deposit a thought\u2026" });
     ta.value = text;
-    ta.addEventListener("input", () => { text = ta.value; saveBtn.disabled = !text.trim(); });
+    // grows with content up to the CSS max-height, then scrolls internally \u2014 so
+    // "topic" stays peeking below rather than getting pushed off-screen entirely
+    function autoGrow() { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; }
+    ta.addEventListener("input", () => { text = ta.value; saveBtn.disabled = !text.trim(); autoGrow(); });
     sheet.appendChild(ta);
+    requestAnimationFrame(autoGrow); // ta isn't attached to the document until after build() returns
 
     // ---- format bar: appears when text is selected, wraps/unwraps markers ----
     const fmtBar = el("div", { class: "fmt-bar" });
@@ -1144,7 +1218,6 @@ periodLabel.addEventListener("click", () => {
     if (ratio < 0.75 && !compactView) {
       compactView = true;
       startDist = dist(ev.touches); // re-baseline so the same gesture doesn't flap
-      queueVisibleSummaries();
       render();
     } else if (ratio > 1.33 && compactView) {
       compactView = false;
@@ -1155,6 +1228,164 @@ periodLabel.addEventListener("click", () => {
   ["touchend", "touchcancel"].forEach(evt =>
     document.addEventListener(evt, () => { startDist = null; }));
 })();
+
+// ---------- weekly summary block ----------
+const EYE_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg>';
+
+function weekSummaryBlock(list) {
+  const k = weekKey(wk.year, wk.week);
+  const rec = weekSummaries[k];
+  const filledDays = new Set(list.map(entryDay).filter(d => d != null)).size;
+  if (!rec && !(filledDays >= 3 && apiKey)) return null; // nothing to show, nothing to generate
+
+  const wrap = el("div", { class: "wsum" });
+  const eye = el("button", { class: "wsum-eye", "aria-label": "Toggle week summary" });
+  eye.innerHTML = showWeekSummary ? EYE_ON : EYE_OFF;
+  eye.addEventListener("click", () => {
+    showWeekSummary = !showWeekSummary;
+    try { localStorage.setItem(SHOW_WSUM_KEY, showWeekSummary ? "1" : "0"); } catch (e) {}
+    render();
+  });
+  wrap.appendChild(eye);
+
+  if (showWeekSummary) {
+    if (!rec) {
+      generateWeekSummary(wk.year, wk.week, list); // one-off; cached from then on
+      wrap.appendChild(el("p", { class: "wsum-text pending" }, "summarizing the week…"));
+    } else {
+      wrap.appendChild(el("p", {
+        class: "wsum-text",
+        onclick: () => openWeekSummaryEditor(wk.year, wk.week, list)
+      }, rec.text));
+    }
+  }
+  return wrap;
+}
+
+function openWeekSummaryEditor(year, week, list) {
+  const k = weekKey(year, week);
+  sheetRoot.innerHTML = "";
+  const overlay = el("div", { class: "overlay", onclick: () => sheetRoot.innerHTML = "" });
+  const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
+  overlay.appendChild(sheet);
+
+  sheet.appendChild(el("div", { class: "grabber" }));
+  const saveBtn = el("button", {
+    class: "save",
+    onclick: () => {
+      const v = ta.value.trim();
+      if (v) weekSummaries[k] = { ...weekSummaries[k], text: v, edited: true };
+      else delete weekSummaries[k]; // cleared = forget it; a fresh one generates on next render
+      saveWeekSummaries();
+      sheetRoot.innerHTML = "";
+      render();
+    }
+  }, "Save");
+  sheet.appendChild(el("div", { class: "sheet-head" },
+    el("span"), el("span", { class: "title" }, "Week summary"), saveBtn));
+
+  const ta = el("textarea", { rows: "5" });
+  ta.value = (weekSummaries[k] || {}).text || "";
+  sheet.appendChild(ta);
+
+  const resum = el("button", {
+    class: "lock-btn",
+    onclick: async () => {
+      resum.disabled = true;
+      resum.textContent = "summarizing…";
+      delete weekSummaries[k];
+      saveWeekSummaries();
+      await generateWeekSummary(year, week, list);
+      if (weekSummaries[k]) ta.value = weekSummaries[k].text;
+      resum.disabled = false;
+      resum.textContent = "re-summarize";
+    }
+  }, "re-summarize");
+  sheet.appendChild(resum);
+
+  sheetRoot.appendChild(overlay);
+}
+
+// ---------- search ----------
+function openSearch() {
+  sheetRoot.innerHTML = "";
+  lockPageScroll();
+  let q = "", scope = "all";
+
+  // scope targets = whatever week/month is currently being browsed, so "a specific
+  // week/month" = navigate there first; the chips name themselves accordingly
+  const scopeWk = { year: wk.year, week: wk.week };
+  const monOfWk = mondayOfISOWeek(wk.year, wk.week);
+  const thuOfWk = new Date(monOfWk);
+  thuOfWk.setUTCDate(monOfWk.getUTCDate() + 3);
+  const scopeMo = view === "month" ? { ...mo } : { year: thuOfWk.getUTCFullYear(), month: thuOfWk.getUTCMonth() };
+  const nowYear = getISOWeek(new Date()).year;
+  const moName = new Date(scopeMo.year, scopeMo.month, 1).toLocaleDateString("en-SG", { month: "long" })
+    + (scopeMo.year !== nowYear ? " " + scopeMo.year : "");
+
+  const overlay = el("div", { class: "overlay", onclick: close });
+  const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
+  overlay.appendChild(sheet);
+  function close() { sheetRoot.innerHTML = ""; unlockPageScroll(); }
+
+  sheet.appendChild(el("div", { class: "grabber" }));
+  sheet.appendChild(el("div", { class: "sheet-head" }, el("span"), el("span", { class: "title" }, "Search"), el("span")));
+
+  const input = el("input", { class: "search-input", type: "search", placeholder: "search entries…", autocomplete: "off" });
+  input.addEventListener("input", () => { q = input.value.trim().toLowerCase(); renderResults(); });
+  sheet.appendChild(input);
+
+  const chips = el("div", { class: "chips" });
+  const scopes = [["all", "all"], ["week", "W" + pad2(scopeWk.week) + (scopeWk.year !== nowYear ? " " + scopeWk.year : "")], ["month", moName]];
+  for (const [id, label] of scopes) {
+    chips.appendChild(el("button", {
+      class: "chip mode" + (scope === id ? " on" : ""),
+      onclick: () => {
+        scope = id;
+        Array.from(chips.children).forEach((c, i) => c.classList.toggle("on", scopes[i][0] === id));
+        renderResults();
+      }
+    }, label));
+  }
+  sheet.appendChild(chips);
+
+  const resultsRoot = el("div", { style: { marginTop: "14px" } });
+  sheet.appendChild(resultsRoot);
+
+  function inScope(e) {
+    if (scope === "week") return e.year === scopeWk.year && e.week === scopeWk.week;
+    if (scope === "month") {
+      const mon = mondayOfISOWeek(e.year, e.week);
+      const thu = new Date(mon);
+      thu.setUTCDate(mon.getUTCDate() + 3);
+      return thu.getUTCFullYear() === scopeMo.year && thu.getUTCMonth() === scopeMo.month;
+    }
+    return true;
+  }
+  function matches(e) {
+    const hay = (plainText(e.text, "keep") + " " + e.tags.map(groupLabel).join(" ")).toLowerCase();
+    return hay.includes(q);
+  }
+  function renderResults() {
+    resultsRoot.innerHTML = "";
+    if (!q) {
+      resultsRoot.appendChild(el("p", { class: "search-hint" }, "search " + entries.filter(inScope).length + " entries…"));
+      return;
+    }
+    const found = entries.filter(e => inScope(e) && matches(e))
+      .sort((a, b) => (b.year - a.year) || (b.week - a.week) || (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
+    resultsRoot.appendChild(el("p", { class: "search-count" }, found.length + " found"));
+    if (!found.length) return;
+    const card = el("div", { class: "group-card" });
+    for (const e of found) card.appendChild(entryEl(e, { showWeek: true }));
+    resultsRoot.appendChild(card);
+  }
+
+  renderResults();
+  sheetRoot.appendChild(overlay);
+  setTimeout(() => input.focus(), 120);
+}
 
 // ---------- settings (long-press the title) ----------
 function openSettings() {
@@ -1181,22 +1412,7 @@ function openSettings() {
     });
     sheet.appendChild(input);
     sheet.appendChild(el("p", { class: "settings-note" },
-      "stored only on this device. entries over " + SUMMARY_MIN_WORDS + " words get a one-line summary (via haiku, fractions of a cent) for the zoomed-out view — pinch the list to toggle. without a key, zoomed-out falls back to the first few words."));
-
-    const pending = entries.filter(needsSummary).length;
-    if (apiKey && pending) {
-      const btn = el("button", {
-        class: "lock-btn",
-        onclick: async () => {
-          btn.textContent = "summarizing…";
-          await Promise.allSettled(entries.filter(needsSummary).map(summarizeEntry));
-          build();
-        }
-      }, "summarize " + pending + " pending");
-      sheet.appendChild(btn);
-    } else if (apiKey) {
-      sheet.appendChild(el("p", { class: "settings-note" }, "nothing pending — all long entries are summarized."));
-    }
+      "stored only on this device. used for the weekly summary (via haiku, fractions of a cent) that appears once a week has entries on 3 or more days. tap a summary to edit or re-summarize; the eye beside it hides it."));
   }
 
   build();
@@ -1274,6 +1490,7 @@ fab.addEventListener("click", () => {
 });
 
 // ---------- wiring ----------
+document.getElementById("searchBtn").addEventListener("click", openSearch);
 segWeek.addEventListener("click", () => { view = "week"; render(); });
 segMonth.addEventListener("click", () => { view = "month"; render(); });
 document.getElementById("prevBtn").addEventListener("click", () => {
