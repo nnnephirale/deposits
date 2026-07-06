@@ -7,6 +7,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="theme-color" content="#F2F2F7" />
 <title>deposits</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <style>
   :root {
     --ink: #1C1C1E;
@@ -214,9 +217,11 @@
 
   /* weekly AI summary — a different voice, so a different face (serif italic) */
   .wsum { position: relative; margin: 0 0 22px; padding: 2px 30px 0 4px; min-height: 18px; }
+  .wsum.collapsed { margin: 0; padding: 0; min-height: 0; } /* hidden: no reserved space — eye rides the next row down */
+  .wsum.collapsed .wsum-eye { top: -5px; } /* nudged to align with the group-head row's vertical center */
   .wsum-text {
-    font-family: ui-serif, Georgia, 'Times New Roman', serif;
-    font-style: italic; font-size: 15px; line-height: 1.65;
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-style: normal; font-size: 17px; line-height: 1.6;
     margin: 0; cursor: pointer;
   }
   .wsum-text.pending { color: var(--subtle); }
@@ -540,6 +545,8 @@ try { apiKey = localStorage.getItem(API_KEY_KEY) || null; } catch (e) {}
 
 function wordCount(t) { return t.trim().split(/\s+/).length; }
 function truncateWords(t, n) { return t.trim().split(/\s+/).slice(0, n).join(" "); }
+// capitalizes the first letter of each sentence — display-only, never mutates stored text
+function sentenceCase(s) { return s.replace(/(^\s*\S|[.!?]\s+\S)/g, c => c.toUpperCase()); }
 
 // ---------- inline formatting (Bear-style: raw markers while editing, rendered in cards) ----------
 // dialect: **bold** *italic* __underline__ `mono` ||redact||
@@ -1251,7 +1258,7 @@ function weekSummaryBlock(list) {
   const filledDays = new Set(list.map(entryDay).filter(d => d != null)).size;
   if (!rec && !(filledDays >= 3 && apiKey)) return null; // nothing to show, nothing to generate
 
-  const wrap = el("div", { class: "wsum" });
+  const wrap = el("div", { class: "wsum" + (showWeekSummary ? "" : " collapsed") });
   const eye = el("button", { class: "wsum-eye", "aria-label": "Toggle week summary" });
   eye.innerHTML = showWeekSummary ? EYE_ON : EYE_OFF;
   eye.addEventListener("click", () => {
@@ -1264,12 +1271,12 @@ function weekSummaryBlock(list) {
   if (showWeekSummary) {
     if (!rec) {
       generateWeekSummary(wk.year, wk.week, list); // one-off; cached from then on
-      wrap.appendChild(el("p", { class: "wsum-text pending" }, "summarizing the week…"));
+      wrap.appendChild(el("p", { class: "wsum-text pending" }, "Summarizing the week…"));
     } else {
       wrap.appendChild(el("p", {
         class: "wsum-text",
         onclick: () => openWeekSummaryEditor(wk.year, wk.week, list)
-      }, rec.text));
+      }, sentenceCase(rec.text)));
     }
   }
   return wrap;
@@ -1298,7 +1305,7 @@ function openWeekSummaryEditor(year, week, list) {
     el("span"), el("span", { class: "title" }, "Week summary"), saveBtn));
 
   const ta = el("textarea", { rows: "5" });
-  ta.value = (weekSummaries[k] || {}).text || "";
+  ta.value = sentenceCase((weekSummaries[k] || {}).text || "");
   sheet.appendChild(ta);
 
   const resum = el("button", {
@@ -1309,7 +1316,7 @@ function openWeekSummaryEditor(year, week, list) {
       delete weekSummaries[k];
       saveWeekSummaries();
       await generateWeekSummary(year, week, list);
-      if (weekSummaries[k]) ta.value = weekSummaries[k].text;
+      if (weekSummaries[k]) ta.value = sentenceCase(weekSummaries[k].text);
       resum.disabled = false;
       resum.textContent = "re-summarize";
     }
