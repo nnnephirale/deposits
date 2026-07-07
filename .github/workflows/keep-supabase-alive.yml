@@ -1,0 +1,32 @@
+name: Keep Supabase Alive
+
+# Free Supabase projects pause after ~7 days with no activity. This pings the REST
+# API so the project (shared with SSaved) stays warm. It lives in the *active*
+# deposits repo on purpose — GitHub disables scheduled workflows after 60 days of
+# repo inactivity, which is exactly what silently killed SSaved's keep-alive.
+#
+# Belt-and-suspenders: also set up an external pinger (cron-job.org / UptimeRobot)
+# hitting the same URL, since that can't be disabled by GitHub.
+
+on:
+  schedule:
+    - cron: '17 8 */4 * *'   # every 4 days, 08:17 UTC (offset minute avoids the busy top-of-hour queue)
+  workflow_dispatch:          # manual "Run workflow" button
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST
+        run: |
+          # public anon key — safe to commit (RLS still gates all data)
+          KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdXFxZGFhbG5kZGVkZ2pkZ2NnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3OTQ2NDIsImV4cCI6MjA4MzM3MDY0Mn0.afUxr9uKdSamnbFQmOt7DDRvEJYLEz3-c8u5P3zZcnE"
+          URL="https://uauqqdaalnddedgjdgcg.supabase.co/rest/v1/deposits_entries?select=id&limit=1"
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" "$URL" -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+          echo "Supabase responded with HTTP $CODE"
+          if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+            echo "✓ alive"
+          else
+            echo "✗ status $CODE — project may be paused (a ping can't wake a paused project; unpause it in the dashboard)"
+            exit 1
+          fi

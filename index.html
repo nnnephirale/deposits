@@ -10,6 +10,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<!-- supabase client for optional cloud sync; app stays fully functional (local-only) if this fails to load -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root {
     --ink: #1C1C1E;
@@ -165,6 +167,15 @@
     font-family: var(--mono); font-size: 0.85em;
     background: var(--field); padding: 1px 5px; border-radius: 5px;
   }
+  /* inline link — a tappable mono pill; label defaults to the domain, editable in raw text */
+  .rt-link {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-family: var(--mono); font-size: 0.8em; letter-spacing: 0.2px;
+    background: var(--field); color: var(--ink); text-decoration: none;
+    padding: 1px 7px 1px 6px; border-radius: 6px;
+    vertical-align: 1px; white-space: nowrap; cursor: pointer;
+  }
+  .rt-link svg { flex: none; opacity: 0.45; }
   .redacted {
     color: transparent; border-radius: 4px; cursor: pointer;
     background:
@@ -221,10 +232,23 @@
   .wsum.collapsed .wsum-eye { top: -5px; } /* nudged to align with the group-head row's vertical center */
   .wsum-text {
     font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
-    font-style: normal; font-size: 17px; line-height: 1.6;
+    font-style: normal; font-size: 22px; line-height: 1.4;
     margin: 0; cursor: pointer;
   }
   .wsum-text.pending { color: var(--subtle); }
+  /* provenance pill: MINE (hand-written) / V1 (first AI take) / V2… (re-summarized) */
+  .wsum-pill {
+    display: inline-block; font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.6px; text-transform: uppercase; color: var(--subtle);
+    background: var(--field); border-radius: 5px; padding: 2px 6px;
+    line-height: 1; margin: 0 0 6px; cursor: pointer;
+  }
+  /* faint invitation to hand-write a summary when none exists / AI won't auto-generate */
+  .wsum-add {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
+    text-transform: uppercase; color: #C7C7CC; cursor: pointer;
+    background: none; border: none; padding: 0;
+  }
   .wsum-eye {
     position: absolute; top: 0; right: 0;
     background: none; border: none; padding: 4px; line-height: 0;
@@ -522,6 +546,12 @@ function saveEntries(list) {
   } catch (e) {
     memoryFallback = list;
   }
+  if (typeof tombstones === "object") { // a live entry supersedes any prior delete of the same id
+    let touched = false;
+    for (const e of list) if (tombstones[e.id]) { delete tombstones[e.id]; touched = true; }
+    if (touched) saveTombstones();
+  }
+  if (typeof syncPushEntries === "function") syncPushEntries(); // best-effort cloud push
 }
 
 // ---------- state ----------
@@ -549,14 +579,25 @@ function truncateWords(t, n) { return t.trim().split(/\s+/).slice(0, n).join(" "
 function sentenceCase(s) { return s.replace(/(^\s*\S|[.!?]\s+\S)/g, c => c.toUpperCase()); }
 
 // ---------- inline formatting (Bear-style: raw markers while editing, rendered in cards) ----------
-// dialect: **bold** *italic* __underline__ `mono` ||redact||
+// dialect: [label](url) **bold** *italic* __underline__ `mono` ||redact||
 // deliberately NO tilde rule — ~text~ renders literally (she likes her curly hyphens).
-const RICH_RE = /\*\*(.+?)\*\*|\*(.+?)\*|__(.+?)__|`(.+?)`|\|\|(.+?)\|\|/g;
+// link is first so its brackets/parens aren't mis-parsed by the emphasis rules.
+const RICH_RE = /\[([^\]]+)\]\(([^)\s]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|__(.+?)__|`(.+?)`|\|\|(.+?)\|\|/g;
+
+const LINK_ICON = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 6 .4l2.6-2.6a4 4 0 0 0-5.7-5.7L11.4 7.6"/><path d="M14 10a4 4 0 0 0-6-.4L5.4 12.2a4 4 0 0 0 5.7 5.7l1.5-1.5"/></svg>';
+
+// derive a compact display domain from a url (drops scheme, www, and path)
+function domainOf(u) {
+  try { return new URL(u).hostname.replace(/^www\./, ""); }
+  catch (e) { return u.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0]; }
+}
 
 // flatten markers to plain text. redactedAs replaces redacted content ("keep" preserves it) —
-// so truncation shows ▓▓▓ and the summarizer never sees redacted content at all.
+// so truncation shows ▓▓▓ and the summarizer never sees redacted content at all. links flatten
+// to their label so search/summaries see the readable text, never the raw url.
 function plainText(t, redactedAs) {
-  return t.replace(RICH_RE, (m0, b, i, u, mono, red) => {
+  return t.replace(RICH_RE, (m0, linkLabel, linkUrl, b, i, u, mono, red) => {
+    if (linkLabel != null) return linkLabel;
     if (red != null) return redactedAs === "keep" ? red : redactedAs;
     return b != null ? b : i != null ? i : u != null ? u : mono;
   });
@@ -568,15 +609,24 @@ function renderRich(text) {
   RICH_RE.lastIndex = 0;
   while ((m = RICH_RE.exec(text))) {
     if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-    if (m[1] != null) frag.appendChild(el("span", { class: "rt-b" }, m[1]));
-    else if (m[2] != null) frag.appendChild(el("span", { class: "rt-i" }, m[2]));
-    else if (m[3] != null) frag.appendChild(el("span", { class: "rt-u" }, m[3]));
-    else if (m[4] != null) frag.appendChild(el("span", { class: "rt-m" }, m[4]));
+    if (m[1] != null) {
+      const a = el("a", {
+        class: "rt-link", href: m[2], target: "_blank", rel: "noopener noreferrer",
+        onclick: ev => ev.stopPropagation() // navigate, but don't also open the composer
+      });
+      a.innerHTML = LINK_ICON;
+      a.appendChild(document.createTextNode(m[1]));
+      frag.appendChild(a);
+    }
+    else if (m[3] != null) frag.appendChild(el("span", { class: "rt-b" }, m[3]));
+    else if (m[4] != null) frag.appendChild(el("span", { class: "rt-i" }, m[4]));
+    else if (m[5] != null) frag.appendChild(el("span", { class: "rt-u" }, m[5]));
+    else if (m[6] != null) frag.appendChild(el("span", { class: "rt-m" }, m[6]));
     else {
       const r = el("span", {
         class: "redacted",
         onclick: ev => { ev.stopPropagation(); r.classList.toggle("revealed"); } // reveal without opening the composer
-      }, m[5]);
+      }, m[7]);
       frag.appendChild(r);
     }
     last = m.index + m[0].length;
@@ -601,8 +651,164 @@ let showWeekSummary = true;
 try { showWeekSummary = localStorage.getItem(SHOW_WSUM_KEY) !== "0"; } catch (e) {}
 function saveWeekSummaries() {
   try { localStorage.setItem(WEEK_SUM_KEY, JSON.stringify(weekSummaries)); } catch (e) {}
+  if (typeof summaryTombstones === "object") { // a live summary supersedes any prior clear of the same week
+    let touched = false;
+    for (const k of Object.keys(weekSummaries)) if (summaryTombstones[k]) { delete summaryTombstones[k]; touched = true; }
+    if (touched) saveTombstones();
+  }
+  if (typeof syncPushSummaries === "function") syncPushSummaries(); // best-effort cloud push
 }
 function weekKey(year, week) { return year + "-" + pad2(week); }
+
+// ---------- cloud sync (Supabase, optional) ----------
+// local-first: localStorage stays the source of truth for instant/offline capture.
+// when a session exists, changes push up and remote changes merge down (last-write-wins
+// on updated_at). every path here no-ops cleanly when logged out or the SDK/network is
+// unavailable — the app never depends on it. anon key is public by design; RLS gates data.
+const SUPABASE_URL = "https://uauqqdaalnddedgjdgcg.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdXFxZGFhbG5kZGVkZ2pkZ2NnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3OTQ2NDIsImV4cCI6MjA4MzM3MDY0Mn0.afUxr9uKdSamnbFQmOt7DDRvEJYLEz3-c8u5P3zZcnE";
+const sb = (window.supabase && window.supabase.createClient)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY,
+      { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })
+  : null;
+let session = null;
+function syncActive() { return !!(sb && session); }
+
+// tombstones: ids/keys deleted locally, retained so the deletion still propagates on the
+// next push (survives being offline at delete time).
+const TOMB_KEY = "weekly-deposits-tombstones";
+const SUM_TOMB_KEY = "weekly-deposits-summary-tombstones";
+let tombstones = {}, summaryTombstones = {};
+try { tombstones = JSON.parse(localStorage.getItem(TOMB_KEY)) || {}; } catch (e) {}
+try { summaryTombstones = JSON.parse(localStorage.getItem(SUM_TOMB_KEY)) || {}; } catch (e) {}
+function saveTombstones() {
+  try { localStorage.setItem(TOMB_KEY, JSON.stringify(tombstones)); } catch (e) {}
+  try { localStorage.setItem(SUM_TOMB_KEY, JSON.stringify(summaryTombstones)); } catch (e) {}
+}
+function tombstoneEntry(id) { tombstones[id] = new Date().toISOString(); saveTombstones(); }
+function tombstoneSummary(k) { summaryTombstones[k] = new Date().toISOString(); saveTombstones(); }
+
+function entryToRow(e) {
+  return {
+    id: e.id, user_id: session.user.id,
+    text: e.text || "", tags: e.tags || [],
+    year: e.year ?? null, week: e.week ?? null, day: ("day" in e ? e.day : null),
+    locked: !!e.locked, created_at: e.createdAt, updated_at: e.updatedAt || e.createdAt,
+    deleted_at: null
+  };
+}
+function rowToEntry(r) {
+  return {
+    id: r.id, text: r.text || "", tags: r.tags || [],
+    year: r.year, week: r.week, day: r.day, locked: !!r.locked,
+    createdAt: r.created_at, updatedAt: r.updated_at
+  };
+}
+function summaryUpdatedAt(rec) { return rec.updatedAt || rec.createdAt || new Date(0).toISOString(); }
+
+// pull remote rows and merge into local state (last-write-wins). returns true if local changed.
+async function syncPull() {
+  if (!syncActive()) return false;
+  let changed = false;
+  try {
+    const { data: rows, error } = await sb.from("deposits_entries").select("*");
+    if (error) throw error;
+    const byId = new Map(entries.map(e => [e.id, e]));
+    for (const r of rows) {
+      if (r.deleted_at) {
+        if (byId.delete(r.id)) changed = true;
+        tombstones[r.id] = r.deleted_at;
+        continue;
+      }
+      if (tombstones[r.id] && new Date(tombstones[r.id]) >= new Date(r.updated_at)) continue; // local delete wins
+      const local = byId.get(r.id);
+      if (!local || new Date(r.updated_at) >= new Date(local.updatedAt || local.createdAt)) {
+        byId.set(r.id, rowToEntry(r)); changed = true;
+      }
+    }
+    entries = [...byId.values()];
+  } catch (e) { console.warn("sync pull entries failed", e); }
+
+  try {
+    const { data: rows, error } = await sb.from("deposits_week_summaries").select("*");
+    if (error) throw error;
+    for (const r of rows) {
+      const k = r.week_key;
+      if (r.deleted_at) {
+        if (weekSummaries[k]) { delete weekSummaries[k]; changed = true; }
+        summaryTombstones[k] = r.deleted_at;
+        continue;
+      }
+      if (summaryTombstones[k] && new Date(summaryTombstones[k]) >= new Date(r.updated_at)) continue;
+      const local = weekSummaries[k];
+      if (!local || new Date(r.updated_at) >= new Date(summaryUpdatedAt(local))) {
+        weekSummaries[k] = { text: r.text, origin: r.origin, version: r.version,
+          edited: r.edited, createdAt: r.created_at, updatedAt: r.updated_at };
+        changed = true;
+      }
+    }
+  } catch (e) { console.warn("sync pull summaries failed", e); }
+
+  saveTombstones();
+  if (changed) { saveEntries(entries); saveWeekSummaries(); } // persists + schedules push of any local-only rows
+  return changed;
+}
+
+let entryPushT = null, summaryPushT = null;
+function syncPushEntries() { if (!syncActive()) return; clearTimeout(entryPushT); entryPushT = setTimeout(pushEntriesNow, 1200); }
+function syncPushSummaries() { if (!syncActive()) return; clearTimeout(summaryPushT); summaryPushT = setTimeout(pushSummariesNow, 1200); }
+
+async function pushEntriesNow() {
+  if (!syncActive()) return;
+  try {
+    const rows = entries.map(entryToRow);
+    for (const [id, ts] of Object.entries(tombstones)) {
+      rows.push({ id, user_id: session.user.id, text: "", tags: [], year: null, week: null,
+        day: null, locked: false, created_at: ts, updated_at: ts, deleted_at: ts });
+    }
+    if (rows.length) {
+      const { error } = await sb.from("deposits_entries").upsert(rows, { onConflict: "id" });
+      if (error) throw error;
+    }
+  } catch (e) { console.warn("sync push entries failed", e); }
+}
+
+async function pushSummariesNow() {
+  if (!syncActive()) return;
+  try {
+    const rows = Object.entries(weekSummaries).map(([k, r]) => ({
+      user_id: session.user.id, week_key: k, text: r.text || "",
+      origin: r.origin || "ai", version: r.version || 1, edited: !!r.edited,
+      created_at: r.createdAt || new Date().toISOString(), updated_at: summaryUpdatedAt(r), deleted_at: null
+    }));
+    for (const [k, ts] of Object.entries(summaryTombstones)) {
+      rows.push({ user_id: session.user.id, week_key: k, text: "", origin: "ai",
+        version: 1, edited: false, created_at: ts, updated_at: ts, deleted_at: ts });
+    }
+    if (rows.length) {
+      const { error } = await sb.from("deposits_week_summaries").upsert(rows, { onConflict: "user_id,week_key" });
+      if (error) throw error;
+    }
+  } catch (e) { console.warn("sync push summaries failed", e); }
+}
+
+async function sendMagicLink(email) {
+  if (!sb) return { error: { message: "sync unavailable — SDK didn't load" } };
+  return await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0].split("?")[0] } });
+}
+async function signOutSync() { if (sb) { try { await sb.auth.signOut(); } catch (e) {} } session = null; }
+
+async function initSync() {
+  if (!sb) return;
+  try { const { data } = await sb.auth.getSession(); session = data.session || null; } catch (e) { session = null; }
+  if (session) { await syncPull(); render(); syncPushEntries(); syncPushSummaries(); }
+  sb.auth.onAuthStateChange(async (evt, s) => {
+    const had = !!session; session = s || null;
+    if (session && !had && evt !== "TOKEN_REFRESHED") { // fresh sign-in / magic-link return
+      await syncPull(); render(); syncPushEntries(); syncPushSummaries();
+    }
+  });
+}
 
 const weekSumInFlight = new Set();
 async function generateWeekSummary(year, week, list) {
@@ -633,7 +839,12 @@ async function generateWeekSummary(year, week, list) {
     const data = await r.json();
     const s = ((data.content && data.content[0] && data.content[0].text) || "").trim();
     if (!s) return;
-    weekSummaries[k] = { text: s, createdAt: new Date().toISOString(), edited: false };
+    // version tracks AI takes only: first take is V1, each re-summarize bumps it.
+    // a prior hand-written (mine) or empty slot resets the AI count to V1.
+    const prev = weekSummaries[k];
+    const version = (prev && prev.origin === "ai" ? (prev.version || 1) : 0) + 1;
+    const nowIso = new Date().toISOString();
+    weekSummaries[k] = { text: s, createdAt: nowIso, updatedAt: nowIso, edited: false, origin: "ai", version };
     saveWeekSummaries();
     if (view === "week" && wk.year === year && wk.week === week) render();
   } catch (err) {
@@ -1051,12 +1262,44 @@ function openComposer(existing) {
       updateBar();
     }
 
+    // link: wrap the selection as [label](url). if the selection is itself a url, it
+    // becomes a domain-labelled pill with no typing; otherwise prompt for the url and
+    // keep the selected words as the label. either way the label stays editable in raw text.
+    function linkSel() {
+      const s = ta.selectionStart, en = ta.selectionEnd;
+      if (s === en) return;
+      const v = ta.value, sel = v.slice(s, en).trim();
+      const looksUrl = /^(https?:\/\/\S+|www\.\S+|\S+\.[a-z]{2,}(\/\S*)?)$/i.test(sel);
+      let url, label;
+      if (looksUrl) {
+        url = /^https?:\/\//i.test(sel) ? sel : "https://" + sel;
+        label = domainOf(url);
+      } else {
+        let u = prompt("paste the link url");
+        if (!u) return;
+        u = u.trim();
+        url = /^https?:\/\//i.test(u) ? u : "https://" + u;
+        label = sel;
+      }
+      const md = "[" + label + "](" + url + ")";
+      ta.value = v.slice(0, s) + md + v.slice(en);
+      text = ta.value;
+      saveBtn.disabled = !text.trim();
+      ta.focus();
+      ta.setSelectionRange(s + 1, s + 1 + label.length); // land on the label so it's easy to rename
+      autoGrow();
+      updateBar();
+    }
+
     [["B", "**", "**", "fmt-b"], ["I", "*", "*", "fmt-i"], ["U", "__", "__", "fmt-u"],
      ["M", "`", "`", "fmt-m"], ["R", "||", "||", "fmt-r"]].forEach(([label, pre, post, cls]) => {
       const b = el("button", { class: "fmt-btn " + cls, onclick: () => wrapSel(pre, post) }, label);
       b.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused + selection alive
       fmtBar.appendChild(b);
     });
+    const linkBtn = el("button", { class: "fmt-btn fmt-l", onclick: linkSel }, "L");
+    linkBtn.addEventListener("pointerdown", ev => ev.preventDefault());
+    fmtBar.appendChild(linkBtn);
     sheet.appendChild(fmtBar);
 
     // ---- topics ----
@@ -1113,6 +1356,7 @@ function openComposer(existing) {
         sheet.appendChild(el("button", {
           class: "delete-btn",
           onclick: () => {
+            tombstoneEntry(existing.id); // so the deletion syncs to the cloud, not just locally
             entries = entries.filter(e => e.id !== existing.id);
             saveEntries(entries);
             close();
@@ -1252,11 +1496,30 @@ periodLabel.addEventListener("click", () => {
 const EYE_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg>';
 
+// which bucket the current summary falls in: MINE (hand-written), or V1/V2… (AI takes).
+// legacy records predate origin/version — treat them as the first AI take.
+function summaryPill(rec) {
+  if (!rec) return "";
+  return rec.origin === "mine" ? "MINE" : "V" + (rec.version || 1);
+}
+
 function weekSummaryBlock(list) {
   const k = weekKey(wk.year, wk.week);
   const rec = weekSummaries[k];
   const filledDays = new Set(list.map(entryDay).filter(d => d != null)).size;
-  if (!rec && !(filledDays >= 3 && apiKey)) return null; // nothing to show, nothing to generate
+  const aiEligible = filledDays >= 3 && apiKey;
+
+  // no summary yet and AI won't auto-generate → offer to hand-write one (saves as MINE).
+  // suppressed when the whole summary surface is hidden.
+  if (!rec && !aiEligible) {
+    if (!showWeekSummary) return null;
+    const wrap = el("div", { class: "wsum" });
+    wrap.appendChild(el("button", {
+      class: "wsum-add",
+      onclick: () => openWeekSummaryEditor(wk.year, wk.week, list)
+    }, "+ write a summary"));
+    return wrap;
+  }
 
   const wrap = el("div", { class: "wsum" + (showWeekSummary ? "" : " collapsed") });
   const eye = el("button", { class: "wsum-eye", "aria-label": "Toggle week summary" });
@@ -1273,10 +1536,9 @@ function weekSummaryBlock(list) {
       generateWeekSummary(wk.year, wk.week, list); // one-off; cached from then on
       wrap.appendChild(el("p", { class: "wsum-text pending" }, "Summarizing the week…"));
     } else {
-      wrap.appendChild(el("p", {
-        class: "wsum-text",
-        onclick: () => openWeekSummaryEditor(wk.year, wk.week, list)
-      }, sentenceCase(rec.text)));
+      const open = () => openWeekSummaryEditor(wk.year, wk.week, list);
+      wrap.appendChild(el("span", { class: "wsum-pill", onclick: open }, summaryPill(rec)));
+      wrap.appendChild(el("p", { class: "wsum-text", onclick: open }, sentenceCase(rec.text)));
     }
   }
   return wrap;
@@ -1290,38 +1552,55 @@ function openWeekSummaryEditor(year, week, list) {
   overlay.appendChild(sheet);
 
   sheet.appendChild(el("div", { class: "grabber" }));
+  const pill = el("span", { class: "wsum-pill", style: { cursor: "default", margin: "0" } });
+  const refreshPill = () => {
+    const p = summaryPill(weekSummaries[k]);
+    pill.textContent = p;
+    pill.style.display = p ? "inline-block" : "none";
+  };
   const saveBtn = el("button", {
     class: "save",
     onclick: () => {
       const v = ta.value.trim();
-      if (v) weekSummaries[k] = { ...weekSummaries[k], text: v, edited: true };
-      else delete weekSummaries[k]; // cleared = forget it; a fresh one generates on next render
+      if (v) {
+        const prev = weekSummaries[k];
+        const nowIso = new Date().toISOString();
+        // editing an existing take keeps its bucket (V1 stays V1); a fresh write is MINE
+        weekSummaries[k] = prev
+          ? { ...prev, text: v, edited: true, updatedAt: nowIso }
+          : { text: v, createdAt: nowIso, updatedAt: nowIso, edited: true, origin: "mine" };
+      } else {
+        tombstoneSummary(k);     // sync the clear, not just locally
+        delete weekSummaries[k]; // cleared = forget it; a fresh one generates on next render
+      }
       saveWeekSummaries();
       sheetRoot.innerHTML = "";
       render();
     }
   }, "Save");
   sheet.appendChild(el("div", { class: "sheet-head" },
-    el("span"), el("span", { class: "title" }, "Week summary"), saveBtn));
+    pill, el("span", { class: "title" }, "Week summary"), saveBtn));
 
-  const ta = el("textarea", { rows: "5" });
+  const ta = el("textarea", { rows: "5", placeholder: "this week, in your words…" });
   ta.value = sentenceCase((weekSummaries[k] || {}).text || "");
   sheet.appendChild(ta);
+  refreshPill();
 
-  const resum = el("button", {
-    class: "lock-btn",
-    onclick: async () => {
-      resum.disabled = true;
-      resum.textContent = "summarizing…";
-      delete weekSummaries[k];
-      saveWeekSummaries();
-      await generateWeekSummary(year, week, list);
-      if (weekSummaries[k]) ta.value = sentenceCase(weekSummaries[k].text);
-      resum.disabled = false;
-      resum.textContent = "re-summarize";
-    }
-  }, "re-summarize");
-  sheet.appendChild(resum);
+  if (apiKey) {
+    const resum = el("button", {
+      class: "lock-btn",
+      onclick: async () => {
+        resum.disabled = true;
+        resum.textContent = "summarizing…";
+        await generateWeekSummary(year, week, list); // increments the version off the prior take
+        if (weekSummaries[k]) ta.value = sentenceCase(weekSummaries[k].text);
+        refreshPill();
+        resum.disabled = false;
+        resum.textContent = "re-summarize";
+      }
+    }, "re-summarize");
+    sheet.appendChild(resum);
+  }
 
   sheetRoot.appendChild(overlay);
 }
@@ -1335,9 +1614,10 @@ function segmentText(raw) {
   RICH_RE.lastIndex = 0;
   while ((m = RICH_RE.exec(raw))) {
     if (m.index > last) segs.push({ t: raw.slice(last, m.index) });
-    if (m[1] != null) segs.push({ t: m[1], bold: true });
-    else if (m[5] != null) segs.push({ t: "▓▓▓", redacted: true });
-    else segs.push({ t: m[2] != null ? m[2] : (m[3] != null ? m[3] : m[4]) }); // italic/underline/mono: plain in snippets
+    if (m[1] != null) segs.push({ t: m[1] });                     // link: show its label as plain text
+    else if (m[3] != null) segs.push({ t: m[3], bold: true });
+    else if (m[7] != null) segs.push({ t: "▓▓▓", redacted: true });
+    else segs.push({ t: m[4] != null ? m[4] : (m[5] != null ? m[5] : m[6]) }); // italic/underline/mono: plain in snippets
     last = m.index + m[0].length;
   }
   if (last < raw.length) segs.push({ t: raw.slice(last) });
@@ -1499,9 +1779,46 @@ function openSettings() {
     sheet.innerHTML = "";
     sheet.appendChild(el("div", { class: "grabber" }));
     sheet.appendChild(el("div", { class: "sheet-head" },
-      el("span", { class: "title" }, "Summaries"), el("span")));
+      el("span", { class: "title" }, "Settings"), el("span")));
 
-    sheet.appendChild(el("p", { class: "field-label" }, "anthropic api key"));
+    // ---- cloud sync / account ----
+    sheet.appendChild(el("p", { class: "field-label" }, "cloud sync"));
+    if (!sb) {
+      sheet.appendChild(el("p", { class: "settings-note", style: { margin: "0" } },
+        "sync unavailable — the supabase library didn't load (offline?). the app still works fully on this device."));
+    } else if (session) {
+      const who = (session.user && session.user.email) || "your account";
+      sheet.appendChild(el("p", { class: "settings-note", style: { margin: "0" } },
+        "signed in as " + who + " — entries and summaries sync across your devices and back up to the cloud."));
+      const syncBtn = el("button", { class: "lock-btn", onclick: async () => {
+        syncBtn.disabled = true; syncBtn.textContent = "syncing…";
+        await syncPull(); await pushEntriesNow(); await pushSummariesNow();
+        syncBtn.disabled = false; syncBtn.textContent = "sync now"; render();
+      } }, "sync now");
+      sheet.appendChild(syncBtn);
+      sheet.appendChild(el("button", { class: "lock-btn", onclick: async () => {
+        await signOutSync(); build(); render();
+      } }, "sign out"));
+    } else {
+      const email = el("input", { class: "key-input", type: "email", placeholder: "you@email.com", autocomplete: "email" });
+      sheet.appendChild(email);
+      const status = el("p", { class: "settings-note" },
+        "sign in to sync across devices and back up. one-time — the magic link keeps you signed in on this device.");
+      const linkBtn = el("button", { class: "lock-btn", onclick: async () => {
+        const addr = email.value.trim();
+        if (!addr) return;
+        linkBtn.disabled = true; linkBtn.textContent = "sending…";
+        const { error } = await sendMagicLink(addr);
+        linkBtn.disabled = false; linkBtn.textContent = "email me a magic link";
+        status.textContent = error
+          ? ("couldn't send: " + error.message)
+          : ("sent — open the link in " + addr + " on this device to finish signing in.");
+      } }, "email me a magic link");
+      sheet.appendChild(linkBtn);
+      sheet.appendChild(status);
+    }
+
+    sheet.appendChild(el("p", { class: "field-label", style: { marginTop: "26px" } }, "anthropic api key"));
     const input = el("input", { class: "key-input", type: "password", placeholder: "sk-ant-…", autocomplete: "off" });
     input.value = apiKey || "";
     input.addEventListener("input", () => {
@@ -1606,6 +1923,9 @@ document.getElementById("nextBtn").addEventListener("click", () => {
 });
 
 render();
+
+// restore any existing session and reconcile with the cloud (async; local render already happened)
+initSync();
 </script>
 </body>
 </html>
