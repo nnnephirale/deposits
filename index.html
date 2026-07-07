@@ -379,6 +379,17 @@
     color: var(--ink); background: var(--field); border: none; border-radius: 12px;
     padding: 12px 0;
   }
+  /* sign-in code row: code input + compact verify button side by side */
+  .code-row { display: flex; gap: 8px; margin-top: 10px; }
+  .code-input {
+    flex: 1; min-width: 0; font-family: var(--mono); font-size: 15px; letter-spacing: 2px;
+    text-align: center; color: var(--ink); border: none; outline: none;
+    background: var(--field); border-radius: 12px; padding: 12px 0;
+  }
+  .verify-btn {
+    flex: none; font-size: 15px; color: #fff; background: var(--ink);
+    border: none; border-radius: 12px; padding: 12px 18px;
+  }
   .lock-btn + .delete-btn { margin-top: 10px; }
   .entry-lock { display: inline-flex; align-items: center; }
   .entry-lock svg { display: block; }
@@ -792,9 +803,18 @@ async function pushSummariesNow() {
   } catch (e) { console.warn("sync push summaries failed", e); }
 }
 
-async function sendMagicLink(email) {
+// code, not a link: tapping a link from Mail always opens Safari on iOS, even when the
+// request came from the home-screen web app — iOS has no way to route it back into that
+// app's own (separate) storage. typing a code back into whichever surface asked for it
+// avoids the redirect entirely, so it works identically on iOS Safari, the home-screen
+// app, and desktop.
+async function sendSignInCode(email) {
   if (!sb) return { error: { message: "sync unavailable — SDK didn't load" } };
-  return await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href.split("#")[0].split("?")[0] } });
+  return await sb.auth.signInWithOtp({ email });
+}
+async function verifySignInCode(email, code) {
+  if (!sb) return { error: { message: "sync unavailable — SDK didn't load" } };
+  return await sb.auth.verifyOtp({ email, token: code.trim(), type: "email" });
 }
 async function signOutSync() { if (sb) { try { await sb.auth.signOut(); } catch (e) {} } session = null; }
 
@@ -804,7 +824,7 @@ async function initSync() {
   if (session) { await syncPull(); render(); syncPushEntries(); syncPushSummaries(); }
   sb.auth.onAuthStateChange(async (evt, s) => {
     const had = !!session; session = s || null;
-    if (session && !had && evt !== "TOKEN_REFRESHED") { // fresh sign-in / magic-link return
+    if (session && !had && evt !== "TOKEN_REFRESHED") { // fresh sign-in elsewhere (e.g. another tab)
       await syncPull(); render(); syncPushEntries(); syncPushSummaries();
     }
   });
@@ -1803,18 +1823,48 @@ function openSettings() {
       const email = el("input", { class: "key-input", type: "email", placeholder: "you@email.com", autocomplete: "email" });
       sheet.appendChild(email);
       const status = el("p", { class: "settings-note" },
-        "sign in to sync across devices and back up. one-time — the magic link keeps you signed in on this device.");
-      const linkBtn = el("button", { class: "lock-btn", onclick: async () => {
-        const addr = email.value.trim();
-        if (!addr) return;
-        linkBtn.disabled = true; linkBtn.textContent = "sending…";
-        const { error } = await sendMagicLink(addr);
-        linkBtn.disabled = false; linkBtn.textContent = "email me a magic link";
-        status.textContent = error
-          ? ("couldn't send: " + error.message)
-          : ("sent — open the link in " + addr + " on this device to finish signing in.");
-      } }, "email me a magic link");
-      sheet.appendChild(linkBtn);
+        "sign in to sync across devices and back up. request a code and type it in right here — " +
+        "works the same on ios safari, the home-screen app, or desktop, since nothing has to leave this screen.");
+
+      const codeRow = el("div", { class: "code-row", style: { display: "none" } });
+      const codeInput = el("input", {
+        class: "code-input", type: "text", inputmode: "numeric", pattern: "[0-9]*",
+        autocomplete: "one-time-code", placeholder: "123456", maxlength: "6"
+      });
+      const verifyBtn = el("button", {
+        class: "verify-btn",
+        onclick: async () => {
+          const addr = email.value.trim(), code = codeInput.value.trim();
+          if (!addr || !code) return;
+          verifyBtn.disabled = true; verifyBtn.textContent = "…";
+          const { data, error } = await verifySignInCode(addr, code);
+          verifyBtn.disabled = false; verifyBtn.textContent = "verify";
+          if (error) { status.textContent = "couldn't verify: " + error.message; return; }
+          session = data.session; // set directly rather than waiting on the auth-state event
+          await syncPull(); render(); syncPushEntries(); syncPushSummaries();
+          build(); // re-render settings as signed-in
+        }
+      }, "verify");
+      codeRow.appendChild(codeInput);
+      codeRow.appendChild(verifyBtn);
+
+      const sendBtn = el("button", {
+        class: "lock-btn",
+        onclick: async () => {
+          const addr = email.value.trim();
+          if (!addr) return;
+          sendBtn.disabled = true; sendBtn.textContent = "sending…";
+          const { error } = await sendSignInCode(addr);
+          sendBtn.disabled = false;
+          if (error) { status.textContent = "couldn't send: " + error.message; return; }
+          sendBtn.textContent = "resend code";
+          status.textContent = "code sent to " + addr + " — enter it below.";
+          codeRow.style.display = "flex";
+          codeInput.focus();
+        }
+      }, "email me a sign-in code");
+      sheet.appendChild(sendBtn);
+      sheet.appendChild(codeRow);
       sheet.appendChild(status);
     }
 
