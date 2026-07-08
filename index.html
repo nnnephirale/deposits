@@ -1827,9 +1827,11 @@ function openSettings() {
         "works the same on ios safari, the home-screen app, or desktop, since nothing has to leave this screen.");
 
       const codeRow = el("div", { class: "code-row", style: { display: "none" } });
+      // OTP length is a Supabase project setting, not something this app controls (hers sends
+      // 8 digits) — don't hardcode a length, just accept whatever arrives.
       const codeInput = el("input", {
         class: "code-input", type: "text", inputmode: "numeric", pattern: "[0-9]*",
-        autocomplete: "one-time-code", placeholder: "123456", maxlength: "6"
+        autocomplete: "one-time-code", placeholder: "code"
       });
       const verifyBtn = el("button", {
         class: "verify-btn",
