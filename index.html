@@ -42,7 +42,11 @@
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     padding: calc(env(safe-area-inset-top) + 16px) 0 12px;
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   }
+  /* scrolling down tucks the header away; any scroll up brings it back */
+  .header.hidden { transform: translateY(-100%); }
+  @media (prefers-reduced-motion: reduce) { .header { transition: none; } }
   .header::after { /* frosted gradient hanging under the header instead of a hard edge */
     content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 22px;
     background: rgba(242,242,247,0.85);
@@ -167,6 +171,12 @@
     font-family: var(--mono); font-size: 0.85em;
     background: var(--field); padding: 1px 5px; border-radius: 5px;
   }
+  /* line formatting: "- " lines render as bullets, leading two-space units as indent */
+  .rt-line { padding-left: calc(var(--ind, 0) * 16px); }
+  .rt-line:empty::before { content: "\00a0"; }
+  .rt-bullet { display: flex; gap: 7px; }
+  .rt-dot { flex: none; color: #C7C7CC; user-select: none; -webkit-user-select: none; }
+  .rt-body { flex: 1; min-width: 0; }
   /* inline link — a tappable mono pill; label defaults to the domain, editable in raw text */
   .rt-link {
     display: inline-flex; align-items: center; gap: 3px;
@@ -194,9 +204,13 @@
   .redacted.revealed { color: inherit; background: var(--field); animation: none; }
   @media (prefers-reduced-motion: reduce) { .redacted { animation: none; } }
 
-  /* format bar (shown while text is selected in the composer) */
+  /* format bar — line ops (bullet/indent) while just typing, span ops (B I U…) once
+     text is selected. one slim row either way; the contents swap, the row never grows. */
   .fmt-bar { display: none; gap: 8px; margin-top: 8px; }
   .fmt-bar.show { display: flex; }
+  .fmt-bar .sel-only, .fmt-bar .line-only { display: none; }
+  .fmt-bar.has-sel .sel-only { display: block; }
+  .fmt-bar:not(.has-sel) .line-only { display: block; }
   .fmt-btn {
     flex: 1; font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
     background: var(--field); color: var(--ink); border: none; border-radius: 8px;
@@ -236,13 +250,16 @@
     margin: 0; cursor: pointer;
   }
   .wsum-text.pending { color: var(--subtle); }
-  /* provenance pill: MINE (hand-written) / V1 (first AI take) / V2… (re-summarized) */
+  /* provenance pill: MINE (hand-written) / V1 (first AI take) / V2… (re-summarized).
+     when a week holds several takes, all show — active one filled, tap another to switch. */
   .wsum-pill {
     display: inline-block; font-family: var(--mono); font-size: 10px;
     letter-spacing: 0.6px; text-transform: uppercase; color: var(--subtle);
     background: var(--field); border-radius: 5px; padding: 2px 6px;
     line-height: 1; margin: 0 0 6px; cursor: pointer;
   }
+  .wsum-pill + .wsum-pill { margin-left: 4px; }
+  .wsum-pill.on { background: var(--ink); color: #fff; }
   /* faint invitation to hand-write a summary when none exists / AI won't auto-generate */
   .wsum-add {
     font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
@@ -482,6 +499,7 @@ const TOPICS = [
   { id: "home", label: "home", bg: "#F2ECDF", fg: "#8A6D2F", dot: "#B39554" },
   { id: "listening", label: "listening to", bg: "#E5E7FB", fg: "#4A50A8", dot: "#7B80D4" },
   { id: "discovered", label: "discovered ✨", bg: "#FFF6D9", fg: "#9C7A00", dot: "#E8C24A" },
+  { id: "lookgood", label: "look good feel good", bg: "#F7E6F4", fg: "#9A3E8C", dot: "#C86EB8" },
 ];
 const MODES = [
   { id: "remember", label: "i want to remember" },
@@ -607,7 +625,7 @@ function domainOf(u) {
 // so truncation shows ▓▓▓ and the summarizer never sees redacted content at all. links flatten
 // to their label so search/summaries see the readable text, never the raw url.
 function plainText(t, redactedAs) {
-  return t.replace(RICH_RE, (m0, linkLabel, linkUrl, b, i, u, mono, red) => {
+  return t.replace(/^[ \t]*[-—] /gm, "").replace(RICH_RE, (m0, linkLabel, linkUrl, b, i, u, mono, red) => {
     if (linkLabel != null) return linkLabel;
     if (red != null) return redactedAs === "keep" ? red : redactedAs;
     return b != null ? b : i != null ? i : u != null ? u : mono;
@@ -646,6 +664,30 @@ function renderRich(text) {
   return frag;
 }
 
+// line-level pass over renderRich: "- " at line start renders as a bullet row (hanging
+// indent via flex), leading two-space units as indentation. entries without either take
+// the plain renderRich path untouched, so nothing existing changes appearance.
+function renderRichBlocks(text) {
+  if (!/^[ \t]*[-—] |^(?: {2}|\t)\S/m.test(text)) return renderRich(text);
+  const frag = document.createDocumentFragment();
+  for (const line of text.split("\n")) {
+    const m = /^([ \t]*)([-—] )?(.*)$/.exec(line);
+    const ind = Math.floor(m[1].replace(/\t/g, "  ").length / 2);
+    const row = el("div", { class: "rt-line" + (m[2] ? " rt-bullet" : "") });
+    if (ind) row.style.setProperty("--ind", ind);
+    if (m[2]) {
+      row.appendChild(el("span", { class: "rt-dot" }, "•"));
+      const body = el("span", { class: "rt-body" });
+      body.appendChild(renderRich(m[3]));
+      row.appendChild(body);
+    } else {
+      row.appendChild(renderRich(m[3]));
+    }
+    frag.appendChild(row);
+  }
+  return frag;
+}
+
 // per-entry LLM summaries were tried and removed (5 Jul 2026) — truncation is enough
 // for the zoomed-out view. old e.summary fields in stored data are simply ignored.
 function compactText(e) { return truncateWords(plainText(e.text, "▓▓▓"), 12) + "…"; }
@@ -660,7 +702,34 @@ let weekSummaries = {};
 try { weekSummaries = JSON.parse(localStorage.getItem(WEEK_SUM_KEY)) || {}; } catch (e) {}
 let showWeekSummary = true;
 try { showWeekSummary = localStorage.getItem(SHOW_WSUM_KEY) !== "0"; } catch (e) {}
+
+// every take a week has ever had, keyed by its pill identity ("mine" / "v1" / "v2"…), so
+// re-summarizing no longer discards the previous take — the pills toggle between them.
+// device-local only: the cloud row stays one-summary-per-week (the currently chosen one),
+// so the switch itself syncs, but the back-catalogue doesn't travel across devices.
+const WEEK_SUM_VERS_KEY = "weekly-deposits-week-summary-versions";
+let weekSummaryVersions = {};
+try { weekSummaryVersions = JSON.parse(localStorage.getItem(WEEK_SUM_VERS_KEY)) || {}; } catch (e) {}
+function saveWeekSummaryVersions() {
+  try { localStorage.setItem(WEEK_SUM_VERS_KEY, JSON.stringify(weekSummaryVersions)); } catch (e) {}
+}
+function summarySlot(rec) { return rec.origin === "mine" ? "mine" : "v" + (rec.version || 1); }
+// next AI version counts across the whole back-catalogue, so V2 never overwrites an archived V2
+function nextAiVersion(k) {
+  let v = 0;
+  const cur = weekSummaries[k];
+  if (cur && cur.origin !== "mine") v = cur.version || 1;
+  for (const [slot, rec] of Object.entries(weekSummaryVersions[k] || {}))
+    if (slot !== "mine") v = Math.max(v, rec.version || 1);
+  return v + 1;
+}
+
 function saveWeekSummaries() {
+  // current record always lands in its version slot too, so no take is ever lost
+  for (const [k, rec] of Object.entries(weekSummaries)) {
+    (weekSummaryVersions[k] = weekSummaryVersions[k] || {})[summarySlot(rec)] = rec;
+  }
+  saveWeekSummaryVersions();
   try { localStorage.setItem(WEEK_SUM_KEY, JSON.stringify(weekSummaries)); } catch (e) {}
   if (typeof summaryTombstones === "object") { // a live summary supersedes any prior clear of the same week
     let touched = false;
@@ -747,6 +816,7 @@ async function syncPull() {
       const k = r.week_key;
       if (r.deleted_at) {
         if (weekSummaries[k]) { delete weekSummaries[k]; changed = true; }
+        if (weekSummaryVersions[k]) { delete weekSummaryVersions[k]; saveWeekSummaryVersions(); } // remote clear = start over
         summaryTombstones[k] = r.deleted_at;
         continue;
       }
@@ -859,10 +929,9 @@ async function generateWeekSummary(year, week, list) {
     const data = await r.json();
     const s = ((data.content && data.content[0] && data.content[0].text) || "").trim();
     if (!s) return;
-    // version tracks AI takes only: first take is V1, each re-summarize bumps it.
-    // a prior hand-written (mine) or empty slot resets the AI count to V1.
-    const prev = weekSummaries[k];
-    const version = (prev && prev.origin === "ai" ? (prev.version || 1) : 0) + 1;
+    // version tracks AI takes only: first take is V1, each re-summarize bumps it —
+    // counted across the week's whole back-catalogue so old takes are never overwritten
+    const version = nextAiVersion(k);
     const nowIso = new Date().toISOString();
     weekSummaries[k] = { text: s, createdAt: nowIso, updatedAt: nowIso, edited: false, origin: "ai", version };
     saveWeekSummaries();
@@ -993,7 +1062,7 @@ function entryEl(e, opts) {
   const collapse = compactView && entryWords(e) > SUMMARY_MIN_WORDS;
   const p = el("p");
   if (collapse) p.textContent = compactText(e);
-  else p.appendChild(renderRich(e.text));
+  else p.appendChild(renderRichBlocks(e.text));
   entry.appendChild(p);
   const meta = el("div", { class: "entry-meta" });
   if (e.locked) {
@@ -1253,10 +1322,15 @@ function openComposer(existing) {
     sheet.appendChild(ta);
     requestAnimationFrame(autoGrow); // ta isn't attached to the document until after build() returns
 
-    // ---- format bar: appears when text is selected, wraps/unwraps markers ----
+    // ---- format bar: line ops (• ⇥ ⇤) while just typing, span ops (B I U M R L)
+    // once text is selected — the row swaps contents rather than growing ----
     const fmtBar = el("div", { class: "fmt-bar" });
-    const updateBar = () => fmtBar.classList.toggle("show", ta.selectionStart !== ta.selectionEnd);
-    ["select", "keyup", "pointerup", "touchend", "input", "blur"].forEach(evt => ta.addEventListener(evt, updateBar));
+    const updateBar = () => {
+      const hasSel = ta.selectionStart !== ta.selectionEnd;
+      fmtBar.classList.toggle("has-sel", hasSel);
+      fmtBar.classList.toggle("show", hasSel || document.activeElement === ta);
+    };
+    ["select", "keyup", "pointerup", "touchend", "input", "focus", "blur"].forEach(evt => ta.addEventListener(evt, updateBar));
 
     function wrapSel(pre, post) {
       const s = ta.selectionStart, en = ta.selectionEnd;
@@ -1311,13 +1385,67 @@ function openComposer(existing) {
       updateBar();
     }
 
+    // line ops act on the line the cursor sits in — no selection needed.
+    // marker is captured (group 2) so continuation preserves "- " or "— " as typed.
+    const BULLET_LINE = /^([ \t]*)([-—] )(.*)$/;
+    function lineOp(transform) {
+      const v = ta.value, s = ta.selectionStart;
+      const ls = v.lastIndexOf("\n", s - 1) + 1;
+      let le = v.indexOf("\n", s); if (le === -1) le = v.length;
+      const line = v.slice(ls, le);
+      const nl = transform(line);
+      if (nl !== line) {
+        ta.value = v.slice(0, ls) + nl + v.slice(le);
+        const pos = Math.min(Math.max(ls, s + nl.length - line.length), ls + nl.length);
+        text = ta.value;
+        saveBtn.disabled = !text.trim();
+        ta.setSelectionRange(pos, pos);
+        autoGrow();
+      }
+      ta.focus();
+      updateBar();
+    }
+    [["•", line => {
+        const m = BULLET_LINE.exec(line);
+        return m ? m[1] + m[3] : line.replace(/^([ \t]*)/, "$1- "); // toggle off drops the marker; on inserts "- "
+      }],
+     ["⇥", line => "  " + line],
+     ["⇤", line => line.startsWith("  ") ? line.slice(2) : line.replace(/^[ \t]/, "")]
+    ].forEach(([label, transform]) => {
+      const b = el("button", { class: "fmt-btn line-only", onclick: () => lineOp(transform) }, label);
+      b.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused
+      fmtBar.appendChild(b);
+    });
+
+    // enter on a bullet line continues the list; enter on an empty bullet ends it
+    ta.addEventListener("keydown", ev => {
+      if (ev.key !== "Enter" || ta.selectionStart !== ta.selectionEnd) return;
+      const v = ta.value, s = ta.selectionStart;
+      const ls = v.lastIndexOf("\n", s - 1) + 1;
+      let le = v.indexOf("\n", s); if (le === -1) le = v.length;
+      const m = BULLET_LINE.exec(v.slice(ls, le));
+      if (!m) return;
+      ev.preventDefault();
+      if (!m[3].trim()) {
+        ta.value = v.slice(0, ls) + v.slice(le); // empty bullet: drop the marker instead of adding a line
+        ta.setSelectionRange(ls, ls);
+      } else {
+        const ins = "\n" + m[1] + m[2]; // continue with the same marker + indent
+        ta.value = v.slice(0, s) + ins + v.slice(s);
+        ta.setSelectionRange(s + ins.length, s + ins.length);
+      }
+      text = ta.value;
+      saveBtn.disabled = !text.trim();
+      autoGrow();
+    });
+
     [["B", "**", "**", "fmt-b"], ["I", "*", "*", "fmt-i"], ["U", "__", "__", "fmt-u"],
      ["M", "`", "`", "fmt-m"], ["R", "||", "||", "fmt-r"]].forEach(([label, pre, post, cls]) => {
-      const b = el("button", { class: "fmt-btn " + cls, onclick: () => wrapSel(pre, post) }, label);
+      const b = el("button", { class: "fmt-btn sel-only " + cls, onclick: () => wrapSel(pre, post) }, label);
       b.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused + selection alive
       fmtBar.appendChild(b);
     });
-    const linkBtn = el("button", { class: "fmt-btn fmt-l", onclick: linkSel }, "L");
+    const linkBtn = el("button", { class: "fmt-btn sel-only fmt-l", onclick: linkSel }, "L");
     linkBtn.addEventListener("pointerdown", ev => ev.preventDefault());
     fmtBar.appendChild(linkBtn);
     sheet.appendChild(fmtBar);
@@ -1523,16 +1651,29 @@ function summaryPill(rec) {
   return rec.origin === "mine" ? "MINE" : "V" + (rec.version || 1);
 }
 
+// the week's summary surface only wakes at its own friday 18:00 (local time) — the week
+// should be basically lived before it's reflected on, even if it already meets the
+// day-count/key requirements. past weeks are always past their friday; future weeks aren't.
+function weekSummaryUnlocked(year, week) {
+  const mon = mondayOfISOWeek(year, week);
+  const fri = new Date(mon);
+  fri.setUTCDate(mon.getUTCDate() + 4); // Mon + 4 = Fri (day index 4)
+  const unlockAt = new Date(fri.getUTCFullYear(), fri.getUTCMonth(), fri.getUTCDate(), 18, 0, 0, 0);
+  return new Date() >= unlockAt;
+}
+
 function weekSummaryBlock(list) {
   const k = weekKey(wk.year, wk.week);
   const rec = weekSummaries[k];
   const filledDays = new Set(list.map(entryDay).filter(d => d != null)).size;
-  const aiEligible = filledDays >= 3 && apiKey;
+  const unlocked = weekSummaryUnlocked(wk.year, wk.week);
+  const aiEligible = filledDays >= 3 && apiKey && unlocked;
 
-  // no summary yet and AI won't auto-generate → offer to hand-write one (saves as MINE).
-  // suppressed when the whole summary surface is hidden.
+  // no summary yet and AI won't auto-generate → offer to hand-write one (saves as MINE),
+  // but only once the week has reached its friday 6pm. before that the whole surface stays
+  // dormant (no invite, no eye) unless a record already exists. suppressed when hidden too.
   if (!rec && !aiEligible) {
-    if (!showWeekSummary) return null;
+    if (!showWeekSummary || !unlocked) return null;
     const wrap = el("div", { class: "wsum" });
     wrap.appendChild(el("button", {
       class: "wsum-add",
@@ -1557,11 +1698,34 @@ function weekSummaryBlock(list) {
       wrap.appendChild(el("p", { class: "wsum-text pending" }, "Summarizing the week…"));
     } else {
       const open = () => openWeekSummaryEditor(wk.year, wk.week, list);
-      wrap.appendChild(el("span", { class: "wsum-pill", onclick: open }, summaryPill(rec)));
+      // every take the week has: V1…Vn then MINE. active pill opens the editor,
+      // any other pill switches the week to that take (and the choice persists/syncs).
+      const slots = { ...(weekSummaryVersions[k] || {}) };
+      slots[summarySlot(rec)] = rec;
+      const ids = Object.keys(slots).sort((a, b) =>
+        ((a === "mine") - (b === "mine")) || (parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10)));
+      const cur = summarySlot(rec);
+      for (const id of ids) {
+        const on = id === cur;
+        wrap.appendChild(el("span", {
+          class: "wsum-pill" + (on && ids.length > 1 ? " on" : ""),
+          onclick: on ? open : () => switchWeekSummary(k, slots[id])
+        }, id === "mine" ? "MINE" : id.toUpperCase()));
+      }
       wrap.appendChild(el("p", { class: "wsum-text", onclick: open }, sentenceCase(rec.text)));
     }
   }
   return wrap;
+}
+
+// bring an earlier take back: it becomes the week's current record with a fresh
+// updatedAt, so the choice both survives reloads and wins last-write-wins in sync
+function switchWeekSummary(k, target) {
+  const cur = weekSummaries[k];
+  if (cur) (weekSummaryVersions[k] = weekSummaryVersions[k] || {})[summarySlot(cur)] = cur;
+  weekSummaries[k] = { ...target, updatedAt: new Date().toISOString() };
+  saveWeekSummaries();
+  render();
 }
 
 function openWeekSummaryEditor(year, week, list) {
@@ -1592,6 +1756,8 @@ function openWeekSummaryEditor(year, week, list) {
       } else {
         tombstoneSummary(k);     // sync the clear, not just locally
         delete weekSummaries[k]; // cleared = forget it; a fresh one generates on next render
+        delete weekSummaryVersions[k]; // start over means the back-catalogue goes too
+        saveWeekSummaryVersions();
       }
       saveWeekSummaries();
       sheetRoot.innerHTML = "";
@@ -1958,6 +2124,25 @@ fab.addEventListener("click", () => {
   if (fabMode === "add") openComposer(null);
   else doExport();
 });
+
+// ---------- header hides on scroll down, returns on scroll up ----------
+const headerEl = document.querySelector(".header");
+let headerLastY = window.scrollY, headerHidden = false;
+function setHeaderHidden(h) {
+  if (headerHidden === h) return;
+  headerHidden = h;
+  headerEl.classList.toggle("hidden", h);
+}
+window.addEventListener("scroll", () => {
+  const y = window.scrollY;
+  const dy = y - headerLastY;
+  headerLastY = y;
+  if (document.body.style.position === "fixed") return; // sheet open: the jump to 0 isn't a real scroll
+  if (Math.abs(dy) > 240) return; // programmatic jump (sheet-close restore), not a finger
+  if (y < 70) { setHeaderHidden(false); return; } // near the top the header always shows
+  if (dy > 4) setHeaderHidden(true);
+  else if (dy < -4) setHeaderHidden(false);
+}, { passive: true });
 
 // ---------- wiring ----------
 document.getElementById("searchBtn").addEventListener("click", openSearch);
