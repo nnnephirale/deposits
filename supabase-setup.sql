@@ -18,11 +18,19 @@ create table if not exists public.deposits_entries (
   week        int,                                     -- ISO week number
   day         int,                                     -- 0-6 (Mon=0), null = no day
   locked      boolean not null default false,
+  source_id   text,                                    -- set on deposits cut from a ramble: id of the hidden original
+  segmented   boolean not null default false,          -- true on a ramble original that now lives behind its deposits
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),      -- bumped on edit; drives last-write-wins
   deleted_at  timestamptz                              -- soft delete so removals sync across devices
 );
 create index if not exists deposits_entries_user_idx on public.deposits_entries(user_id);
+
+-- ---------- migration for existing installs (17 Jul 2026: ramble segmentation) ----------
+-- Safe to re-run; no-ops once the columns exist. Until this runs, the app pushes
+-- without these columns (it detects the missing-column error and retries stripped).
+alter table public.deposits_entries add column if not exists source_id text;
+alter table public.deposits_entries add column if not exists segmented boolean not null default false;
 
 -- ---------- weekly summaries ----------
 create table if not exists public.deposits_week_summaries (

@@ -393,6 +393,29 @@
     font-size: 13px; color: var(--subtle); background: none; border: none;
     margin-top: 8px; padding: 0; text-decoration: underline;
   }
+  /* segmentation: a long ramble can be broken into separate deposits. the offer link
+     lives under the format bar; the preview shows the proposed cuts as entry-like
+     blocks, each with its suggested topic pill and a JOIN control on the divider. */
+  .seg-offer {
+    display: block; font-size: 13px; color: var(--subtle); background: none; border: none;
+    margin-top: 10px; padding: 0; text-decoration: underline;
+  }
+  .seg-offer.pending { text-decoration: none; animation: segPulse 1.6s ease-in-out infinite; }
+  @keyframes segPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  .seg-note { font-size: 13px; color: var(--subtle); margin: 10px 0 0; }
+  .seg-list { margin-top: 2px; }
+  .seg-block { padding: 13px 16px; }
+  .seg-block p { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+  .seg-join { position: relative; height: 0; border-top: 1px solid var(--hairline); }
+  .seg-join button {
+    position: absolute; left: 50%; top: -9px; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.6px; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px; line-height: 1;
+    border: 1px solid var(--hairline); background: var(--card); color: var(--subtle);
+  }
+  .seg-join button::after { content: ""; position: absolute; inset: -10px -8px; } /* forgiving tap zone */
+  button.pill { border: none; padding: 3px 8px; cursor: pointer; }
+  .ramble-text { margin: 0 0 8px; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
   .delete-btn {
     display: block; width: 100%; margin-top: 22px; font-size: 15px;
     color: #C43C36; background: #FBE3E1; border: none; border-radius: 12px;
@@ -606,6 +629,13 @@ let compactView = false; // pinch out on the list -> long entries collapse to su
 // truncation. Key is user-supplied, stored only in this device's localStorage.
 const API_KEY_KEY = "weekly-deposits-anthropic-key";
 const SUMMARY_MIN_WORDS = 20;
+
+// A ramble this long grows a quiet "break into deposits" offer in the composer.
+// Segmentation cuts the entry into separate deposits at AI-found seams — the model
+// only returns verbatim anchors, the app does the cutting, so the text is never
+// rewritten. Needs the API key, like the week summary.
+const SEGMENT_MIN_LINES = 6;
+const SEGMENT_MIN_WORDS = 80;
 let apiKey = null;
 try { apiKey = localStorage.getItem(API_KEY_KEY) || null; } catch (e) {}
 
@@ -780,7 +810,8 @@ function entryToRow(e) {
     id: e.id, user_id: session.user.id,
     text: e.text || "", tags: e.tags || [],
     year: e.year ?? null, week: e.week ?? null, day: ("day" in e ? e.day : null),
-    locked: !!e.locked, created_at: e.createdAt, updated_at: e.updatedAt || e.createdAt,
+    locked: !!e.locked, source_id: e.sourceId || null, segmented: !!e.segmented,
+    created_at: e.createdAt, updated_at: e.updatedAt || e.createdAt,
     deleted_at: null
   };
 }
@@ -788,6 +819,7 @@ function rowToEntry(r) {
   return {
     id: r.id, text: r.text || "", tags: r.tags || [],
     year: r.year, week: r.week, day: r.day, locked: !!r.locked,
+    sourceId: r.source_id || null, segmented: !!r.segmented,
     createdAt: r.created_at, updatedAt: r.updated_at
   };
 }
@@ -852,11 +884,20 @@ async function pushEntriesNow() {
     const rows = entries.map(entryToRow);
     for (const [id, ts] of Object.entries(tombstones)) {
       rows.push({ id, user_id: session.user.id, text: "", tags: [], year: null, week: null,
-        day: null, locked: false, created_at: ts, updated_at: ts, deleted_at: ts });
+        day: null, locked: false, source_id: null, segmented: false,
+        created_at: ts, updated_at: ts, deleted_at: ts });
     }
     if (rows.length) {
       const { error } = await sb.from("deposits_entries").upsert(rows, { onConflict: "id" });
-      if (error) throw error;
+      if (error && (error.code === "PGRST204" || /column/i.test(error.message || ""))) {
+        // segments migration not run yet — push without the new columns so sync never stalls.
+        // run in supabase: alter table deposits_entries add column if not exists source_id text;
+        //                  alter table deposits_entries add column if not exists segmented boolean not null default false;
+        console.warn("deposits: segments columns missing in cloud — run the migration; pushing without them");
+        const stripped = rows.map(({ source_id, segmented, ...rest }) => rest);
+        const { error: e2 } = await sb.from("deposits_entries").upsert(stripped, { onConflict: "id" });
+        if (e2) throw e2;
+      } else if (error) throw error;
     }
   } catch (e) { console.warn("sync push entries failed", e); }
 }
@@ -950,15 +991,82 @@ async function generateWeekSummary(year, week, list) {
   }
 }
 
+// ---------- ramble segmentation ----------
+// breaks one long entry into several deposits. the model never writes anything: it only
+// returns the verbatim first words of each proposed segment (plus a topic guess), and the
+// app cuts the original string itself — so every deposit is exactly her words. anchors
+// that can't be found verbatim simply dissolve into the previous segment.
+function segmentAnchorsToRanges(text, items) {
+  // whitespace/case-insensitive verbatim search: normalize the haystack once,
+  // keeping a map from each normalized char back to its original index
+  const map = []; let norm = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (/\s/.test(c)) {
+      if (!norm || norm.endsWith(" ")) continue;
+      norm += " "; map.push(i);
+    } else {
+      norm += c.toLowerCase(); map.push(i);
+    }
+  }
+  const starts = [{ at: 0, topic: null }]; // segment 1 always starts at the very beginning
+  let from = 0;
+  items.forEach((it, i) => {
+    const topic = topicById[it.topic] ? it.topic : null;
+    const nq = String(it.first_words || "").toLowerCase().replace(/\s+/g, " ").trim();
+    if (!nq) return;
+    const at = norm.indexOf(nq, from);
+    if (at === -1) return;
+    from = at + nq.length;
+    const last = starts[starts.length - 1];
+    if (i === 0 || map[at] <= last.at) {
+      if (!last.topic) last.topic = topic; // seam collapses into the previous segment
+      return;
+    }
+    starts.push({ at: map[at], topic });
+  });
+  return starts
+    .map((s, i) => ({ start: s.at, end: i + 1 < starts.length ? starts[i + 1].at : text.length, topic: s.topic }))
+    .filter(rg => text.slice(rg.start, rg.end).trim());
+}
+
+async function segmentRamble(text) {
+  const topicList = TOPICS.map(t => t.id + " (" + t.label + ")").join(", ");
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 600,
+      system: "You segment one long journal ramble into 2-6 self-contained deposits. Never rewrite, reorder, summarize or add words — you only decide where one thought ends and the next begins. Cut at genuine shifts of subject; prefer fewer, meatier segments over many tiny ones. Reply with only strict JSON, no code fences: {\"segments\":[{\"first_words\":string,\"topic\":string|null}]}. first_words is the exact first 4-8 words of that segment, copied verbatim from the input including punctuation and markdown markers. The first segment starts at the very beginning of the input. topic is the single best-fitting id from [" + topicList + "], or null if none fits.",
+      messages: [{ role: "user", content: text }]
+    })
+  });
+  if (!r.ok) throw new Error("api " + r.status);
+  const data = await r.json();
+  let raw = ((data.content && data.content[0] && data.content[0].text) || "").trim();
+  raw = raw.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
+  const parsed = JSON.parse(raw);
+  const list = Array.isArray(parsed) ? parsed : parsed.segments;
+  if (!Array.isArray(list) || !list.length) throw new Error("bad segments payload");
+  return segmentAnchorsToRanges(text, list);
+}
+
 // ---------- grouping + markdown ----------
 function activeEntries() {
   if (view === "week") {
     return entries
-      .filter(e => e.year === wk.year && e.week === wk.week)
+      .filter(e => !e.segmented && e.year === wk.year && e.week === wk.week)
       .sort((a, b) => (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
   }
   return entries
     .filter(e => {
+      if (e.segmented) return false; // ramble originals live behind their segments, not in views
       const mon = mondayOfISOWeek(e.year, e.week);
       const thu = new Date(mon);
       thu.setUTCDate(mon.getUTCDate() + 3); // week belongs to the month its Thursday is in
@@ -1201,6 +1309,8 @@ function openComposer(existing) {
     : (view === "week" ? { year: wk.year, week: wk.week } : getISOWeek(new Date()));
   let day = existing ? entryDay(existing) : weekdayIndex(new Date());
   const nowWk = getISOWeek(new Date());
+  // segmentation proposal: null | { busy: true } | { ranges: [{start, end, topic}] }
+  let segState = null, segErr = null, segTagOpen = -1;
 
   sheetRoot.innerHTML = ""; // never stack on another sheet (composer can open from search results)
   lockPageScroll();
@@ -1213,6 +1323,7 @@ function openComposer(existing) {
   // brand-new entry with text AND edits to an existing one; an unchanged entry (just opened
   // to read) or an empty new composer dismisses without friction.
   function isDirty() {
+    if (segState && segState.ranges) return true; // an unsaved cut proposal counts as work
     if (!existing) return !!text.trim();
     if (text.trim() !== (existing.text || "").trim()) return true;
     if (locked !== !!existing.locked) return true;
@@ -1319,26 +1430,60 @@ function openComposer(existing) {
       render();
     }
 
+    // saving a segmentation writes the ramble as a hidden source entry plus one
+    // deposit per block — every block is a verbatim slice of the original text.
+    function doSaveSegments() {
+      const ranges = segState.ranges;
+      const stamp = new Date().toISOString();
+      const base = Date.now().toString(36);
+      let src;
+      if (existing) {
+        src = { ...existing, text: text.trim(), tags, year: cw.year, week: cw.week, day, locked,
+          segmented: true, updatedAt: stamp };
+        entries = entries.map(e => e.id === existing.id ? src : e);
+      } else {
+        src = { id: base, createdAt: stamp, updatedAt: stamp, text: text.trim(), tags,
+          year: cw.year, week: cw.week, day, locked, segmented: true };
+        entries = [...entries, src];
+      }
+      const modeTags = tags.filter(t => modeById[t]); // modes chosen for the ramble carry to every deposit
+      const segs = ranges.map((rg, i) => ({
+        id: base + "s" + i, createdAt: stamp, updatedAt: stamp,
+        text: text.slice(rg.start, rg.end).trim(),
+        tags: [...(rg.topic ? [rg.topic] : []), ...modeTags],
+        year: cw.year, week: cw.week, day, locked: false, sourceId: src.id
+      }));
+      entries = [...entries, ...segs];
+      saveEntries(entries);
+      close();
+      render();
+    }
+
     const saveBtn = el("button", {
       class: "save",
       onclick: () => {
         if (!text.trim()) return;
+        const save = (segState && segState.ranges) ? doSaveSegments : doSave;
         // moving an existing entry to a different week is easy to do by accident — confirm it
         if (existing && (cw.year !== existing.year || cw.week !== existing.week)) {
           const from = "W" + pad2(existing.week) + (existing.year !== cw.year ? " " + existing.year : "");
           const to = "W" + pad2(cw.week) + (existing.year !== cw.year ? " " + cw.year : "");
-          confirmAction("Move this entry from " + from + " to " + to + "?", "Move", doSave);
+          confirmAction("Move this entry from " + from + " to " + to + "?", "Move", save);
         } else {
-          doSave();
+          save();
         }
       }
     }, "Save");
     saveBtn.disabled = !text.trim();
 
     head.appendChild(dayPill);
-    head.appendChild(el("span", { class: "title" }, existing ? "Edit entry" : "New entry"));
+    head.appendChild(el("span", { class: "title" },
+      segState && segState.ranges ? segState.ranges.length + " deposits" : (existing ? "Edit entry" : "New entry")));
     head.appendChild(saveBtn);
     sheet.appendChild(head);
+
+    // ---- segmentation preview: the ramble cut into blocks, nothing else on the sheet ----
+    if (segState && segState.ranges) { buildSegPreview(); return; }
 
     // ---- text ----
     const ta = el("textarea", { rows: "4", placeholder: "deposit a thought\u2026" });
@@ -1478,6 +1623,35 @@ function openComposer(existing) {
     fmtBar.appendChild(linkBtn);
     sheet.appendChild(fmtBar);
 
+    // ---- segmentation offer: appears once the ramble is long enough (and a key exists) ----
+    const segOffer = segState && segState.busy
+      ? el("p", { class: "seg-offer pending" }, "finding the seams…")
+      : el("button", { class: "seg-offer", onclick: runSegmentation }, "break into deposits");
+    sheet.appendChild(segOffer);
+    if (segErr && !(segState && segState.busy)) sheet.appendChild(el("p", { class: "seg-note" }, segErr));
+    updateSegOffer();
+    function updateSegOffer() {
+      const lines = text.split("\n").filter(l => l.trim()).length;
+      const long = lines >= SEGMENT_MIN_LINES || wordCount(plainText(text, "x")) >= SEGMENT_MIN_WORDS;
+      segOffer.style.display = (apiKey && long) ? "" : "none";
+    }
+    ta.addEventListener("input", updateSegOffer);
+
+    async function runSegmentation() {
+      if (segState) return;
+      segErr = null; segState = { busy: true }; build();
+      try {
+        const ranges = await segmentRamble(text);
+        if (ranges.length < 2) throw new Error("only one thought found");
+        segState = { ranges }; segTagOpen = -1;
+      } catch (err) {
+        console.warn("segmentation failed", err);
+        segState = null;
+        segErr = "couldn't find clean seams — try again";
+      }
+      build();
+    }
+
     // ---- topics ----
     sheet.appendChild(el("p", { class: "field-label" }, "topic"));
     const topicChips = el("div", { class: "chips" });
@@ -1521,6 +1695,21 @@ function openComposer(existing) {
       sheet.appendChild(el("button", { class: "back-link", onclick: () => { cw = nowWk; build(); } }, "back to this week"));
     }
 
+    if (existing && existing.sourceId) {
+      // this deposit was cut from a longer ramble — the untouched original is two taps away
+      const src = entries.find(e => e.id === existing.sourceId);
+      if (src) {
+        sheet.appendChild(el("button", {
+          class: "back-link",
+          style: { display: "block", marginTop: "18px" },
+          onclick: () => {
+            if (isDirty()) confirmAction("Discard your changes to this entry?", "Discard", () => openRambleView(src));
+            else openRambleView(src);
+          }
+        }, "view the full ramble"));
+      }
+    }
+
     if (existing) {
       // lock guards against accidental deletion: delete only shows while unlocked.
       // the lock state itself saves with Save, like every other field.
@@ -1541,6 +1730,61 @@ function openComposer(existing) {
         }, "Delete entry"));
       }
     }
+
+    // preview of the proposed cuts: entry-like blocks, each with its suggested topic
+    // pill (tap to retag) and a JOIN control on every divider to merge neighbours.
+    function buildSegPreview() {
+      const ranges = segState.ranges;
+      sheet.appendChild(el("p", { class: "seg-note", style: { margin: "2px 0 12px" } },
+        "your words, cut apart — nothing rewritten"));
+      const card = el("div", { class: "group-card seg-list" });
+      ranges.forEach((rg, i) => {
+        if (i) {
+          const join = el("div", { class: "seg-join" });
+          join.appendChild(el("button", {
+            onclick: () => {
+              ranges[i - 1].end = rg.end;
+              if (!ranges[i - 1].topic) ranges[i - 1].topic = rg.topic;
+              ranges.splice(i, 1);
+              if (ranges.length < 2) { segState = null; segErr = null; } // merged back into one — plain composer returns
+              segTagOpen = -1;
+              build();
+            }
+          }, "join"));
+          card.appendChild(join);
+        }
+        const block = el("div", { class: "seg-block" });
+        const p = el("p");
+        p.appendChild(renderRichBlocks(text.slice(rg.start, rg.end).trim()));
+        block.appendChild(p);
+        const meta = el("div", { class: "entry-meta" });
+        const tt = topicById[rg.topic];
+        meta.appendChild(el("button", {
+          class: "pill" + (tt ? "" : " mode"),
+          style: tt ? { background: tt.bg, color: tt.fg } : {},
+          onclick: () => { segTagOpen = segTagOpen === i ? -1 : i; build(); }
+        }, tt ? tt.label : "untagged"));
+        block.appendChild(meta);
+        if (segTagOpen === i) {
+          const chips = el("div", { class: "chips", style: { marginTop: "10px" } });
+          for (const t of TOPICS) {
+            const on = rg.topic === t.id;
+            chips.appendChild(el("button", {
+              class: "chip",
+              style: on ? { background: t.bg, color: t.fg, borderColor: t.dot, fontWeight: "600" } : {},
+              onclick: () => { rg.topic = on ? null : t.id; segTagOpen = -1; build(); }
+            }, t.label));
+          }
+          block.appendChild(chips);
+        }
+        card.appendChild(block);
+      });
+      sheet.appendChild(card);
+      sheet.appendChild(el("button", {
+        class: "back-link",
+        onclick: () => { segState = null; segErr = null; segTagOpen = -1; build(); }
+      }, "keep as one entry"));
+    }
   }
 
   function toggleTag(id) {
@@ -1553,6 +1797,51 @@ function openComposer(existing) {
     const ta = sheet.querySelector("textarea");
     if (ta && !existing) ta.focus();
   }, 120);
+}
+
+// read-only view of the original ramble a deposit was cut from. restoring swaps the
+// deposits back out for the single original entry — they're all verbatim slices of it,
+// so only edits made to the deposits afterwards would be lost, hence the confirm.
+function openRambleView(src) {
+  sheetRoot.innerHTML = "";
+  lockPageScroll();
+  const overlay = el("div", { class: "overlay", onclick: close });
+  const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
+  overlay.appendChild(sheet);
+  function close() { sheetRoot.innerHTML = ""; unlockPageScroll(); }
+
+  sheet.appendChild(el("div", { class: "grabber" }));
+  const head = el("div", { class: "sheet-head" });
+  head.appendChild(el("span", { class: "title" }, "Full ramble"));
+  sheet.appendChild(head);
+
+  const segs = entries.filter(e => e.sourceId === src.id);
+  const d = entryDay(src);
+  sheet.appendChild(el("p", { class: "seg-note", style: { margin: "0 0 12px" } },
+    "kept as written · " + (d == null ? "" : DAY_TOKENS[d] + ", ") + "W" + pad2(src.week)
+    + " · now " + segs.length + " deposits"));
+
+  const body = el("p", { class: "ramble-text" });
+  body.appendChild(renderRichBlocks(src.text));
+  sheet.appendChild(body);
+
+  sheet.appendChild(el("button", {
+    class: "delete-btn",
+    onclick: () => confirmAction(
+      "Restore the full ramble? Its " + segs.length + " deposits will be replaced by the original entry.",
+      "Restore",
+      () => {
+        segs.forEach(sg => tombstoneEntry(sg.id)); // so the removals sync, not just locally
+        entries = entries
+          .filter(e => e.sourceId !== src.id)
+          .map(e => e.id === src.id ? { ...e, segmented: false, updatedAt: new Date().toISOString() } : e);
+        saveEntries(entries);
+        close();
+        render();
+      })
+  }, "Restore as one entry"));
+
+  sheetRoot.appendChild(overlay);
 }
 
 // ---------- calendar picker ----------
@@ -1986,10 +2275,10 @@ function openSearch() {
   function renderResults() {
     resultsRoot.innerHTML = "";
     if (!q) {
-      resultsRoot.appendChild(el("p", { class: "search-hint" }, "search " + entries.filter(inScope).length + " entries…"));
+      resultsRoot.appendChild(el("p", { class: "search-hint" }, "search " + entries.filter(e => !e.segmented && inScope(e)).length + " entries…"));
       return;
     }
-    const found = entries.filter(e => inScope(e) && matches(e))
+    const found = entries.filter(e => !e.segmented && inScope(e) && matches(e))
       .sort((a, b) => (b.year - a.year) || (b.week - a.week) || (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
     resultsRoot.appendChild(el("p", { class: "search-count" }, found.length + " found"));
     if (!found.length) return;
