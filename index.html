@@ -177,15 +177,18 @@
   .rt-bullet { display: flex; gap: 7px; }
   .rt-dot { flex: none; color: #C7C7CC; user-select: none; -webkit-user-select: none; }
   .rt-body { flex: 1; min-width: 0; }
-  /* inline link — a tappable mono pill; label defaults to the domain, editable in raw text */
+  /* inline link — a tappable mono pill; label defaults to the domain, editable in raw text.
+     display:inline + box-decoration-break:clone so a long label wraps across lines and each
+     line fragment still gets the pill's padding/rounding, instead of overflowing/clipping. */
   .rt-link {
-    display: inline-flex; align-items: center; gap: 3px;
+    display: inline;
+    -webkit-box-decoration-break: clone; box-decoration-break: clone;
     font-family: var(--mono); font-size: 0.8em; letter-spacing: 0.2px;
     background: var(--field); color: var(--ink); text-decoration: none;
     padding: 1px 7px 1px 6px; border-radius: 6px;
-    vertical-align: 1px; white-space: nowrap; cursor: pointer;
+    vertical-align: 1px; overflow-wrap: anywhere; cursor: pointer;
   }
-  .rt-link svg { flex: none; opacity: 0.45; }
+  .rt-link svg { opacity: 0.45; vertical-align: -1px; margin-right: 3px; }
   .redacted {
     color: transparent; border-radius: 4px; cursor: pointer;
     background:
@@ -253,12 +256,16 @@
   /* provenance pill: MINE (hand-written) / V1 (first AI take) / V2… (re-summarized).
      when a week holds several takes, all show — active one filled, tap another to switch. */
   .wsum-pill {
+    position: relative; /* anchors the invisible hit-slop below */
     display: inline-block; font-family: var(--mono); font-size: 10px;
     letter-spacing: 0.6px; text-transform: uppercase; color: var(--subtle);
     background: var(--field); border-radius: 5px; padding: 2px 6px;
     line-height: 1; margin: 0 0 6px; cursor: pointer;
   }
-  .wsum-pill + .wsum-pill { margin-left: 4px; }
+  /* the visible pill stays tiny; this transparent overlay makes it a ~36px-tall thumb
+     target. horizontal slop is kept small so adjacent pills' zones don't overlap. */
+  .wsum-pill::after { content: ""; position: absolute; inset: -12px -2px -10px; }
+  .wsum-pill + .wsum-pill { margin-left: 6px; }
   .wsum-pill.on { background: var(--ink); color: #fff; }
   /* faint invitation to hand-write a summary when none exists / AI won't auto-generate */
   .wsum-add {
@@ -1197,11 +1204,20 @@ function openComposer(existing) {
 
   sheetRoot.innerHTML = ""; // never stack on another sheet (composer can open from search results)
   lockPageScroll();
-  const overlay = el("div", { class: "overlay", onclick: close });
+  const overlay = el("div", { class: "overlay", onclick: requestClose });
   const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
   overlay.appendChild(sheet);
 
   function close() { sheetRoot.innerHTML = ""; unlockPageScroll(); }
+  // tapping away from a brand-new entry with text in it is an easy way to lose a thought —
+  // warn first. editing an existing entry, or an empty composer, dismisses without friction.
+  function requestClose() {
+    if (!existing && text.trim()) {
+      confirmAction("Discard this entry? Your unsaved text will be lost.", "Discard", close);
+    } else {
+      close();
+    }
+  }
 
   function build() {
     sheet.innerHTML = "";
@@ -1651,14 +1667,15 @@ function summaryPill(rec) {
   return rec.origin === "mine" ? "MINE" : "V" + (rec.version || 1);
 }
 
-// the week's summary surface only wakes at its own friday 18:00 (local time) — the week
-// should be basically lived before it's reflected on, even if it already meets the
-// day-count/key requirements. past weeks are always past their friday; future weeks aren't.
+// the week's summary surface only wakes at its own sunday 10:00 (local time) — a
+// sunday-morning reflection ritual, once the week is essentially lived, even if it
+// already meets the day-count/key requirements. past weeks are always past their
+// sunday; future weeks aren't.
 function weekSummaryUnlocked(year, week) {
   const mon = mondayOfISOWeek(year, week);
-  const fri = new Date(mon);
-  fri.setUTCDate(mon.getUTCDate() + 4); // Mon + 4 = Fri (day index 4)
-  const unlockAt = new Date(fri.getUTCFullYear(), fri.getUTCMonth(), fri.getUTCDate(), 18, 0, 0, 0);
+  const sun = new Date(mon);
+  sun.setUTCDate(mon.getUTCDate() + 6); // Mon + 6 = Sun (last day of the ISO week)
+  const unlockAt = new Date(sun.getUTCFullYear(), sun.getUTCMonth(), sun.getUTCDate(), 10, 0, 0, 0);
   return new Date() >= unlockAt;
 }
 
@@ -1670,7 +1687,7 @@ function weekSummaryBlock(list) {
   const aiEligible = filledDays >= 3 && apiKey && unlocked;
 
   // no summary yet and AI won't auto-generate → offer to hand-write one (saves as MINE),
-  // but only once the week has reached its friday 6pm. before that the whole surface stays
+  // but only once the week has reached its sunday 10am. before that the whole surface stays
   // dormant (no invite, no eye) unless a record already exists. suppressed when hidden too.
   if (!rec && !aiEligible) {
     if (!showWeekSummary || !unlocked) return null;
@@ -1786,6 +1803,26 @@ function openWeekSummaryEditor(year, week, list) {
       }
     }, "re-summarize");
     sheet.appendChild(resum);
+  }
+
+  // explicit authorship: plain Save keeps the current take's provenance (a light edit of
+  // V3 stays V3), so claiming a hand-written take is its own deliberate action. archives
+  // the current AI take into the pill row and makes a distinct MINE the current one.
+  const curRec = weekSummaries[k];
+  if (curRec && curRec.origin !== "mine") {
+    sheet.appendChild(el("button", {
+      class: "lock-btn",
+      onclick: () => {
+        const v = ta.value.trim();
+        if (!v) return;
+        const nowIso = new Date().toISOString();
+        (weekSummaryVersions[k] = weekSummaryVersions[k] || {})[summarySlot(curRec)] = curRec; // keep the AI take
+        weekSummaries[k] = { text: v, createdAt: nowIso, updatedAt: nowIso, edited: true, origin: "mine" };
+        saveWeekSummaries();
+        sheetRoot.innerHTML = "";
+        render();
+      }
+    }, "save as my own"));
   }
 
   sheetRoot.appendChild(overlay);
