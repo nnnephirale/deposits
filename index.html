@@ -1209,11 +1209,23 @@ function openComposer(existing) {
   overlay.appendChild(sheet);
 
   function close() { sheetRoot.innerHTML = ""; unlockPageScroll(); }
-  // tapping away from a brand-new entry with text in it is an easy way to lose a thought —
-  // warn first. editing an existing entry, or an empty composer, dismisses without friction.
+  // tapping away with unsaved work is an easy way to lose a thought — warn first. covers a
+  // brand-new entry with text AND edits to an existing one; an unchanged entry (just opened
+  // to read) or an empty new composer dismisses without friction.
+  function isDirty() {
+    if (!existing) return !!text.trim();
+    if (text.trim() !== (existing.text || "").trim()) return true;
+    if (locked !== !!existing.locked) return true;
+    if (day !== entryDay(existing)) return true;
+    if (cw.year !== existing.year || cw.week !== existing.week) return true;
+    const a = [...tags].sort(), b = [...(existing.tags || [])].sort();
+    return a.length !== b.length || a.some((t, i) => t !== b[i]);
+  }
   function requestClose() {
-    if (!existing && text.trim()) {
-      confirmAction("Discard this entry? Your unsaved text will be lost.", "Discard", close);
+    if (isDirty()) {
+      confirmAction(
+        existing ? "Discard your changes to this entry?" : "Discard this entry? Your unsaved text will be lost.",
+        "Discard", close);
     } else {
       close();
     }
