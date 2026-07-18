@@ -189,6 +189,8 @@
     vertical-align: 1px; overflow-wrap: anywhere; cursor: pointer;
   }
   .rt-link svg { opacity: 0.45; vertical-align: -1px; margin-right: 3px; }
+  /* pasted images — stored on the entry, referenced in text by a short ![photo:id] marker */
+  .rt-img { display: block; max-width: 100%; border-radius: 12px; margin: 6px 0; }
   .redacted {
     color: transparent; border-radius: 4px; cursor: pointer;
     background:
@@ -212,13 +214,15 @@
   .fmt-bar { display: none; gap: 8px; margin-top: 8px; }
   .fmt-bar.show { display: flex; }
   .fmt-bar .sel-only, .fmt-bar .line-only { display: none; }
-  .fmt-bar.has-sel .sel-only { display: block; }
-  .fmt-bar:not(.has-sel) .line-only { display: block; }
+  .fmt-bar.has-sel .sel-only { display: flex; }
+  .fmt-bar:not(.has-sel) .line-only { display: flex; }
   .fmt-btn {
     flex: 1; font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
     background: var(--field); color: var(--ink); border: none; border-radius: 8px;
-    padding: 9px 0; user-select: none; -webkit-user-select: none;
+    height: 38px; padding: 0; align-items: center; justify-content: center;
+    user-select: none; -webkit-user-select: none;
   }
+  .fmt-btn svg { display: block; }
   .fmt-btn:active { background: var(--ink); color: #fff; }
   .fmt-b { font-weight: 700; }
   .fmt-i { font-style: italic; }
@@ -645,12 +649,54 @@ function truncateWords(t, n) { return t.trim().split(/\s+/).slice(0, n).join(" "
 function sentenceCase(s) { return s.replace(/(^\s*\S|[.!?]\s+\S)/g, c => c.toUpperCase()); }
 
 // ---------- inline formatting (Bear-style: raw markers while editing, rendered in cards) ----------
-// dialect: [label](url) **bold** *italic* __underline__ `mono` ||redact||
+// dialect: [label](url) **bold** *italic* __underline__ `mono` ||redact|| ![photo:id]
 // deliberately NO tilde rule — ~text~ renders literally (she likes her curly hyphens).
 // link is first so its brackets/parens aren't mis-parsed by the emphasis rules.
-const RICH_RE = /\[([^\]]+)\]\(([^)\s]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|__(.+?)__|`(.+?)`|\|\|(.+?)\|\|/g;
+const RICH_RE = /\[([^\]]+)\]\(([^)\s]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|__(.+?)__|`(.+?)`|\|\|([\s\S]+?)\|\||!\[photo:([a-z0-9]+)\]/g;
+
+// pasted images live out-of-band on the entry (entry.images = { id: dataURL }) so the
+// raw-text editor shows a short marker instead of a thousand base64 characters.
+const IMG_MARK_RE = /!\[photo:([a-z0-9]+)\]/g;
+const IMG_MAX_DIM = 1100, IMG_QUALITY = 0.82;
+
+// keep only the images the text still references — pasted-then-deleted ones don't persist
+function imagesUsedIn(text, images) {
+  const out = {};
+  if (!images) return out;
+  let m;
+  IMG_MARK_RE.lastIndex = 0;
+  while ((m = IMG_MARK_RE.exec(text))) if (images[m[1]]) out[m[1]] = images[m[1]];
+  return out;
+}
+
+// downscale + recompress a pasted image so entries stay small enough for localStorage/sync
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, IMG_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+      const w = Math.max(1, Math.round(img.naturalWidth * scale));
+      const h = Math.max(1, Math.round(img.naturalHeight * scale));
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h); // jpeg has no alpha channel
+      ctx.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL("image/jpeg", IMG_QUALITY));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("image decode failed")); };
+    img.src = url;
+  });
+}
 
 const LINK_ICON = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 6 .4l2.6-2.6a4 4 0 0 0-5.7-5.7L11.4 7.6"/><path d="M14 10a4 4 0 0 0-6-.4L5.4 12.2a4 4 0 0 0 5.7 5.7l1.5-1.5"/></svg>';
+
+// format-bar line ops: proper icons instead of squished text glyphs
+const BULLET_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="6" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="5" cy="18" r="1.6" fill="currentColor" stroke="none"/><path d="M10.5 6h9M10.5 12h9M10.5 18h9"/></svg>';
+const INDENT_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M12 12h8M4 19h16"/><path d="M4 9.2v5.6L7.6 12Z" fill="currentColor" stroke="none"/></svg>';
+const OUTDENT_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M12 12h8M4 19h16"/><path d="M7.6 9.2v5.6L4 12Z" fill="currentColor" stroke="none"/></svg>';
 
 // derive a compact display domain from a url (drops scheme, www, and path)
 function domainOf(u) {
@@ -661,15 +707,19 @@ function domainOf(u) {
 // flatten markers to plain text. redactedAs replaces redacted content ("keep" preserves it) —
 // so truncation shows ▓▓▓ and the summarizer never sees redacted content at all. links flatten
 // to their label so search/summaries see the readable text, never the raw url.
+// redaction is masked in a pre-pass so ||…|| nested inside bold/italic (or spanning lines,
+// which the per-rule regex can't reach) never leaks through to the summarizer either.
 function plainText(t, redactedAs) {
-  return t.replace(/^[ \t]*[-—] /gm, "").replace(RICH_RE, (m0, linkLabel, linkUrl, b, i, u, mono, red) => {
+  if (redactedAs !== "keep") t = t.replace(/\|\|[\s\S]+?\|\|/g, () => redactedAs);
+  return t.replace(IMG_MARK_RE, "").replace(/^[ \t]*[-—] /gm, "").replace(RICH_RE, (m0, linkLabel, linkUrl, b, i, u, mono, red, img) => {
     if (linkLabel != null) return linkLabel;
     if (red != null) return redactedAs === "keep" ? red : redactedAs;
+    if (img != null) return "";
     return b != null ? b : i != null ? i : u != null ? u : mono;
   });
 }
 
-function renderRich(text) {
+function renderRich(text, images) {
   const frag = document.createDocumentFragment();
   let last = 0, m;
   RICH_RE.lastIndex = 0;
@@ -688,6 +738,12 @@ function renderRich(text) {
     else if (m[4] != null) frag.appendChild(el("span", { class: "rt-i" }, m[4]));
     else if (m[5] != null) frag.appendChild(el("span", { class: "rt-u" }, m[5]));
     else if (m[6] != null) frag.appendChild(el("span", { class: "rt-m" }, m[6]));
+    else if (m[8] != null) {
+      const src = images && images[m[8]];
+      // no stored data (e.g. synced before the cloud grew its images column): show the marker as-is
+      if (src) frag.appendChild(el("img", { class: "rt-img", src, alt: "photo" }));
+      else frag.appendChild(document.createTextNode(m[0]));
+    }
     else {
       const r = el("span", {
         class: "redacted",
@@ -704,8 +760,8 @@ function renderRich(text) {
 // line-level pass over renderRich: "- " at line start renders as a bullet row (hanging
 // indent via flex), leading two-space units as indentation. entries without either take
 // the plain renderRich path untouched, so nothing existing changes appearance.
-function renderRichBlocks(text) {
-  if (!/^[ \t]*[-—] |^(?: {2}|\t)\S/m.test(text)) return renderRich(text);
+function renderRichBlocks(text, images) {
+  if (!/^[ \t]*[-—] |^(?: {2}|\t)\S/m.test(text)) return renderRich(text, images);
   const frag = document.createDocumentFragment();
   for (const line of text.split("\n")) {
     const m = /^([ \t]*)([-—] )?(.*)$/.exec(line);
@@ -715,10 +771,10 @@ function renderRichBlocks(text) {
     if (m[2]) {
       row.appendChild(el("span", { class: "rt-dot" }, "•"));
       const body = el("span", { class: "rt-body" });
-      body.appendChild(renderRich(m[3]));
+      body.appendChild(renderRich(m[3], images));
       row.appendChild(body);
     } else {
-      row.appendChild(renderRich(m[3]));
+      row.appendChild(renderRich(m[3], images));
     }
     frag.appendChild(row);
   }
@@ -811,17 +867,20 @@ function entryToRow(e) {
     text: e.text || "", tags: e.tags || [],
     year: e.year ?? null, week: e.week ?? null, day: ("day" in e ? e.day : null),
     locked: !!e.locked, source_id: e.sourceId || null, segmented: !!e.segmented,
+    images: e.images || null,
     created_at: e.createdAt, updated_at: e.updatedAt || e.createdAt,
     deleted_at: null
   };
 }
 function rowToEntry(r) {
-  return {
+  const e = {
     id: r.id, text: r.text || "", tags: r.tags || [],
     year: r.year, week: r.week, day: r.day, locked: !!r.locked,
     sourceId: r.source_id || null, segmented: !!r.segmented,
     createdAt: r.created_at, updatedAt: r.updated_at
   };
+  if (r.images && Object.keys(r.images).length) e.images = r.images;
+  return e;
 }
 function summaryUpdatedAt(rec) { return rec.updatedAt || rec.createdAt || new Date(0).toISOString(); }
 
@@ -884,17 +943,18 @@ async function pushEntriesNow() {
     const rows = entries.map(entryToRow);
     for (const [id, ts] of Object.entries(tombstones)) {
       rows.push({ id, user_id: session.user.id, text: "", tags: [], year: null, week: null,
-        day: null, locked: false, source_id: null, segmented: false,
+        day: null, locked: false, source_id: null, segmented: false, images: null,
         created_at: ts, updated_at: ts, deleted_at: ts });
     }
     if (rows.length) {
       const { error } = await sb.from("deposits_entries").upsert(rows, { onConflict: "id" });
       if (error && (error.code === "PGRST204" || /column/i.test(error.message || ""))) {
-        // segments migration not run yet — push without the new columns so sync never stalls.
+        // newer-column migration not run yet — push without the new columns so sync never stalls.
         // run in supabase: alter table deposits_entries add column if not exists source_id text;
         //                  alter table deposits_entries add column if not exists segmented boolean not null default false;
-        console.warn("deposits: segments columns missing in cloud — run the migration; pushing without them");
-        const stripped = rows.map(({ source_id, segmented, ...rest }) => rest);
+        //                  alter table deposits_entries add column if not exists images jsonb;
+        console.warn("deposits: newer columns missing in cloud — run the migration; pushing without them");
+        const stripped = rows.map(({ source_id, segmented, images, ...rest }) => rest);
         const { error: e2 } = await sb.from("deposits_entries").upsert(stripped, { onConflict: "id" });
         if (e2) throw e2;
       } else if (error) throw error;
@@ -1177,7 +1237,7 @@ function entryEl(e, opts) {
   const collapse = compactView && entryWords(e) > SUMMARY_MIN_WORDS;
   const p = el("p");
   if (collapse) p.textContent = compactText(e);
-  else p.appendChild(renderRichBlocks(e.text));
+  else p.appendChild(renderRichBlocks(e.text, e.images));
   entry.appendChild(p);
   const meta = el("div", { class: "entry-meta" });
   if (e.locked) {
@@ -1303,6 +1363,7 @@ function unlockPageScroll() {
 function openComposer(existing) {
   let text = existing ? existing.text : "";
   let tags = existing ? [...existing.tags] : [];
+  let images = existing && existing.images ? { ...existing.images } : {};
   let locked = existing ? !!existing.locked : false;
   let cw = existing
     ? { year: existing.year, week: existing.week }
@@ -1367,10 +1428,16 @@ function openComposer(existing) {
       stripTokens.forEach((tok, i) => {
         const cls = [i === hot ? "hot" : "", i === todayIdx ? "today" : ""].filter(Boolean).join(" ");
         const s = el("span", { class: cls }, tok);
-        s.addEventListener("click", ev => {
+        // commit on pointerdown, not click: a click arrives only after the textarea has
+        // blurred and the keyboard collapse has shifted the whole sheet, so it used to
+        // land on the wrong element — the tap "didn't take" and needed a second attempt.
+        // preventDefault also keeps the textarea focused, so nothing moves at all.
+        s.addEventListener("pointerdown", ev => {
+          ev.preventDefault();
           ev.stopPropagation();
           commitDay(i);
         });
+        s.addEventListener("click", ev => ev.stopPropagation()); // late click on a replaced sheet must not bubble anywhere
         strip.appendChild(s);
       });
       head.appendChild(strip);
@@ -1412,17 +1479,20 @@ function openComposer(existing) {
     });
 
     function doSave() {
+      const imgs = imagesUsedIn(text, images); // pasted-then-deleted images don't persist
+      const imgVal = Object.keys(imgs).length ? imgs : undefined;
       if (existing) {
         entries = entries.map(e => e.id === existing.id
           ? { ...e, text: text.trim(), tags, year: cw.year, week: cw.week, day, locked,
-              updatedAt: new Date().toISOString() }
+              images: imgVal, updatedAt: new Date().toISOString() }
           : e);
       } else {
         const stamp = new Date().toISOString();
         entries = [...entries, {
           id: Date.now().toString(36),
           createdAt: stamp, updatedAt: stamp,
-          text: text.trim(), tags, year: cw.year, week: cw.week, day, locked
+          text: text.trim(), tags, year: cw.year, week: cw.week, day, locked,
+          images: imgVal
         }];
       }
       saveEntries(entries);
@@ -1436,23 +1506,30 @@ function openComposer(existing) {
       const ranges = segState.ranges;
       const stamp = new Date().toISOString();
       const base = Date.now().toString(36);
+      const srcImgs = imagesUsedIn(text, images);
       let src;
       if (existing) {
         src = { ...existing, text: text.trim(), tags, year: cw.year, week: cw.week, day, locked,
-          segmented: true, updatedAt: stamp };
+          images: Object.keys(srcImgs).length ? srcImgs : undefined, segmented: true, updatedAt: stamp };
         entries = entries.map(e => e.id === existing.id ? src : e);
       } else {
         src = { id: base, createdAt: stamp, updatedAt: stamp, text: text.trim(), tags,
-          year: cw.year, week: cw.week, day, locked, segmented: true };
+          year: cw.year, week: cw.week, day, locked, segmented: true,
+          images: Object.keys(srcImgs).length ? srcImgs : undefined };
         entries = [...entries, src];
       }
       const modeTags = tags.filter(t => modeById[t]); // modes chosen for the ramble carry to every deposit
-      const segs = ranges.map((rg, i) => ({
-        id: base + "s" + i, createdAt: stamp, updatedAt: stamp,
-        text: text.slice(rg.start, rg.end).trim(),
-        tags: [...(rg.topic ? [rg.topic] : []), ...modeTags],
-        year: cw.year, week: cw.week, day, locked: false, sourceId: src.id
-      }));
+      const segs = ranges.map((rg, i) => {
+        const segText = text.slice(rg.start, rg.end).trim();
+        const segImgs = imagesUsedIn(segText, images); // each deposit keeps only the images its slice references
+        return {
+          id: base + "s" + i, createdAt: stamp, updatedAt: stamp,
+          text: segText,
+          tags: [...(rg.topic ? [rg.topic] : []), ...modeTags],
+          year: cw.year, week: cw.week, day, locked: false, sourceId: src.id,
+          images: Object.keys(segImgs).length ? segImgs : undefined
+        };
+      });
       entries = [...entries, ...segs];
       saveEntries(entries);
       close();
@@ -1494,6 +1571,44 @@ function openComposer(existing) {
     ta.addEventListener("input", () => { text = ta.value; saveBtn.disabled = !text.trim(); autoGrow(); });
     sheet.appendChild(ta);
     requestAnimationFrame(autoGrow); // ta isn't attached to the document until after build() returns
+
+    // ⌘V an image (screenshot, copied photo): it lands inline as a short ![photo:id]
+    // marker — the actual pixels live on the entry, never as base64 soup in the editor
+    ta.addEventListener("paste", async ev => {
+      const items = ev.clipboardData ? ev.clipboardData.items : null;
+      if (!items) return;
+      const item = [...items].find(it => it.kind === "file" && it.type.startsWith("image/"));
+      if (!item) return; // plain text pastes stay untouched
+      ev.preventDefault();
+      const file = item.getAsFile();
+      if (!file) return;
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        const id = Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+        images[id] = dataUrl;
+        const s = ta.selectionStart, en = ta.selectionEnd, v = ta.value;
+        const before = v.slice(0, s), after = v.slice(en);
+        const mark = (before && !before.endsWith("\n") ? "\n" : "")
+          + "![photo:" + id + "]"
+          + (!after || after.startsWith("\n") ? "" : "\n");
+        ta.value = before + mark + after;
+        const pos = before.length + mark.length;
+        ta.setSelectionRange(pos, pos);
+        text = ta.value;
+        saveBtn.disabled = !text.trim();
+        autoGrow();
+        updateBar();
+      } catch (err) { console.warn("image paste failed", err); }
+    });
+
+    // desktop: ⌘B / ⌘I / ⌘U (ctrl elsewhere) style the selection, same as the format bar
+    ta.addEventListener("keydown", ev => {
+      if (!(ev.metaKey || ev.ctrlKey) || ev.altKey) return;
+      const pair = { b: ["**", "**"], i: ["*", "*"], u: ["__", "__"] }[ev.key.toLowerCase()];
+      if (!pair) return;
+      ev.preventDefault();
+      wrapSel(pair[0], pair[1]);
+    });
 
     // ---- format bar: line ops (• ⇥ ⇤) while just typing, span ops (B I U M R L)
     // once text is selected — the row swaps contents rather than growing ----
@@ -1578,14 +1693,15 @@ function openComposer(existing) {
       ta.focus();
       updateBar();
     }
-    [["•", line => {
+    [[BULLET_ICON, "Bullet", line => {
         const m = BULLET_LINE.exec(line);
         return m ? m[1] + m[3] : line.replace(/^([ \t]*)/, "$1- "); // toggle off drops the marker; on inserts "- "
       }],
-     ["⇥", line => "  " + line],
-     ["⇤", line => line.startsWith("  ") ? line.slice(2) : line.replace(/^[ \t]/, "")]
-    ].forEach(([label, transform]) => {
-      const b = el("button", { class: "fmt-btn line-only", onclick: () => lineOp(transform) }, label);
+     [INDENT_ICON, "Indent", line => "  " + line],
+     [OUTDENT_ICON, "Outdent", line => line.startsWith("  ") ? line.slice(2) : line.replace(/^[ \t]/, "")]
+    ].forEach(([icon, label, transform]) => {
+      const b = el("button", { class: "fmt-btn line-only", "aria-label": label, onclick: () => lineOp(transform) });
+      b.innerHTML = icon;
       b.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused
       fmtBar.appendChild(b);
     });
@@ -1755,7 +1871,7 @@ function openComposer(existing) {
         }
         const block = el("div", { class: "seg-block" });
         const p = el("p");
-        p.appendChild(renderRichBlocks(text.slice(rg.start, rg.end).trim()));
+        p.appendChild(renderRichBlocks(text.slice(rg.start, rg.end).trim(), images));
         block.appendChild(p);
         const meta = el("div", { class: "entry-meta" });
         const tt = topicById[rg.topic];
@@ -1822,7 +1938,7 @@ function openRambleView(src) {
     + " · now " + segs.length + " deposits"));
 
   const body = el("p", { class: "ramble-text" });
-  body.appendChild(renderRichBlocks(src.text));
+  body.appendChild(renderRichBlocks(src.text, src.images));
   sheet.appendChild(body);
 
   sheet.appendChild(el("button", {
@@ -2141,6 +2257,7 @@ function segmentText(raw) {
     if (m[1] != null) segs.push({ t: m[1] });                     // link: show its label as plain text
     else if (m[3] != null) segs.push({ t: m[3], bold: true });
     else if (m[7] != null) segs.push({ t: "▓▓▓", redacted: true });
+    else if (m[8] != null) segs.push({ t: "" });                  // image: nothing to show in a text snippet
     else segs.push({ t: m[4] != null ? m[4] : (m[5] != null ? m[5] : m[6]) }); // italic/underline/mono: plain in snippets
     last = m.index + m[0].length;
   }

@@ -20,17 +20,19 @@ create table if not exists public.deposits_entries (
   locked      boolean not null default false,
   source_id   text,                                    -- set on deposits cut from a ramble: id of the hidden original
   segmented   boolean not null default false,          -- true on a ramble original that now lives behind its deposits
+  images      jsonb,                                   -- pasted images: { id: dataURL }, referenced in text as ![photo:id]
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),      -- bumped on edit; drives last-write-wins
   deleted_at  timestamptz                              -- soft delete so removals sync across devices
 );
 create index if not exists deposits_entries_user_idx on public.deposits_entries(user_id);
 
--- ---------- migration for existing installs (17 Jul 2026: ramble segmentation) ----------
+-- ---------- migration for existing installs ----------
 -- Safe to re-run; no-ops once the columns exist. Until this runs, the app pushes
 -- without these columns (it detects the missing-column error and retries stripped).
-alter table public.deposits_entries add column if not exists source_id text;
+alter table public.deposits_entries add column if not exists source_id text;   -- 17 Jul 2026: ramble segmentation
 alter table public.deposits_entries add column if not exists segmented boolean not null default false;
+alter table public.deposits_entries add column if not exists images jsonb;     -- 19 Jul 2026: pasted inline images
 
 -- ---------- weekly summaries ----------
 create table if not exists public.deposits_week_summaries (
