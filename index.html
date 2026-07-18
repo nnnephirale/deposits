@@ -342,6 +342,9 @@
   }
   .save:disabled { color: #C7C7CC; cursor: default; }
 
+  /* day + week pills side by side in the sheet head */
+  .head-pills { display: flex; gap: 8px; align-items: center; }
+
   /* day pill + scrubber */
   .day-pill {
     font-family: var(--mono); font-size: 13px; font-weight: 600;
@@ -365,6 +368,23 @@
     content: ""; display: inline-block; width: 4px; height: 4px;
     margin-left: 3px; border-radius: 50%; background: #FF3B30; vertical-align: middle;
   }
+
+  /* inline week/date picker — slides down from the W pill; liquid, but sleek.
+     same grey surface as the day strip so the two pickers read as one family;
+     the current week row lifts to white, the chosen date is the black pill. */
+  .cal-pop {
+    position: absolute; left: 0; right: 0; top: calc(100% + 8px);
+    background: var(--field); border-radius: 16px; padding: 6px 10px 10px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+    z-index: 7; transform-origin: top center;
+    animation: calDrop 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .cal-pop .cal-row.wk-row.current { background: var(--card); }
+  @keyframes calDrop { from { opacity: 0; transform: translateY(-12px) scale(0.97); } to { opacity: 1; transform: none; } }
+  .cal-pop.closing { animation: calRise 0.18s cubic-bezier(0.4, 0, 1, 1) forwards; pointer-events: none; }
+  @keyframes calRise { to { opacity: 0; transform: translateY(-10px) scale(0.97); } }
+  @media (prefers-reduced-motion: reduce) { .cal-pop, .cal-pop.closing { animation: none; } }
+  .cal-sel { background: var(--ink); color: #fff !important; border-radius: 8px; font-weight: 700; }
 
   .sheet textarea {
     width: 100%; font-family: var(--font); font-size: 16px; line-height: 1.5;
@@ -392,12 +412,6 @@
   .chip.mode { background: transparent; color: var(--subtle); border-color: var(--hairline); }
   .chip.mode.on { background: var(--ink); color: #fff; border-color: var(--ink); font-weight: 600; }
 
-  .wk-picker {
-    display: flex; align-items: center; justify-content: space-between;
-    background: var(--field); border-radius: 14px; padding: 10px 8px;
-  }
-  .wk-picker .num { font-family: var(--mono); font-size: 15px; font-weight: 600; }
-  .wk-picker .range { font-size: 12px; color: var(--subtle); margin-top: 2px; }
   .back-link {
     font-size: 13px; color: var(--subtle); background: none; border: none;
     margin-top: 8px; padding: 0; text-decoration: underline;
@@ -591,6 +605,14 @@ function entryDay(e) {
 function daySortKey(e) {
   const d = entryDay(e);
   return d == null ? -1 : d; // sorted descending, so no-day entries land last
+}
+// actual calendar date of an entry's chosen day, as DD/MM (month view shows it beside the day token)
+function entryDateStr(e) {
+  const d = entryDay(e);
+  if (d == null || e.year == null || e.week == null) return null;
+  const dt = mondayOfISOWeek(e.year, e.week);
+  dt.setUTCDate(dt.getUTCDate() + d);
+  return pad2(dt.getUTCDate()) + "/" + pad2(dt.getUTCMonth() + 1);
 }
 function entryStamp(e) {
   return Date.parse(e.updatedAt || e.createdAt);
@@ -1252,7 +1274,9 @@ function entryEl(e, opts) {
   }
   const d = entryDay(e);
   const bits = [];
-  if (opts.showDay !== false && d != null) bits.push(DAY_TOKENS[d]);
+  if (opts.showDay !== false && d != null) {
+    bits.push(DAY_TOKENS[d] + (opts.showDate && entryDateStr(e) ? " " + entryDateStr(e) : ""));
+  }
   if (opts.showWeek) bits.push("W" + pad2(e.week));
   if (opts.showWeek && e.year !== currentWk.year) bits.push(String(e.year));
   if (bits.length) meta.appendChild(el("span", { class: "entry-day" }, bits.join(" · ")));
@@ -1280,7 +1304,8 @@ function renderTopicGroups(list, dense) {
     for (const e of g.entries) {
       card.appendChild(entryEl(e, {
         skipTag: dense ? null : g.key, // dense: every entry carries its own topic pill, headers or no
-        showWeek: view === "month"
+        showWeek: view === "month",
+        showDate: view === "month"
       }));
     }
     group.appendChild(card);
@@ -1297,7 +1322,7 @@ function renderDayGroups(list) {
     buckets.push({ label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false } });
   } else {
     for (const w of [...new Set(list.map(e => e.week))]) {
-      buckets.push({ label: "W" + pad2(w), entries: list.filter(e => e.week === w), opts: {} });
+      buckets.push({ label: "W" + pad2(w), entries: list.filter(e => e.week === w), opts: { showDate: true } });
     }
   }
   for (const b of buckets) {
@@ -1461,6 +1486,7 @@ function openComposer(existing) {
 
     dayPill.addEventListener("pointerdown", ev => {
       ev.preventDefault();
+      closeCalPop();
       if (strip && !dragging) { closeStrip(); return; } // second tap toggles closed
       dragging = true; moved = false; hot = (day == null ? NO_DAY : day); startX = ev.clientX;
       openStrip();
@@ -1478,9 +1504,108 @@ function openComposer(existing) {
       // no movement: strip stays open for tapping a day
     });
     dayPill.addEventListener("pointercancel", () => { dragging = false; closeStrip(); });
-    // tap anywhere else in the sheet closes an open strip
+
+    // ---- week pill: the wk-picker section collapsed into a W## button beside the day
+    // pill. tapping it drops an inline month calendar; a date picks week + day, the W##
+    // cell picks just the week (day untouched). collapse animates before committing. ----
+    let calPop = null, calMonth = null;
+    const weekPill = el("button", { class: "day-pill" },
+      "W" + pad2(cw.week) + (cw.year !== nowWk.year ? "·" + String(cw.year).slice(2) : ""));
+    weekPill.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused
+    weekPill.addEventListener("click", ev => {
+      ev.stopPropagation();
+      if (calPop) closeCalPop(); else openCalPop();
+    });
+
+    function openCalPop() {
+      if (calPop) return;
+      closeStrip();
+      const mon = mondayOfISOWeek(cw.year, cw.week);
+      const thu = new Date(mon);
+      thu.setUTCDate(mon.getUTCDate() + 3);
+      calMonth = { year: thu.getUTCFullYear(), month: thu.getUTCMonth() }; // month the chosen week belongs to
+      calPop = el("div", { class: "cal-pop" });
+      // same keyboard rule as the day strip: preventDefault on pointerdown so the textarea
+      // never blurs — the sheet stays perfectly still under the picker
+      calPop.addEventListener("pointerdown", ev => { ev.preventDefault(); ev.stopPropagation(); });
+      calPop.addEventListener("click", ev => ev.stopPropagation());
+      renderCalPop();
+      head.appendChild(calPop);
+    }
+    function closeCalPop(after) {
+      const p = calPop;
+      calPop = null;
+      if (!p) { if (after) after(); return; }
+      let fired = false;
+      const done = () => { if (fired) return; fired = true; p.remove(); if (after) after(); };
+      p.classList.add("closing");
+      p.addEventListener("animationend", done, { once: true });
+      setTimeout(done, 240); // reduced-motion / safety net
+    }
+    function pickWeek(iso, dayIdx) {
+      closeCalPop(() => {
+        cw = { year: iso.year, week: iso.week };
+        if (dayIdx != null) day = dayIdx;
+        build();
+      });
+    }
+    function renderCalPop() {
+      calPop.innerHTML = "";
+      calPop.appendChild(el("div", { class: "cal-head" },
+        el("button", { class: "stepper-btn", onclick: () => {
+          calMonth = calMonth.month === 0 ? { year: calMonth.year - 1, month: 11 } : { year: calMonth.year, month: calMonth.month - 1 };
+          renderCalPop();
+        } }, "‹"),
+        el("button", { class: "cal-title", onclick: () => { // tap the title = back to the current month
+          const t = new Date();
+          calMonth = { year: t.getFullYear(), month: t.getMonth() };
+          renderCalPop();
+        } }, monthLabel(calMonth.year, calMonth.month)),
+        el("button", { class: "stepper-btn", onclick: () => {
+          calMonth = calMonth.month === 11 ? { year: calMonth.year + 1, month: 0 } : { year: calMonth.year, month: calMonth.month + 1 };
+          renderCalPop();
+        } }, "›")
+      ));
+      const dow = el("div", { class: "cal-row cal-dow" }, el("span", { class: "cal-wk" }, ""));
+      DAY_TOKENS.forEach(t => dow.appendChild(el("span", null, t)));
+      calPop.appendChild(dow);
+
+      const lastDay = new Date(Date.UTC(calMonth.year, calMonth.month + 1, 0));
+      const first = new Date(Date.UTC(calMonth.year, calMonth.month, 1));
+      const start = new Date(first);
+      start.setUTCDate(first.getUTCDate() - ((first.getUTCDay() + 6) % 7)); // back to Monday
+      const today = new Date();
+      for (let mon = new Date(start); mon <= lastDay; mon.setUTCDate(mon.getUTCDate() + 7)) {
+        const rowMon = new Date(mon);
+        const iso = getISOWeek(new Date(rowMon.getUTCFullYear(), rowMon.getUTCMonth(), rowMon.getUTCDate()));
+        const current = iso.year === cw.year && iso.week === cw.week;
+        const row = el("div", { class: "cal-row wk-row" + (current ? " current" : "") });
+        const wkCell = el("span", { class: "cal-wk" }, "W" + pad2(iso.week));
+        wkCell.addEventListener("pointerdown", () => pickWeek(iso, null)); // week only — day stays
+        row.appendChild(wkCell);
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(rowMon);
+          d.setUTCDate(rowMon.getUTCDate() + i);
+          const isToday = d.getUTCFullYear() === today.getFullYear()
+            && d.getUTCMonth() === today.getMonth()
+            && d.getUTCDate() === today.getDate();
+          const cls = [
+            d.getUTCMonth() !== calMonth.month ? "cal-out" : "",
+            isToday ? "cal-today" : "",
+            current && i === day ? "cal-sel" : ""
+          ].filter(Boolean).join(" ");
+          const cell = el("span", cls ? { class: cls } : null, String(d.getUTCDate()));
+          cell.addEventListener("pointerdown", () => pickWeek(iso, i)); // a date sets week + day together
+          row.appendChild(cell);
+        }
+        calPop.appendChild(row);
+      }
+    }
+
+    // tap anywhere else in the sheet closes an open strip / calendar
     sheet.addEventListener("click", ev => {
       if (strip && !strip.contains(ev.target) && ev.target !== dayPill) closeStrip();
+      if (calPop && !calPop.contains(ev.target) && ev.target !== weekPill) closeCalPop();
     });
 
     function doSave() {
@@ -1558,7 +1683,7 @@ function openComposer(existing) {
     }, "Save");
     saveBtn.disabled = !text.trim();
 
-    head.appendChild(dayPill);
+    head.appendChild(el("div", { class: "head-pills" }, dayPill, weekPill));
     head.appendChild(el("span", { class: "title" },
       segState && segState.ranges ? segState.ranges.length + " deposits" : (existing ? "Edit entry" : "New entry")));
     head.appendChild(saveBtn);
@@ -1800,21 +1925,6 @@ function openComposer(existing) {
       modeChips.appendChild(chip);
     }
     sheet.appendChild(modeChips);
-
-    // ---- week picker ----
-    sheet.appendChild(el("p", { class: "field-label" }, "week"));
-    const range = weekRangeLabel(cw.year, cw.week) + (cw.year !== nowWk.year ? " \u00B7 " + cw.year : "");
-    sheet.appendChild(el("div", { class: "wk-picker" },
-      el("button", { class: "stepper-btn", onclick: () => { cw = shiftWeek(cw.year, cw.week, -1); build(); } }, "\u2039"),
-      el("div", { style: { textAlign: "center" } },
-        el("div", { class: "num" }, "W" + pad2(cw.week)),
-        el("div", { class: "range" }, range)
-      ),
-      el("button", { class: "stepper-btn", onclick: () => { cw = shiftWeek(cw.year, cw.week, 1); build(); } }, "\u203A")
-    ));
-    if (cw.week !== nowWk.week || cw.year !== nowWk.year) {
-      sheet.appendChild(el("button", { class: "back-link", onclick: () => { cw = nowWk; build(); } }, "back to this week"));
-    }
 
     if (existing && existing.sourceId) {
       // this deposit was cut from a longer ramble — the untouched original is two taps away
