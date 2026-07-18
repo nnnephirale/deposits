@@ -370,7 +370,12 @@
     width: 100%; font-family: var(--font); font-size: 16px; line-height: 1.5;
     color: var(--ink); border: none; outline: none; resize: none;
     background: var(--field); border-radius: 14px; padding: 14px 16px;
-    min-height: 92px; max-height: 32vh; overflow-y: auto;
+    min-height: 144px; max-height: 32vh; overflow-y: auto;
+  }
+  /* desktop: the composer opens tall from the start — a real thinking surface.
+     scoped to the entry field so the week-summary editor keeps its compact size. */
+  @media (min-width: 700px) {
+    .sheet textarea.ta-entry { min-height: max(300px, 40vh); max-height: 52vh; }
   }
   .field-label {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
@@ -1563,7 +1568,7 @@ function openComposer(existing) {
     if (segState && segState.ranges) { buildSegPreview(); return; }
 
     // ---- text ----
-    const ta = el("textarea", { rows: "4", placeholder: "deposit a thought\u2026" });
+    const ta = el("textarea", { rows: "4", class: "ta-entry", placeholder: "deposit a thought\u2026" });
     ta.value = text;
     // grows with content up to the CSS max-height, then scrolls internally \u2014 so
     // "topic" stays peeking below rather than getting pushed off-screen entirely
