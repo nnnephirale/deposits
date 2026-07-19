@@ -17,6 +17,7 @@ create table if not exists public.deposits_entries (
   year        int,                                     -- ISO week-year
   week        int,                                     -- ISO week number
   day         int,                                     -- 0-6 (Mon=0), null = no day
+  month       int,                                     -- 0-11: set on month-scoped entries (week/day null)
   locked      boolean not null default false,
   source_id   text,                                    -- set on deposits cut from a ramble: id of the hidden original
   segmented   boolean not null default false,          -- true on a ramble original that now lives behind its deposits
@@ -33,6 +34,7 @@ create index if not exists deposits_entries_user_idx on public.deposits_entries(
 alter table public.deposits_entries add column if not exists source_id text;   -- 17 Jul 2026: ramble segmentation
 alter table public.deposits_entries add column if not exists segmented boolean not null default false;
 alter table public.deposits_entries add column if not exists images jsonb;     -- 19 Jul 2026: pasted inline images
+alter table public.deposits_entries add column if not exists month int;        -- 19 Jul 2026: month-scoped entries (created in month view)
 
 -- ---------- weekly summaries ----------
 create table if not exists public.deposits_week_summaries (

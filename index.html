@@ -223,6 +223,10 @@
     user-select: none; -webkit-user-select: none;
   }
   .fmt-btn svg { display: block; }
+  /* line ops (bullet/indent/outdent): smaller, and the muted grey of the topic chips below */
+  .fmt-btn.line-only { color: #6B6B70; }
+  .fmt-btn.line-only:active { color: #fff; } /* keep the press invert (specificity beats the rest colour) */
+  .fmt-btn.line-only svg { width: 19.2px; height: 19.2px; } /* 20% smaller than 24 */
   .fmt-btn:active { background: var(--ink); color: #fff; }
   .fmt-b { font-weight: 700; }
   .fmt-i { font-style: italic; }
@@ -239,7 +243,7 @@
   .pill.mode {
     border: 1px solid var(--hairline); color: var(--subtle); font-weight: 400;
   }
-  .entry-day { font-family: var(--mono); font-size: 11px; color: #C7C7CC; }
+  .entry-day { font-family: var(--mono); font-size: 11px; color: #A9A9AD; } /* 15% darker than #C7C7CC — readable on a phone */
   .group.dense { margin-bottom: 12px; }
 
   .empty {
@@ -283,6 +287,9 @@
     color: #D6D6DB; /* barely there by design */
   }
   .wsum-eye svg { width: 15px; height: 15px; }
+  /* magic wand: the summary offer once 3 days are filled — a touch more present than the eye */
+  .wsum-wand { color: #B9B9BF; }
+  .wsum-wand svg { width: 13.5px; height: 13.5px; } /* 10% smaller than the eye */
 
   /* subtle frost at the bottom edge — content softly fades behind the fab zone */
   .bottom-frost {
@@ -353,11 +360,11 @@
     touch-action: none; user-select: none; -webkit-user-select: none;
   }
   .day-strip {
-    position: absolute; left: 0; right: 0; top: calc(100% + 8px);
-    display: flex; background: var(--field); border-radius: 999px; padding: 4px;
+    position: absolute; left: 0; right: 0; top: calc(100% + 10px);
+    display: flex; background: var(--field); border-radius: 14px; padding: 4px;
     z-index: 6; touch-action: none;
     box-shadow: 0 4px 16px rgba(0,0,0,0.10);
-  }
+  } /* 14px radius + 10px drop = the row reads as the typing field's twin, top edges flush */
   .day-strip span {
     flex: 1; text-align: center; font-family: var(--mono); font-size: 13px;
     padding: 9px 0; border-radius: 999px; color: var(--subtle);
@@ -373,7 +380,7 @@
      same grey surface as the day strip so the two pickers read as one family;
      the current week row lifts to white, the chosen date is the black pill. */
   .cal-pop {
-    position: absolute; left: 0; right: 0; top: calc(100% + 8px);
+    position: absolute; left: 0; right: 0; top: calc(100% + 10px); /* flush with the typing field's top edge, like the day strip */
     background: var(--field); border-radius: 16px; padding: 6px 10px 10px;
     box-shadow: 0 8px 28px rgba(0,0,0,0.12);
     z-index: 7; transform-origin: top center;
@@ -499,6 +506,95 @@
   .confirm-actions button { flex: 1; padding: 10px 0; border-radius: 10px; border: none; font-size: 15px; }
   .confirm-cancel { background: var(--field); color: var(--ink); }
   .confirm-ok { background: var(--ink); color: #fff; font-weight: 600; }
+
+  /* ---------- monthly recap: a full-screen reveal, not a sheet ----------
+     the one surface in the app allowed to take a beat. alive background
+     (slow warm blobs + faint grain), text arrives after the card, spectacle
+     reserved for at most two "earned" moments. */
+  .recap {
+    position: fixed; inset: 0; z-index: 70;
+    background: var(--canvas); overflow: hidden;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  .recap-blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.55; }
+  .recap-blob.b1 { width: 60vmax; height: 60vmax; top: -25vmax; left: -18vmax; background: #EDE4D8; animation: blobDrift1 52s ease-in-out infinite alternate; }
+  .recap-blob.b2 { width: 50vmax; height: 50vmax; bottom: -20vmax; right: -15vmax; background: #DFE7EA; animation: blobDrift2 64s ease-in-out infinite alternate; }
+  .recap-blob.b3 { width: 36vmax; height: 36vmax; top: 30%; left: 55%; background: #EAE0EA; animation: blobDrift3 47s ease-in-out infinite alternate; }
+  @keyframes blobDrift1 { to { transform: translate(9vmax, 7vmax) scale(1.12); } }
+  @keyframes blobDrift2 { to { transform: translate(-8vmax, -6vmax) scale(1.08); } }
+  @keyframes blobDrift3 { to { transform: translate(-10vmax, 5vmax) scale(0.92); } }
+  /* the veil keeps the blobs a whisper; an earned card brightens the whole world instead of animating the text */
+  .recap-veil { position: absolute; inset: 0; background: rgba(242,242,247,0.55); transition: background 2.2s ease; }
+  .recap.lit .recap-veil { background: rgba(250,250,252,0.22); }
+  .recap-grain {
+    position: absolute; inset: 0; opacity: 0.05; pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  }
+  @media (prefers-reduced-motion: reduce) { .recap-blob { animation: none; } .recap-veil { transition: none; } }
+
+  .recap-top {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: calc(env(safe-area-inset-top) + 16px) 20px 0;
+  }
+  .recap-month { font-family: var(--mono); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--subtle); }
+  .recap-dashes { display: flex; gap: 5px; }
+  .recap-dashes span { width: 13px; height: 2px; border-radius: 1px; background: rgba(28,28,30,0.13); transition: background 0.4s ease; }
+  .recap-dashes span.on { background: rgba(28,28,30,0.5); }
+  .recap-x { background: none; border: none; padding: 0 6px; font-size: 22px; font-weight: 300; line-height: 1; color: var(--subtle); }
+
+  .recap-stage {
+    position: absolute; inset: 0; z-index: 1;
+    display: flex; align-items: center; justify-content: center;
+    padding: 84px 30px calc(env(safe-area-inset-bottom) + 84px);
+    cursor: pointer;
+  }
+  .recap-card { max-width: 460px; width: 100%; }
+  .recap-head {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-size: 32px; line-height: 1.22; color: var(--ink); margin: 0;
+    animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .recap-sub {
+    font-size: 15px; line-height: 1.65; color: #55555A; margin: 18px 0 0;
+    white-space: pre-wrap;
+    animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.55s both;
+  }
+  .recap-meta { margin-top: 26px; animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 1.15s both; }
+  @keyframes recapRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  .recap-card.out { animation: recapSink 0.35s ease forwards; pointer-events: none; position: absolute; max-width: 460px; }
+  @keyframes recapSink { to { opacity: 0; transform: translateY(-10px) scale(0.97); } }
+  @media (prefers-reduced-motion: reduce) {
+    .recap-head, .recap-sub, .recap-meta { animation: none; }
+    .recap-card.out { animation: none; opacity: 0; }
+  }
+  .recap-ev-btn {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+    background: none; border: none; padding: 4px 0; color: #A9A9AD; display: block;
+  }
+  .recap-ev { margin: 10px 0 4px; }
+  .recap-ev p {
+    margin: 0 0 8px; font-size: 13px; line-height: 1.55; color: #6B6B70;
+    padding-left: 12px; border-left: 2px solid rgba(28,28,30,0.10);
+  }
+  .recap-verdicts { display: flex; gap: 8px; margin-top: 16px; }
+  .recap-verdicts button {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+    padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(28,28,30,0.12);
+    background: transparent; color: var(--subtle); transition: all 0.15s ease;
+  }
+  .recap-verdicts button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  /* dust catching sunlight — reserved for earned cards, never confetti */
+  .recap-dust {
+    position: absolute; width: 3px; height: 3px; border-radius: 50%;
+    background: rgba(28,28,30,0.35); pointer-events: none;
+    animation: dust 1.9s ease-out forwards;
+  }
+  @keyframes dust {
+    from { opacity: 0; }
+    15%  { opacity: 1; }
+    to   { opacity: 0; transform: translate(var(--dx), var(--dy)); }
+  }
 
   .export-area {
     width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.5;
@@ -814,8 +910,9 @@ function compactText(e) { return truncateWords(plainText(e.text, "▓▓▓"), 1
 function entryWords(e) { return wordCount(plainText(e.text, "▓")); }
 
 // ---------- weekly AI summary (Dot-style) ----------
-// auto-generates ONCE per week when entries span >= 3 distinct days (and a key is set),
-// cached in localStorage. eye icon toggles visibility; tap the text to edit or re-summarize.
+// never auto-generates: once entries span >= 3 distinct days (and a key is set), a magic
+// wand appears — tap it, confirm, and the summary is written and cached in localStorage.
+// eye icon toggles visibility; tap the text to edit or re-summarize.
 const WEEK_SUM_KEY = "weekly-deposits-week-summaries";
 const SHOW_WSUM_KEY = "weekly-deposits-show-week-summary";
 let weekSummaries = {};
@@ -893,6 +990,7 @@ function entryToRow(e) {
     id: e.id, user_id: session.user.id,
     text: e.text || "", tags: e.tags || [],
     year: e.year ?? null, week: e.week ?? null, day: ("day" in e ? e.day : null),
+    month: e.month ?? null,
     locked: !!e.locked, source_id: e.sourceId || null, segmented: !!e.segmented,
     images: e.images || null,
     created_at: e.createdAt, updated_at: e.updatedAt || e.createdAt,
@@ -906,6 +1004,7 @@ function rowToEntry(r) {
     sourceId: r.source_id || null, segmented: !!r.segmented,
     createdAt: r.created_at, updatedAt: r.updated_at
   };
+  if (r.month != null) e.month = r.month; // month-scoped entry (week/day are null)
   if (r.images && Object.keys(r.images).length) e.images = r.images;
   return e;
 }
@@ -970,7 +1069,7 @@ async function pushEntriesNow() {
     const rows = entries.map(entryToRow);
     for (const [id, ts] of Object.entries(tombstones)) {
       rows.push({ id, user_id: session.user.id, text: "", tags: [], year: null, week: null,
-        day: null, locked: false, source_id: null, segmented: false, images: null,
+        day: null, month: null, locked: false, source_id: null, segmented: false, images: null,
         created_at: ts, updated_at: ts, deleted_at: ts });
     }
     if (rows.length) {
@@ -980,8 +1079,9 @@ async function pushEntriesNow() {
         // run in supabase: alter table deposits_entries add column if not exists source_id text;
         //                  alter table deposits_entries add column if not exists segmented boolean not null default false;
         //                  alter table deposits_entries add column if not exists images jsonb;
+        //                  alter table deposits_entries add column if not exists month int;
         console.warn("deposits: newer columns missing in cloud — run the migration; pushing without them");
-        const stripped = rows.map(({ source_id, segmented, images, ...rest }) => rest);
+        const stripped = rows.map(({ source_id, segmented, images, month, ...rest }) => rest);
         const { error: e2 } = await sb.from("deposits_entries").upsert(stripped, { onConflict: "id" });
         if (e2) throw e2;
       } else if (error) throw error;
@@ -1070,11 +1170,11 @@ async function generateWeekSummary(year, week, list) {
     const nowIso = new Date().toISOString();
     weekSummaries[k] = { text: s, createdAt: nowIso, updatedAt: nowIso, edited: false, origin: "ai", version };
     saveWeekSummaries();
-    if (view === "week" && wk.year === year && wk.week === week) render();
   } catch (err) {
-    console.warn("week summary failed", err); // placeholder stays; next render retries
+    console.warn("week summary failed", err); // the wand comes back on re-render — tap to retry
   } finally {
     weekSumInFlight.delete(k);
+    if (view === "week" && wk.year === year && wk.week === week) render();
   }
 }
 
@@ -1151,16 +1251,21 @@ function activeEntries() {
       .filter(e => !e.segmented && e.year === wk.year && e.week === wk.week)
       .sort((a, b) => (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
   }
+  return entriesForMonth(mo.year, mo.month);
+}
+function entriesForMonth(year, month) {
   return entries
     .filter(e => {
       if (e.segmented) return false; // ramble originals live behind their segments, not in views
+      if (e.week == null) return e.year === year && e.month === month; // month-scoped entry
       const mon = mondayOfISOWeek(e.year, e.week);
       const thu = new Date(mon);
       thu.setUTCDate(mon.getUTCDate() + 3); // week belongs to the month its Thursday is in
-      return thu.getUTCFullYear() === mo.year && thu.getUTCMonth() === mo.month;
+      return thu.getUTCFullYear() === year && thu.getUTCMonth() === month;
     })
-    .sort((a, b) => (b.week - a.week) || (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
+    .sort((a, b) => (weekSortKey(b) - weekSortKey(a)) || (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
 }
+function weekSortKey(e) { return e.week == null ? -1 : e.week; } // month-scoped entries land last, like no-day ones
 function groupByTopic(list) {
   const groups = {};
   const order = [...TOPICS.map(t => t.id), ...MODES.map(m => m.id), "untagged"];
@@ -1187,7 +1292,9 @@ function toMarkdown(list, heading) {
       const d = entryDay(e);
       md += "- " + e.text
         + (modes.length ? " _(" + modes.join(", ") + ")_" : "")
-        + " \u2014 " + (d == null ? "" : DAY_TOKENS[d] + ", ") + "W" + pad2(e.week) + "\n";
+        + " \u2014 " + (e.week == null
+          ? monthLabel(e.year, e.month)
+          : (d == null ? "" : DAY_TOKENS[d] + ", ") + "W" + pad2(e.week)) + "\n";
     }
     md += "\n";
   }
@@ -1275,9 +1382,13 @@ function entryEl(e, opts) {
   const d = entryDay(e);
   const bits = [];
   if (opts.showDay !== false && d != null) {
-    bits.push(DAY_TOKENS[d] + (opts.showDate && entryDateStr(e) ? " " + entryDateStr(e) : ""));
+    // month view leads with the date, day token in parens (15/07 (W)); week view is just the token
+    const dstr = opts.showDate ? entryDateStr(e) : null;
+    bits.push(dstr ? dstr + " (" + DAY_TOKENS[d] + ")" : DAY_TOKENS[d]);
   }
-  if (opts.showWeek) bits.push("W" + pad2(e.week));
+  // week-tagged entries (day or not) show their W## in month view; month-scoped ones
+  // have no week to show — the view itself is their scope
+  if (opts.showWeek && e.week != null) bits.push("W" + pad2(e.week));
   if (opts.showWeek && e.year !== currentWk.year) bits.push(String(e.year));
   if (bits.length) meta.appendChild(el("span", { class: "entry-day" }, bits.join(" · ")));
   for (const tg of e.tags) {
@@ -1322,7 +1433,8 @@ function renderDayGroups(list) {
     buckets.push({ label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false } });
   } else {
     for (const w of [...new Set(list.map(e => e.week))]) {
-      buckets.push({ label: "W" + pad2(w), entries: list.filter(e => e.week === w), opts: { showDate: true } });
+      // the null-week bucket holds the month-scoped entries — "anytime", like week view's
+      buckets.push({ label: w == null ? "anytime" : "W" + pad2(w), entries: list.filter(e => e.week === w), opts: { showDate: true } });
     }
   }
   for (const b of buckets) {
@@ -1365,6 +1477,9 @@ function render() {
   if (view === "week") {
     const wsum = weekSummaryBlock(list);
     if (wsum) entriesRoot.appendChild(wsum);
+  } else {
+    const recap = monthRecapBlock(list); // the month's wand: read it back / replay the reading
+    if (recap) entriesRoot.appendChild(recap);
   }
   const mode = layout === "mix" ? (view === "week" ? "day" : "topic") : layout;
   if (mode === "day") renderDayGroups(list);
@@ -1395,11 +1510,21 @@ function openComposer(existing) {
   let tags = existing ? [...existing.tags] : [];
   let images = existing && existing.images ? { ...existing.images } : {};
   let locked = existing ? !!existing.locked : false;
+  // month mode: entries born in the month view belong to the month itself — no week, no
+  // day. an entry keeps its scope for life: editing a month entry never grows week pills.
+  const monthMode = existing ? (existing.week == null && existing.month != null) : view === "month";
+  const cmo = monthMode
+    ? (existing ? { year: existing.year, month: existing.month } : { ...mo })
+    : null;
   let cw = existing
     ? { year: existing.year, week: existing.week }
     : (view === "week" ? { year: wk.year, week: wk.week } : getISOWeek(new Date()));
   let day = existing ? entryDay(existing) : weekdayIndex(new Date());
   const nowWk = getISOWeek(new Date());
+  // the fields that pin an entry to its spot in time — month scope or week(+day) scope
+  const scopeFields = () => monthMode
+    ? { year: cmo.year, month: cmo.month, week: null, day: null }
+    : { year: cw.year, week: cw.week, day };
   // segmentation proposal: null | { busy: true } | { ranges: [{start, end, topic}] }
   let segState = null, segErr = null, segTagOpen = -1;
 
@@ -1613,7 +1738,7 @@ function openComposer(existing) {
       const imgVal = Object.keys(imgs).length ? imgs : undefined;
       if (existing) {
         entries = entries.map(e => e.id === existing.id
-          ? { ...e, text: text.trim(), tags, year: cw.year, week: cw.week, day, locked,
+          ? { ...e, text: text.trim(), tags, ...scopeFields(), locked,
               images: imgVal, updatedAt: new Date().toISOString() }
           : e);
       } else {
@@ -1621,7 +1746,7 @@ function openComposer(existing) {
         entries = [...entries, {
           id: Date.now().toString(36),
           createdAt: stamp, updatedAt: stamp,
-          text: text.trim(), tags, year: cw.year, week: cw.week, day, locked,
+          text: text.trim(), tags, ...scopeFields(), locked,
           images: imgVal
         }];
       }
@@ -1639,12 +1764,12 @@ function openComposer(existing) {
       const srcImgs = imagesUsedIn(text, images);
       let src;
       if (existing) {
-        src = { ...existing, text: text.trim(), tags, year: cw.year, week: cw.week, day, locked,
+        src = { ...existing, text: text.trim(), tags, ...scopeFields(), locked,
           images: Object.keys(srcImgs).length ? srcImgs : undefined, segmented: true, updatedAt: stamp };
         entries = entries.map(e => e.id === existing.id ? src : e);
       } else {
         src = { id: base, createdAt: stamp, updatedAt: stamp, text: text.trim(), tags,
-          year: cw.year, week: cw.week, day, locked, segmented: true,
+          ...scopeFields(), locked, segmented: true,
           images: Object.keys(srcImgs).length ? srcImgs : undefined };
         entries = [...entries, src];
       }
@@ -1656,7 +1781,7 @@ function openComposer(existing) {
           id: base + "s" + i, createdAt: stamp, updatedAt: stamp,
           text: segText,
           tags: [...(rg.topic ? [rg.topic] : []), ...modeTags],
-          year: cw.year, week: cw.week, day, locked: false, sourceId: src.id,
+          ...scopeFields(), locked: false, sourceId: src.id,
           images: Object.keys(segImgs).length ? segImgs : undefined
         };
       });
@@ -1683,7 +1808,16 @@ function openComposer(existing) {
     }, "Save");
     saveBtn.disabled = !text.trim();
 
-    head.appendChild(el("div", { class: "head-pills" }, dayPill, weekPill));
+    if (monthMode) {
+      // month entries carry no week/day — a single quiet pill names the month instead
+      const monthPill = el("button", { class: "day-pill", style: { cursor: "default" } },
+        new Date(cmo.year, cmo.month, 1).toLocaleDateString("en-SG", { month: "short" }).toUpperCase()
+        + (cmo.year !== nowWk.year ? "·" + String(cmo.year).slice(2) : ""));
+      monthPill.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused
+      head.appendChild(el("div", { class: "head-pills" }, monthPill));
+    } else {
+      head.appendChild(el("div", { class: "head-pills" }, dayPill, weekPill));
+    }
     head.appendChild(el("span", { class: "title" },
       segState && segState.ranges ? segState.ranges.length + " deposits" : (existing ? "Edit entry" : "New entry")));
     head.appendChild(saveBtn);
@@ -2049,7 +2183,10 @@ function openRambleView(src) {
   const segs = entries.filter(e => e.sourceId === src.id);
   const d = entryDay(src);
   sheet.appendChild(el("p", { class: "seg-note", style: { margin: "0 0 12px" } },
-    "kept as written · " + (d == null ? "" : DAY_TOKENS[d] + ", ") + "W" + pad2(src.week)
+    "kept as written · "
+    + (src.week == null
+      ? monthLabel(src.year, src.month)
+      : (d == null ? "" : DAY_TOKENS[d] + ", ") + "W" + pad2(src.week))
     + " · now " + segs.length + " deposits"));
 
   const body = el("p", { class: "ramble-text" });
@@ -2090,10 +2227,18 @@ function openCalendar() {
   }
 
   sheetRoot.innerHTML = ""; // never stack a second sheet
-  const overlay = el("div", { class: "overlay", onclick: close });
+  const overlay = el("div", { class: "overlay", onclick: dismiss });
   const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
   overlay.appendChild(sheet);
   function close() { sheetRoot.innerHTML = ""; }
+  // month view: browsing to another month and tapping away lands the view there —
+  // no need to also hit the title. week view keeps its no-op dismiss.
+  function dismiss() {
+    if (view === "month" && (cm.year !== mo.year || cm.month !== mo.month)) {
+      mo = { ...cm }; close(); render(); return;
+    }
+    close();
+  }
 
   function build() {
     sheet.innerHTML = "";
@@ -2191,6 +2336,7 @@ periodLabel.addEventListener("click", () => {
 // ---------- weekly summary block ----------
 const EYE_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg>';
+const WAND_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg>';
 
 // which bucket the current summary falls in: MINE (hand-written), or V1/V2… (AI takes).
 // legacy records predate origin/version — treat them as the first AI take.
@@ -2199,10 +2345,9 @@ function summaryPill(rec) {
   return rec.origin === "mine" ? "MINE" : "V" + (rec.version || 1);
 }
 
-// the week's summary surface only wakes at its own sunday 10:00 (local time) — a
-// sunday-morning reflection ritual, once the week is essentially lived, even if it
-// already meets the day-count/key requirements. past weeks are always past their
-// sunday; future weeks aren't.
+// the hand-write invite only wakes at the week's own sunday 10:00 (local time) — a
+// sunday-morning reflection ritual. (the AI path no longer waits for sunday: the wand
+// shows as soon as 3 days are filled, and generates only on an explicit tap+confirm.)
 function weekSummaryUnlocked(year, week) {
   const mon = mondayOfISOWeek(year, week);
   const sun = new Date(mon);
@@ -2215,14 +2360,35 @@ function weekSummaryBlock(list) {
   const k = weekKey(wk.year, wk.week);
   const rec = weekSummaries[k];
   const filledDays = new Set(list.map(entryDay).filter(d => d != null)).size;
-  const unlocked = weekSummaryUnlocked(wk.year, wk.week);
-  const aiEligible = filledDays >= 3 && apiKey && unlocked;
 
-  // no summary yet and AI won't auto-generate → offer to hand-write one (saves as MINE),
-  // but only once the week has reached its sunday 10am. before that the whole surface stays
-  // dormant (no invite, no eye) unless a record already exists. suppressed when hidden too.
-  if (!rec && !aiEligible) {
-    if (!showWeekSummary || !unlocked) return null;
+  if (!rec) {
+    // a requested summary is on its way — hold the pending line
+    if (weekSumInFlight.has(k)) {
+      const wrap = el("div", { class: "wsum" });
+      wrap.appendChild(el("p", { class: "wsum-text pending" }, "Summarizing the week…"));
+      return wrap;
+    }
+    // 3+ days filled and a key set → the magic wand appears where the collapsed eye
+    // usually sits. tapping it asks first; nothing generates on its own anymore.
+    if (filledDays >= 3 && apiKey) {
+      const wrap = el("div", { class: "wsum collapsed" });
+      const wand = el("button", { class: "wsum-eye wsum-wand", "aria-label": "Summarize this week" });
+      wand.innerHTML = WAND_ICON;
+      wand.addEventListener("click", () => {
+        confirmAction("Create a summary of this week?", "Summarize", () => {
+          showWeekSummary = true; // she asked for it — make sure it isn't hidden when it lands
+          try { localStorage.setItem(SHOW_WSUM_KEY, "1"); } catch (e) {}
+          generateWeekSummary(wk.year, wk.week, list);
+          render(); // shows the pending line while the summary is written
+        });
+      });
+      wrap.appendChild(wand);
+      return wrap;
+    }
+    // no wand (no key / fewer than 3 days) → offer to hand-write one (saves as MINE),
+    // but only once the week has reached its sunday 10am. before that the whole surface
+    // stays dormant (no invite, no eye). suppressed when hidden too.
+    if (!showWeekSummary || !weekSummaryUnlocked(wk.year, wk.week)) return null;
     const wrap = el("div", { class: "wsum" });
     wrap.appendChild(el("button", {
       class: "wsum-add",
@@ -2242,27 +2408,22 @@ function weekSummaryBlock(list) {
   wrap.appendChild(eye);
 
   if (showWeekSummary) {
-    if (!rec) {
-      generateWeekSummary(wk.year, wk.week, list); // one-off; cached from then on
-      wrap.appendChild(el("p", { class: "wsum-text pending" }, "Summarizing the week…"));
-    } else {
-      const open = () => openWeekSummaryEditor(wk.year, wk.week, list);
-      // every take the week has: V1…Vn then MINE. active pill opens the editor,
-      // any other pill switches the week to that take (and the choice persists/syncs).
-      const slots = { ...(weekSummaryVersions[k] || {}) };
-      slots[summarySlot(rec)] = rec;
-      const ids = Object.keys(slots).sort((a, b) =>
-        ((a === "mine") - (b === "mine")) || (parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10)));
-      const cur = summarySlot(rec);
-      for (const id of ids) {
-        const on = id === cur;
-        wrap.appendChild(el("span", {
-          class: "wsum-pill" + (on && ids.length > 1 ? " on" : ""),
-          onclick: on ? open : () => switchWeekSummary(k, slots[id])
-        }, id === "mine" ? "MINE" : id.toUpperCase()));
-      }
-      wrap.appendChild(el("p", { class: "wsum-text", onclick: open }, sentenceCase(rec.text)));
+    const open = () => openWeekSummaryEditor(wk.year, wk.week, list);
+    // every take the week has: V1…Vn then MINE. active pill opens the editor,
+    // any other pill switches the week to that take (and the choice persists/syncs).
+    const slots = { ...(weekSummaryVersions[k] || {}) };
+    slots[summarySlot(rec)] = rec;
+    const ids = Object.keys(slots).sort((a, b) =>
+      ((a === "mine") - (b === "mine")) || (parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10)));
+    const cur = summarySlot(rec);
+    for (const id of ids) {
+      const on = id === cur;
+      wrap.appendChild(el("span", {
+        class: "wsum-pill" + (on && ids.length > 1 ? " on" : ""),
+        onclick: on ? open : () => switchWeekSummary(k, slots[id])
+      }, id === "mine" ? "MINE" : id.toUpperCase()));
     }
+    wrap.appendChild(el("p", { class: "wsum-text", onclick: open }, sentenceCase(rec.text)));
   }
   return wrap;
 }
@@ -2360,6 +2521,329 @@ function openWeekSummaryEditor(year, week, list) {
   sheetRoot.appendChild(overlay);
 }
 
+// ---------- monthly recap: the month, read back ----------
+// one sonnet call reads the whole month and returns observation cards, each citing
+// the entry ids it grew from. cards that can't cite don't survive — the app drops
+// them before she ever sees one. verdicts (keep / let it go) are stored and fed to
+// the next month's reading, so the AI learns what rings true. device-local for now
+// (a recap is regenerable, so losing it costs one api call, not data).
+const RECAP_KEY = "weekly-deposits-month-recaps";
+const RECAP_MIN_ENTRIES = 5;
+let monthRecaps = {};
+try { monthRecaps = JSON.parse(localStorage.getItem(RECAP_KEY)) || {}; } catch (e) {}
+function saveMonthRecaps() {
+  try { localStorage.setItem(RECAP_KEY, JSON.stringify(monthRecaps)); } catch (e) {}
+}
+function monthKey(year, month) { return year + "-M" + pad2(month + 1); }
+function monthNameOf(year, month) {
+  return new Date(year, month, 1).toLocaleDateString("en-SG", { month: "long" }).toLowerCase();
+}
+
+// strict schema — the api guarantees the reply parses; grounding is still checked app-side
+const RECAP_SCHEMA = {
+  type: "object",
+  properties: {
+    cards: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          headline: { type: "string" },
+          support: { type: "string" },
+          evidence: { type: "array", items: { type: "string" } },
+          earned: { type: "boolean" }
+        },
+        required: ["headline", "support", "evidence", "earned"],
+        additionalProperties: false
+      }
+    },
+    title: { type: "string" }
+  },
+  required: ["cards", "title"],
+  additionalProperties: false
+};
+
+const RECAP_SYSTEM = "You are reading one month of Marilyn's personal journal entries to write her monthly recap: a handful of observations that show her the month's patterns — things she might not have noticed herself. Rules: 3 to 8 cards; a thin or scattered month earns fewer, and when no single thread runs through the month it is fine for the cards to be small specific moments instead of themes. Every card must be grounded in specific entries and cite 1-4 of their ids in evidence — an observation you cannot cite must not be written. headline is one short sentence, an observation rather than a statistic. support is 1-3 short lines expanding it; borrowing her own words is good. earned is true on at most 2 cards that deserve a moment of weight — a real shift, a milestone, something worth sitting with — and false on everything else. title is what the month would be called if it had a title: a short phrase (2-6 words) only this month could produce, defensible from the entries, lowercase. Voice: write exactly the way the entries read — lowercase, plain, concrete, warm but dry. Never use: quietly, gently, softly, simply, truly, journey, chapter, embrace, whirlwind. No exclamation marks, no horoscope vagueness — name the actual things.";
+
+const recapInFlight = new Set();
+async function startMonthRecap(year, month) {
+  const k = monthKey(year, month);
+  if (!apiKey || recapInFlight.has(k)) return;
+  recapInFlight.add(k);
+  if (view === "month") render(); // the "reading…" line appears
+  try {
+    const list = entriesForMonth(year, month);
+    const lines = list.map(e => {
+      const labels = e.tags.map(tg => (topicById[tg] || modeById[tg] || {}).label).filter(Boolean).join(", ");
+      const when = e.week == null ? "month-wide"
+        : (entryDay(e) != null && entryDateStr(e)) ? entryDateStr(e) : "W" + pad2(e.week);
+      return e.id + " | " + when + " | " + (labels || "untagged") + " | " + plainText(e.text, "[…]");
+    });
+    // her hand-written week summaries are the purest voice reference available
+    const mine = Object.values(weekSummaries)
+      .filter(r => r.origin === "mine" && r.text).slice(-5).map(r => "- " + r.text);
+    // last month's verdicts teach this month's reading
+    const pm = month === 0 ? { year: year - 1, month: 11 } : { year, month: month - 1 };
+    const prev = monthRecaps[monthKey(pm.year, pm.month)];
+    let feedback = "";
+    if (prev && prev.verdicts && Object.keys(prev.verdicts).length) {
+      const kept = [], letgo = [];
+      prev.cards.forEach((cd, i) => {
+        if (prev.verdicts[i] === "keep") kept.push(cd.headline);
+        if (prev.verdicts[i] === "letgo") letgo.push(cd.headline);
+      });
+      if (kept.length) feedback += "\n\nLAST MONTH, OBSERVATIONS SHE KEPT (this register rang true):\n" + kept.map(h => "- " + h).join("\n");
+      if (letgo.length) feedback += "\n\nLAST MONTH, OBSERVATIONS SHE LET GO (missed — don't repeat this register):\n" + letgo.map(h => "- " + h).join("\n");
+    }
+    const input = "THE MONTH: " + monthNameOf(year, month) + " " + year
+      + "\n\nENTRIES (id | when | topics | text):\n" + lines.join("\n")
+      + (mine.length ? "\n\nHER OWN WORDS, FOR VOICE (week summaries she wrote herself):\n" + mine.join("\n") : "")
+      + feedback;
+
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-5", // reads a month better than haiku; one call a month, a few cents
+        max_tokens: 6000, // headroom: sonnet 5 thinks before writing, and thinking counts against this
+        output_config: { format: { type: "json_schema", schema: RECAP_SCHEMA } },
+        system: RECAP_SYSTEM,
+        messages: [{ role: "user", content: input }]
+      })
+    });
+    if (!r.ok) throw new Error("api " + r.status);
+    const data = await r.json();
+    // thinking blocks precede the text block on sonnet 5 — find, don't index
+    const textBlock = (data.content || []).find(b => b.type === "text");
+    const parsed = JSON.parse((textBlock && textBlock.text) || "");
+
+    // grounding pass: evidence ids must resolve to real entries; snapshots of her words
+    // are stored on the card so a later edit/delete never breaks a saved recap
+    const byId = new Map(list.map(e => [e.id, e]));
+    const cards = (parsed.cards || []).map(cd => ({
+      headline: String(cd.headline || "").trim(),
+      support: String(cd.support || "").trim(),
+      earned: !!cd.earned,
+      evidence: [...new Set(cd.evidence || [])].map(id => byId.get(id)).filter(Boolean)
+        .map(e => ({ id: e.id, text: truncateWords(plainText(e.text, "▓▓▓"), 28) }))
+    })).filter(cd => cd.headline && cd.evidence.length); // can't cite it → she never sees it
+    let earnedCount = 0; // spectacle budget enforced here, not left to the model's enthusiasm
+    for (const cd of cards) if (cd.earned && ++earnedCount > 2) cd.earned = false;
+    if (!cards.length) throw new Error("no grounded cards");
+
+    monthRecaps[k] = { cards, title: String(parsed.title || "").trim(), createdAt: new Date().toISOString(), verdicts: {} };
+    saveMonthRecaps();
+    if (view === "month" && mo.year === year && mo.month === month) openRecap(year, month);
+  } catch (err) {
+    console.warn("month recap failed", err); // wand returns on re-render; tap to retry
+  } finally {
+    recapInFlight.delete(k);
+    if (view === "month" && mo.year === year && mo.month === month) render();
+  }
+}
+
+// the wand row in month view — same collapsed-eye spot as the week wand.
+// no recap yet: tap → confirm → generate. recap saved: tap → straight back in.
+function monthRecapBlock(list) {
+  const k = monthKey(mo.year, mo.month);
+  const monthName = monthNameOf(mo.year, mo.month);
+  if (recapInFlight.has(k)) {
+    const wrap = el("div", { class: "wsum" });
+    wrap.appendChild(el("p", { class: "wsum-text pending" }, "Reading " + monthName + "…"));
+    return wrap;
+  }
+  const rec = monthRecaps[k];
+  if (!rec && !(apiKey && list.length >= RECAP_MIN_ENTRIES)) return null;
+  const wrap = el("div", { class: "wsum collapsed" });
+  const wand = el("button", { class: "wsum-eye wsum-wand", "aria-label": rec ? "Replay this month's reading" : "Read this month back" });
+  wand.innerHTML = WAND_ICON;
+  wand.addEventListener("click", () => {
+    if (monthRecaps[k]) { openRecap(mo.year, mo.month); return; }
+    confirmAction("Read " + monthName + " back? A few observations, one at a time.", "Read it",
+      () => startMonthRecap(mo.year, mo.month));
+  });
+  wrap.appendChild(wand);
+  return wrap;
+}
+
+// ---------- the reveal itself ----------
+function openRecap(year, month) {
+  const k = monthKey(year, month);
+  const rec = monthRecaps[k];
+  if (!rec || !rec.cards || !rec.cards.length) return;
+  rec.verdicts = rec.verdicts || {};
+  const monthName = monthNameOf(year, month);
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  lockPageScroll();
+  const root = el("div", { class: "recap" });
+  ["b1", "b2", "b3"].forEach(b => root.appendChild(el("div", { class: "recap-blob " + b })));
+  root.appendChild(el("div", { class: "recap-veil" }));
+  root.appendChild(el("div", { class: "recap-grain" }));
+
+  const total = rec.cards.length + 3; // intro + cards + title + end
+  const dashes = el("div", { class: "recap-dashes" });
+  for (let i = 0; i < total; i++) dashes.appendChild(el("span"));
+  root.appendChild(el("div", { class: "recap-top" },
+    el("span", { class: "recap-month" }, monthName + " " + year),
+    dashes,
+    el("button", { class: "recap-x", "aria-label": "Close", onclick: ev => { ev.stopPropagation(); close(); } }, "×")
+  ));
+
+  const stage = el("div", { class: "recap-stage" });
+  root.appendChild(stage);
+
+  let idx = 0, card = null, titleTimer = null;
+
+  function close() {
+    clearInterval(titleTimer);
+    root.remove();
+    unlockPageScroll();
+  }
+  function setDashes() {
+    Array.from(dashes.children).forEach((d, i) => d.classList.toggle("on", i <= idx));
+  }
+  function dustBurst(c) {
+    const head = c.querySelector(".recap-head");
+    if (!head) return;
+    const r = head.getBoundingClientRect();
+    for (let i = 0; i < 14; i++) {
+      const d = el("span", { class: "recap-dust" });
+      d.style.left = (r.left + Math.random() * r.width) + "px";
+      d.style.top = (r.top + Math.random() * r.height) + "px";
+      d.style.setProperty("--dx", (Math.random() * 60 - 30) + "px");
+      d.style.setProperty("--dy", (-30 - Math.random() * 50) + "px");
+      d.style.animationDelay = (Math.random() * 0.5) + "s";
+      root.appendChild(d);
+      setTimeout(() => d.remove(), 2700);
+    }
+  }
+
+  function show(i) {
+    idx = Math.max(0, Math.min(total - 1, i));
+    setDashes();
+    clearInterval(titleTimer);
+    root.classList.remove("lit");
+    if (card) {
+      const old = card;
+      old.classList.add("out"); // recedes while the next one arrives — nothing teleports
+      setTimeout(() => old.remove(), 380);
+    }
+    card = buildCard(idx);
+    stage.appendChild(card);
+  }
+
+  function buildCard(i) {
+    const c = el("div", { class: "recap-card" });
+    if (i === 0) {
+      // intro: nothing arrives immediately
+      c.appendChild(el("p", { class: "recap-head", style: { fontSize: "44px" } }, monthName + ","));
+      c.appendChild(el("p", { class: "recap-sub" }, "read back."));
+      c.appendChild(el("p", { class: "recap-meta recap-ev-btn", style: { cursor: "pointer" } }, "tap to begin"));
+    } else if (i <= rec.cards.length) {
+      const cd = rec.cards[i - 1], ci = i - 1;
+      c.appendChild(el("p", { class: "recap-head" }, cd.headline));
+      if (cd.support) c.appendChild(el("p", { class: "recap-sub" }, cd.support));
+      const meta = el("div", { class: "recap-meta" });
+      // progressive disclosure: the receipts unfold only when asked for
+      const evWrap = el("div", { class: "recap-ev", style: { display: "none" } });
+      cd.evidence.forEach(sv => evWrap.appendChild(el("p", null, sv.text + "…")));
+      meta.appendChild(el("button", {
+        class: "recap-ev-btn",
+        onclick: ev => {
+          ev.stopPropagation();
+          evWrap.style.display = evWrap.style.display === "none" ? "" : "none";
+        }
+      }, "from your words"));
+      meta.appendChild(evWrap);
+      const verdicts = el("div", { class: "recap-verdicts" });
+      [["keep", "keep"], ["letgo", "let it go"]].forEach(([id, label]) => {
+        verdicts.appendChild(el("button", {
+          class: rec.verdicts[ci] === id ? "on" : "",
+          onclick: ev => {
+            ev.stopPropagation();
+            if (rec.verdicts[ci] === id) delete rec.verdicts[ci]; // tap again = undecided
+            else rec.verdicts[ci] = id;
+            saveMonthRecaps();
+            Array.from(verdicts.children).forEach((b, j) =>
+              b.classList.toggle("on", rec.verdicts[ci] === (j === 0 ? "keep" : "letgo")));
+          }
+        }, label));
+      });
+      meta.appendChild(verdicts);
+      c.appendChild(meta);
+      if (cd.earned) {
+        // one second of silence first — then the world brightens and dust catches the light
+        setTimeout(() => {
+          if (!c.isConnected) return;
+          root.classList.add("lit");
+          if (!reduceMotion) dustBurst(c);
+        }, 1000);
+      }
+    } else if (i === rec.cards.length + 1 && rec.title) {
+      c.appendChild(el("p", { class: "recap-sub", style: { margin: "0 0 14px" } }, "if " + monthName + " had a title…"));
+      const t = el("p", { class: "recap-head" }, " ");
+      c.appendChild(t);
+      if (reduceMotion) t.textContent = rec.title;
+      else {
+        // a beat of silence, then the title types itself out. clearInterval works on
+        // timeout ids too, so show()/close() cancel whichever phase is live; the
+        // isConnected guard covers a card swapped out mid-race.
+        let pos = 0;
+        titleTimer = setTimeout(() => {
+          titleTimer = setInterval(() => {
+            if (!t.isConnected) { clearInterval(titleTimer); return; }
+            pos++;
+            t.textContent = rec.title.slice(0, pos);
+            if (pos >= rec.title.length) clearInterval(titleTimer);
+          }, 60);
+        }, 900);
+      }
+    } else if (i === rec.cards.length + 1) {
+      // no title came back — jump the pacing straight to the end card's content
+      return buildCard(i + 1);
+    } else {
+      const kept = Object.values(rec.verdicts).filter(v => v === "keep").length;
+      c.appendChild(el("p", { class: "recap-head" }, "that's " + monthName + "."));
+      c.appendChild(el("p", { class: "recap-sub" },
+        rec.cards.length + " observations" + (kept ? " · " + kept + " kept" : "")
+        + "\nwhat you keep and let go shapes next month's reading."));
+      const meta = el("div", { class: "recap-meta" });
+      meta.appendChild(el("button", { class: "recap-ev-btn", style: { marginBottom: "8px" }, onclick: ev => { ev.stopPropagation(); close(); } }, "done"));
+      meta.appendChild(el("button", {
+        class: "recap-ev-btn",
+        onclick: ev => {
+          ev.stopPropagation();
+          confirmAction("Read " + monthName + " again, fresh? This reading and its keep / let-go choices will be replaced.", "Re-read", () => {
+            close();
+            delete monthRecaps[k];
+            saveMonthRecaps();
+            startMonthRecap(year, month);
+          });
+        }
+      }, "read it fresh"));
+      c.appendChild(meta);
+    }
+    return c;
+  }
+
+  // stories grammar: left edge steps back, everywhere else steps forward.
+  // buttons stopPropagation, so verdicts/evidence never advance the deck.
+  stage.addEventListener("click", ev => {
+    const r = stage.getBoundingClientRect();
+    if (ev.clientX - r.left < r.width * 0.22) { if (idx > 0) show(idx - 1); }
+    else if (idx < total - 1) show(idx + 1);
+  });
+
+  document.body.appendChild(root);
+  show(0);
+}
+
 // ---------- search ----------
 // flatten raw text into display segments: bold flagged (for the highlight rule),
 // redacted content replaced with a mask so search results can never unveil it
@@ -2433,7 +2917,8 @@ function searchResultEl(e, q) {
   const d = entryDay(e);
   const bits = [];
   if (d != null) bits.push(DAY_TOKENS[d]);
-  bits.push("W" + pad2(e.week));
+  if (e.week != null) bits.push("W" + pad2(e.week));
+  else bits.push(new Date(e.year, e.month, 1).toLocaleDateString("en-SG", { month: "short" })); // month-scoped
   if (e.year !== currentWk.year) bits.push(String(e.year));
   meta.appendChild(el("span", { class: "entry-day" }, bits.join(" · ")));
   for (const tg of e.tags) {
@@ -2493,6 +2978,7 @@ function openSearch() {
   function inScope(e) {
     if (scope === "week") return e.year === scopeWk.year && e.week === scopeWk.week;
     if (scope === "month") {
+      if (e.week == null) return e.year === scopeMo.year && e.month === scopeMo.month; // month-scoped entry
       const mon = mondayOfISOWeek(e.year, e.week);
       const thu = new Date(mon);
       thu.setUTCDate(mon.getUTCDate() + 3);
@@ -2511,7 +2997,7 @@ function openSearch() {
       return;
     }
     const found = entries.filter(e => !e.segmented && inScope(e) && matches(e))
-      .sort((a, b) => (b.year - a.year) || (b.week - a.week) || (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
+      .sort((a, b) => (b.year - a.year) || (weekSortKey(b) - weekSortKey(a)) || (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
     resultsRoot.appendChild(el("p", { class: "search-count" }, found.length + " found"));
     if (!found.length) return;
     const card = el("div", { class: "group-card" });
@@ -2618,7 +3104,7 @@ function openSettings() {
     });
     sheet.appendChild(input);
     sheet.appendChild(el("p", { class: "settings-note" },
-      "stored only on this device. used for the weekly summary (via haiku, fractions of a cent) that appears once a week has entries on 3 or more days. tap a summary to edit or re-summarize; the eye beside it hides it."));
+      "stored only on this device. used for the weekly summary (via haiku, fractions of a cent) — once a week has entries on 3 or more days, a wand appears to create it — and for the monthly reading (via sonnet, a few cents): in month view, the wand reads the whole month back as observation cards, one at a time."));
   }
 
   build();
