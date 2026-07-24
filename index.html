@@ -378,7 +378,8 @@
   /* sheet */
   .overlay {
     position: fixed; inset: 0; z-index: 50;
-    background: rgba(0,0,0,0.25);
+    background: rgba(0,0,0,0.4);
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
     display: flex; align-items: flex-end; justify-content: center;
   }
   .sheet {
@@ -392,13 +393,22 @@
   @keyframes slideUp { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
 
-  .grabber { width: 36px; height: 5px; border-radius: 3px; background: var(--hairline); margin: 0 auto 12px; }
+  /* the notch doubles as a resize handle for the composer: drag it to set the height */
+  .grabber {
+    width: 36px; height: 5px; border-radius: 3px;
+    background: var(--hairline); background-clip: content-box; box-sizing: content-box;
+    padding: 9px 22px; margin: -5px auto 3px;
+    cursor: ns-resize; touch-action: none; user-select: none; -webkit-user-select: none;
+  }
   .sheet-head {
     position: relative;
     display: flex; justify-content: space-between; align-items: center;
     margin-bottom: 10px;
   }
-  .sheet-head .title { font-size: 15px; font-weight: 600; }
+  .sheet-head .title {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    font-size: 15px; font-weight: 600; pointer-events: none; white-space: nowrap;
+  }
   .save {
     font-size: 15px; background: none; border: none; padding: 4px;
     color: var(--ink); font-weight: 600;
@@ -1677,6 +1687,8 @@ function openComposer(existing) {
     : { year: cw.year, week: cw.week, day };
   // segmentation proposal: null | { busy: true } | { ranges: [{start, end, topic}] }
   let segState = null, segErr = null, segTagOpen = -1;
+  // manual composer height (px) set by dragging the notch; persists across rebuilds
+  let manualHeight = null;
 
   sheetRoot.innerHTML = ""; // never stack on another sheet (composer can open from search results)
   lockPageScroll();
@@ -1710,7 +1722,8 @@ function openComposer(existing) {
 
   function build() {
     sheet.innerHTML = "";
-    sheet.appendChild(el("div", { class: "grabber" }));
+    const grabber = el("div", { class: "grabber", title: "Drag to resize" });
+    sheet.appendChild(grabber);
 
     // ---- header: day scrubber | title | save ----
     const head = el("div", { class: "sheet-head" });
@@ -1980,11 +1993,41 @@ function openComposer(existing) {
     const ta = el("textarea", { rows: "4", class: "ta-entry", placeholder: "deposit a thought\u2026" });
     ta.value = text;
     // grows with content up to the CSS max-height, then scrolls internally \u2014 so
-    // "topic" stays peeking below rather than getting pushed off-screen entirely
-    function autoGrow() { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; }
+    // "topic" stays peeking below rather than getting pushed off-screen entirely.
+    // once the notch has been dragged, that height wins and content just scrolls within it.
+    function autoGrow() {
+      if (manualHeight != null) { ta.style.height = manualHeight + "px"; return; }
+      ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px";
+    }
     ta.addEventListener("input", () => { text = ta.value; saveBtn.disabled = !text.trim(); autoGrow(); });
     sheet.appendChild(ta);
     requestAnimationFrame(autoGrow); // ta isn't attached to the document until after build() returns
+
+    // ---- notch = resize handle: drag it up to grow the writing surface, down to shrink ----
+    grabber.addEventListener("pointerdown", ev => {
+      ev.preventDefault();
+      const startY = ev.clientY;
+      const startH = ta.getBoundingClientRect().height;
+      const maxH = Math.round(window.innerHeight * 0.7);
+      grabber.style.cursor = "grabbing";
+      try { grabber.setPointerCapture(ev.pointerId); } catch (e) {}
+      const onMove = e => {
+        const h = Math.max(120, Math.min(maxH, Math.round(startH + (startY - e.clientY))));
+        manualHeight = h;
+        // an explicit height overrides the CSS min/max clamp so the drag feels 1:1
+        ta.style.maxHeight = "none"; ta.style.height = h + "px";
+      };
+      const onUp = e => {
+        grabber.removeEventListener("pointermove", onMove);
+        grabber.removeEventListener("pointerup", onUp);
+        grabber.style.cursor = "";
+        try { grabber.releasePointerCapture(e.pointerId); } catch (err) {}
+      };
+      grabber.addEventListener("pointermove", onMove);
+      grabber.addEventListener("pointerup", onUp);
+    });
+    // a height chosen earlier survives a rebuild (day/week change)
+    if (manualHeight != null) { ta.style.maxHeight = "none"; ta.style.height = manualHeight + "px"; }
 
     // shared image pipeline: ⌘V paste and the format-bar photo button both land here.
     // the image is downscaled (max 1100px), stored on the entry, and referenced inline
