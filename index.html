@@ -3292,9 +3292,11 @@ function openRecap(year, month) {
 // a first reading of the week arrives here — four slow breaths, then it collapses to the
 // quiet wsum line. same stories grammar (tap forward, tap the left edge to step back),
 // fewer panels than the month, one crescendo, and no keep/let-go verdicts.
-function openWeekReveal(year, week, list) {
+function openWeekReveal(year, week, list, take) {
   const k = weekKey(year, week);
-  const rec = weekSummaries[k];
+  // `take` lets you replay the reading behind a specific version (V1/V2/V3/MINE)
+  // without touching which one is current — default is the week's current take.
+  const rec = take || weekSummaries[k];
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const range = weekRangeLabel(year, week);
 
@@ -3448,6 +3450,8 @@ function openWeekReveal(year, week, list) {
       const ids = Object.keys(slots).sort((a, b) =>
         ((a === "mine") - (b === "mine")) || (parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10)));
       if (ids.length > 1) {
+        // each take's own reading — tap to replay the reveal for that version. purely a
+        // viewing switch: the week's current take (and the whole back-catalogue) is untouched.
         const pills = el("div", { style: { marginBottom: "14px" } });
         ids.forEach(id => {
           const on = rec && id === summarySlot(rec);
@@ -3456,9 +3460,8 @@ function openWeekReveal(year, week, list) {
             onclick: ev => {
               ev.stopPropagation();
               if (on) return;
-              switchWeekSummary(k, slots[id]);
               close();
-              openWeekReveal(year, week, list);
+              openWeekReveal(year, week, list, slots[id]);
             }
           }, id === "mine" ? "MINE" : id.toUpperCase()));
         });
