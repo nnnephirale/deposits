@@ -1689,6 +1689,8 @@ function openComposer(existing) {
   let segState = null, segErr = null, segTagOpen = -1;
   // manual composer height (px) set by dragging the notch; persists across rebuilds
   let manualHeight = null;
+  // once the format bar has shown, keep it shown (survives rebuilds too — no reflow jump)
+  let barShown = false;
 
   sheetRoot.innerHTML = ""; // never stack on another sheet (composer can open from search results)
   lockPageScroll();
@@ -2008,7 +2010,14 @@ function openComposer(existing) {
       ev.preventDefault();
       const startY = ev.clientY;
       const startH = ta.getBoundingClientRect().height;
-      const maxH = Math.round(window.innerHeight * 0.7);
+      // maximise the writing surface up to the point where the sheet exactly fills the
+      // viewport minus a minimal tap-away gap — so dragging all the way up never spawns a
+      // scrollbar. chrome = everything in the sheet that isn't the textarea (grabber, head,
+      // format bar, topic/mode sections, paddings), measured live so it stays honest.
+      const TOP_GAP = Math.max(28, Math.round(window.innerHeight * 0.06));
+      const chrome = sheet.scrollHeight - startH;
+      const maxH = Math.max(120, Math.round(window.innerHeight - TOP_GAP - chrome));
+      sheet.style.maxHeight = (window.innerHeight - TOP_GAP) + "px"; // let the sheet grow to match
       grabber.style.cursor = "grabbing";
       try { grabber.setPointerCapture(ev.pointerId); } catch (e) {}
       const onMove = e => {
@@ -2102,10 +2111,14 @@ function openComposer(existing) {
     // ---- format bar: line ops (• ⇥ ⇤) while just typing, span ops (B I U M R L)
     // once text is selected — the row swaps contents rather than growing ----
     const fmtBar = el("div", { class: "fmt-bar" });
+    // once the bar has appeared it stays put for the life of the composer: hiding it on
+    // blur reflows the sheet, and the height jump made it easy to tap the backdrop by
+    // accident and trip the discard prompt. it still swaps line-ops <-> span-ops.
     const updateBar = () => {
       const hasSel = ta.selectionStart !== ta.selectionEnd;
       fmtBar.classList.toggle("has-sel", hasSel);
-      fmtBar.classList.toggle("show", hasSel || document.activeElement === ta);
+      if (hasSel || document.activeElement === ta) barShown = true;
+      fmtBar.classList.toggle("show", barShown);
     };
     ["select", "keyup", "pointerup", "touchend", "input", "focus", "blur"].forEach(evt => ta.addEventListener(evt, updateBar));
 
