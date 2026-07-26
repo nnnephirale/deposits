@@ -204,26 +204,33 @@
 
   /* full-screen image preview — frosted, blurred backdrop with an optional size rail */
   .img-preview-back {
-    position: fixed; inset: 0; z-index: 90;
+    position: fixed; inset: 0; height: 100dvh; z-index: 90;
     display: flex; align-items: center; justify-content: center;
-    padding: 24px;
+    padding: 20px;
     background: rgba(28,28,30,0.34);
     -webkit-backdrop-filter: blur(18px) saturate(1.1); backdrop-filter: blur(18px) saturate(1.1);
     opacity: 0; transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .img-preview-back.show { opacity: 1; }
+  /* stage fills the backdrop, so the photo is measured against the room actually there —
+     88vh guessed, and a long screenshot spent the guess plus the size rail's share of it */
   .img-preview-stage {
-    display: flex; align-items: center; gap: 16px;
-    max-width: 100%; max-height: 100%;
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    width: 100%; height: 100%; min-width: 0; min-height: 0;
     transform: scale(0.985); transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
   .img-preview-back.show .img-preview-stage { transform: none; }
+  /* side-by-side: the photo is a direct flex item so it stays hugging the rail (a wrapper
+     box would reserve its untrimmed width and push the rail away). mobile stacks — below */
+  .img-preview-frame { display: contents; }
   .img-preview-img {
-    max-width: min(88vw, 900px); max-height: 88vh;
+    flex: 0 1 auto; min-width: 0;
+    max-width: min(100%, 900px); max-height: 100%;
     border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,0.4);
     object-fit: contain;
   }
   .img-size-rail {
+    flex: none;
     display: flex; flex-direction: column; gap: 6px;
     background: rgba(255,255,255,0.9);
     -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
@@ -244,6 +251,12 @@
   .img-size-btn.active { background: var(--ink); color: #fff; }
   @media (max-width: 560px) {
     .img-preview-stage { flex-direction: column; gap: 12px; }
+    /* stacked: the rail claims its row first and the photo shrinks into whatever height is
+       left, so the size buttons are always reachable however long the screenshot is */
+    .img-preview-frame {
+      display: flex; flex: 0 1 auto; min-height: 0; min-width: 0;
+      align-items: center; justify-content: center;
+    }
     .img-size-rail { flex-direction: row; padding: 8px; }
     .img-size-title { display: none; }
   }
@@ -1055,7 +1068,9 @@ function openImagePreview(src, id, size, onResize) {
   if (imgPreviewClose) imgPreviewClose();
   const back = el("div", { class: "img-preview-back" });
   const stage = el("div", { class: "img-preview-stage" });
-  stage.appendChild(el("img", { class: "img-preview-img", src, alt: "photo" }));
+  const frame = el("div", { class: "img-preview-frame" }); // gives the photo a shrinkable box
+  frame.appendChild(el("img", { class: "img-preview-img", src, alt: "photo" }));
+  stage.appendChild(frame);
   back.appendChild(stage);
 
   // size rail — only when the caller can persist a change (i.e. a real entry, not a preview view)
@@ -1086,10 +1101,13 @@ function openImagePreview(src, id, size, onResize) {
     setTimeout(() => back.remove(), 220);
   };
   const onKey = ev => { if (ev.key === "Escape") close(); };
-  // don't let the finger-up that *opened* the preview also close it (it can land on the backdrop)
+  // short guard so the tap that opened the preview can't also dismiss it. it used to be 260ms,
+  // to outlast the finger-up of a long-press; a tap is over by the time we get here.
   let armed = false;
-  setTimeout(() => { armed = true; }, 260);
-  back.addEventListener("click", ev => { if (armed && (ev.target === back || ev.target === stage)) close(); });
+  setTimeout(() => { armed = true; }, 100);
+  back.addEventListener("click", ev => {
+    if (armed && (ev.target === back || ev.target === stage || ev.target === frame)) close(); // tapping beside the photo
+  });
   document.addEventListener("keydown", onKey);
   imgPreviewClose = close;
   document.body.appendChild(back);
@@ -1734,6 +1752,16 @@ function unlockPageScroll() {
   window.scrollTo(0, composerScrollY);
 }
 
+// document-level selectionchange hook for whichever composer textarea is live. build()
+// recreates the field on every day/week change, so the previous hook has to go with it —
+// one listener at a time, dropped for good when the composer closes.
+let fmtSelSync = null;
+function bindFmtSelectionSync(fn) {
+  if (fmtSelSync) document.removeEventListener("selectionchange", fmtSelSync);
+  fmtSelSync = fn;
+  if (fn) document.addEventListener("selectionchange", fn);
+}
+
 function openComposer(existing) {
   let text = existing ? existing.text : "";
   let tags = existing ? [...existing.tags] : [];
@@ -1767,7 +1795,7 @@ function openComposer(existing) {
   const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
   overlay.appendChild(sheet);
 
-  function close() { sheetRoot.innerHTML = ""; unlockPageScroll(); }
+  function close() { bindFmtSelectionSync(null); sheetRoot.innerHTML = ""; unlockPageScroll(); }
   // tapping away with unsaved work is an easy way to lose a thought — warn first. covers a
   // brand-new entry with text AND edits to an existing one; an unchanged entry (just opened
   // to read) or an empty new composer dismisses without friction.
@@ -2193,13 +2221,24 @@ function openComposer(existing) {
     // once the bar has appeared it stays put for the life of the composer: hiding it on
     // blur reflows the sheet, and the height jump made it easy to tap the backdrop by
     // accident and trip the discard prompt. it still swaps line-ops <-> span-ops.
+    // span ops belong to a live selection in *this* field, so the swap keys off focus too:
+    // a blurred textarea keeps its selectionStart/End, which used to leave B I U showing
+    // over nothing selected.
     const updateBar = () => {
-      const hasSel = ta.selectionStart !== ta.selectionEnd;
+      const focused = document.activeElement === ta;
+      const hasSel = focused && ta.selectionStart !== ta.selectionEnd;
       fmtBar.classList.toggle("has-sel", hasSel);
-      if (hasSel || document.activeElement === ta) barShown = true;
+      if (focused || hasSel) barShown = true;
       fmtBar.classList.toggle("show", barShown);
     };
-    ["select", "keyup", "pointerup", "touchend", "input", "focus", "blur"].forEach(evt => ta.addEventListener(evt, updateBar));
+    // selectionchange is the only event that fires for BOTH making and clearing a selection:
+    // `select` fires only when text becomes selected — never when it collapses — and on iOS
+    // the tap that dismisses a selection is swallowed by the callout/handles, so no pointerup
+    // reaches the textarea either. that's the row getting stuck on the wrong ops. bound on
+    // the element (newer engines) and on the document (Safari's long-standing path).
+    ta.addEventListener("selectionchange", updateBar);
+    bindFmtSelectionSync(updateBar);
+    ["keyup", "pointerup", "input", "focus", "blur"].forEach(evt => ta.addEventListener(evt, updateBar));
 
     // markers have to hug the words they style, one line at a time — that's what makes the
     // difference between a style that renders and one that shows its asterisks. a selection
@@ -2274,6 +2313,19 @@ function openComposer(existing) {
       updateBar();
     }
 
+    // every format-bar press commits on pointerdown. the press already has to preventDefault
+    // to keep the field focused and the selection alive; a click arrives a beat later, by which
+    // time the row may have swapped its contents out from under her finger — which is exactly
+    // how a tap ends up doing nothing, or the wrong thing. same rule as the day strip.
+    function fmtPress(b, run) {
+      b.addEventListener("pointerdown", ev => {
+        if (ev.button !== 0) return; // left/primary press only — a right-click isn't a format op
+        ev.preventDefault();
+        run();
+      });
+      return b;
+    }
+
     // line ops act on the line the cursor sits in — no selection needed.
     // marker is captured (group 2) so continuation preserves "- " or "— " as typed.
     const BULLET_LINE = /^([ \t]*)([-—] )(.*)$/;
@@ -2301,10 +2353,9 @@ function openComposer(existing) {
      [INDENT_ICON, "Indent", line => "  " + line],
      [OUTDENT_ICON, "Outdent", line => line.startsWith("  ") ? line.slice(2) : line.replace(/^[ \t]/, "")]
     ].forEach(([icon, label, transform]) => {
-      const b = el("button", { class: "fmt-btn line-only", "aria-label": label, onclick: () => lineOp(transform) });
+      const b = el("button", { class: "fmt-btn line-only", "aria-label": label });
       b.innerHTML = icon;
-      b.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused
-      fmtBar.appendChild(b);
+      fmtBar.appendChild(fmtPress(b, () => lineOp(transform)));
     });
 
     // photo button: pick from disk / photo library — the same pipeline as ⌘V,
@@ -2315,10 +2366,9 @@ function openComposer(existing) {
       imgInput.value = ""; // so the same photo can be picked again later
       if (files.length) insertImageFiles(files);
     });
-    const imgBtn = el("button", { class: "fmt-btn line-only", "aria-label": "Add photo", onclick: () => imgInput.click() });
+    const imgBtn = el("button", { class: "fmt-btn line-only", "aria-label": "Add photo" });
     imgBtn.innerHTML = IMG_ICON;
-    imgBtn.addEventListener("pointerdown", ev => ev.preventDefault());
-    fmtBar.appendChild(imgBtn);
+    fmtBar.appendChild(fmtPress(imgBtn, () => imgInput.click()));
     sheet.appendChild(imgInput);
 
     // enter on a bullet line continues the list; enter on an empty bullet ends it
@@ -2345,13 +2395,10 @@ function openComposer(existing) {
 
     [["B", "**", "**", "fmt-b"], ["I", "*", "*", "fmt-i"], ["U", "__", "__", "fmt-u"],
      ["M", "`", "`", "fmt-m"], ["R", "||", "||", "fmt-r"]].forEach(([label, pre, post, cls]) => {
-      const b = el("button", { class: "fmt-btn sel-only " + cls, onclick: () => wrapSel(pre, post) }, label);
-      b.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused + selection alive
-      fmtBar.appendChild(b);
+      const b = el("button", { class: "fmt-btn sel-only " + cls }, label);
+      fmtBar.appendChild(fmtPress(b, () => wrapSel(pre, post)));
     });
-    const linkBtn = el("button", { class: "fmt-btn sel-only fmt-l", onclick: linkSel }, "L");
-    linkBtn.addEventListener("pointerdown", ev => ev.preventDefault());
-    fmtBar.appendChild(linkBtn);
+    fmtBar.appendChild(fmtPress(el("button", { class: "fmt-btn sel-only fmt-l" }, "L"), linkSel));
     sheet.appendChild(fmtBar);
 
     // ---- segmentation offer: appears once the ramble is long enough (and a key exists) ----
