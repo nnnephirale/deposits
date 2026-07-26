@@ -896,7 +896,12 @@ function sentenceCase(s) { return s.replace(/(^\s*\S|[.!?]\s+\S)/g, c => c.toUpp
 // deliberately NO tilde rule — ~text~ renders literally (she likes her curly hyphens).
 // link is first so its brackets/parens aren't mis-parsed by the emphasis rules.
 // a photo marker may carry an optional display size (![photo:id@2x]); no suffix = full-width (3x).
-const RICH_RE = /\[([^\]]+)\]\(([^)\s]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|__(.+?)__|`(.+?)`|\|\|([\s\S]+?)\|\||!\[photo:([a-z0-9]+)(?:@(inline|1x|2x|3x))?\]/g;
+// bold/underline/redact may run across line breaks — but not across a blank line, so one
+// unclosed marker can't swallow the paragraphs after it. italic is the fussy one: a lone *
+// is also a plain typographic character, so it only opens on a non-space, never closes on a
+// space, never eats the ** of a neighbouring bold marker, and stays on one line. without
+// those guards a stray "3 * 4" earlier in an entry silently ate the next **bold**.
+const RICH_RE = /\[([^\]]+)\]\(([^)\s]+)\)|\*\*((?:[^\n]|\n(?!\s*\n))+?)\*\*|\*(?![\s*])([^*\n]*?[^\s*])\*(?!\*)|__((?:[^\n]|\n(?!\s*\n))+?)__|`([^`\n]+?)`|\|\|([\s\S]+?)\|\||!\[photo:([a-z0-9]+)(?:@(inline|1x|2x|3x))?\]/g;
 
 // pasted images live out-of-band on the entry (entry.images = { id: dataURL }) so the
 // raw-text editor shows a short marker instead of a thousand base64 characters.
@@ -1031,24 +1036,17 @@ function renderRichBlocks(text, images, onResize) {
   return frag;
 }
 
-// long-press a rendered image to open the full-screen preview. a plain tap falls through to
-// the entry's own click (open the composer); only the press-and-hold is intercepted here.
+// tap a rendered image to open the full-screen preview (and its size rail). this was a
+// press-and-hold, which lost the race on the phone too often — finger jitter past the move
+// threshold, or Safari's own image gesture, cancelled the timer and the size rail felt gone.
+// a single tap can't miss; the composer is still one tap away on the entry's text. cursor
+// is zoom-in, so the image already advertises it.
 function attachImagePreview(img, src, id, size, onResize) {
-  let timer = null, fired = false, sx = 0, sy = 0;
-  const clear = () => { clearTimeout(timer); timer = null; };
-  img.addEventListener("pointerdown", ev => {
-    fired = false; sx = ev.clientX; sy = ev.clientY;
-    clear();
-    timer = setTimeout(() => { fired = true; openImagePreview(src, id, size, onResize); }, 420);
+  img.addEventListener("click", ev => {
+    ev.stopPropagation(); // don't also open the composer
+    ev.preventDefault();
+    openImagePreview(src, id, size, onResize);
   });
-  img.addEventListener("pointermove", ev => {
-    if (timer && (Math.abs(ev.clientX - sx) > 8 || Math.abs(ev.clientY - sy) > 8)) clear(); // a drag/scroll isn't a press
-  });
-  img.addEventListener("pointerup", clear);
-  img.addEventListener("pointercancel", clear);
-  img.addEventListener("pointerleave", clear);
-  // swallow the tap that follows a fired long-press so the composer doesn't also open
-  img.addEventListener("click", ev => { if (fired) { ev.stopPropagation(); ev.preventDefault(); fired = false; } });
   img.addEventListener("contextmenu", ev => ev.preventDefault()); // no iOS/desktop image callout on hold
 }
 
@@ -2115,7 +2113,9 @@ function openComposer(existing) {
     async function insertImageFile(file) {
       try {
         const dataUrl = await fileToDataUrl(file);
-        const id = Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+        let id;
+        do { id = Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36); }
+        while (images[id]); // a batch of photos can land inside one millisecond
         images[id] = dataUrl;
         const s = ta.selectionStart, en = ta.selectionEnd, v = ta.value;
         const before = v.slice(0, s), after = v.slice(en);
@@ -2133,15 +2133,23 @@ function openComposer(existing) {
       } catch (err) { console.warn("image insert failed", err); }
     }
 
-    // ⌘V an image (screenshot, copied photo)
+    // several photos at once — one after another, in the order she picked them, so the
+    // markers land in that order too (each insert moves the cursor past its own marker)
+    async function insertImageFiles(files) {
+      for (const f of files) await insertImageFile(f);
+    }
+
+    // ⌘V an image (screenshot, copied photo) — or a clipboard holding several
     ta.addEventListener("paste", ev => {
       const items = ev.clipboardData ? ev.clipboardData.items : null;
       if (!items) return;
-      const item = [...items].find(it => it.kind === "file" && it.type.startsWith("image/"));
-      if (!item) return; // plain text pastes stay untouched
+      const files = [...items]
+        .filter(it => it.kind === "file" && it.type.startsWith("image/"))
+        .map(it => it.getAsFile())
+        .filter(Boolean);
+      if (!files.length) return; // plain text pastes stay untouched
       ev.preventDefault();
-      const file = item.getAsFile();
-      if (file) insertImageFile(file);
+      insertImageFiles(files);
     });
 
     // desktop: ⌘B / ⌘I / ⌘U (ctrl elsewhere). with a selection they wrap it, same as the
@@ -2193,23 +2201,43 @@ function openComposer(existing) {
     };
     ["select", "keyup", "pointerup", "touchend", "input", "focus", "blur"].forEach(evt => ta.addEventListener(evt, updateBar));
 
+    // markers have to hug the words they style, one line at a time — that's what makes the
+    // difference between a style that renders and one that shows its asterisks. a selection
+    // dragged to the end of a line carries the newline with it (and iOS loves to hand back a
+    // trailing space), so whitespace at either edge stays *outside* the pair, and a selection
+    // spanning lines gets its own pair per line rather than one straddling the break.
+    const LINE_RUN = /[^\n]+/g;
+    // [, lead, core, trail] — a line's indent and its bullet marker count as lead, so
+    // styling a run of bullets styles the words and leaves the • alone
+    const runParts = r => /^(\s*(?:[-—] )?)([\s\S]*?)(\s*)$/.exec(r);
     function wrapSel(pre, post) {
       const s = ta.selectionStart, en = ta.selectionEnd;
       if (s === en) return;
       const v = ta.value, sel = v.slice(s, en);
+      const pl = pre.length, ql = post.length;
+      const runs = sel.match(LINE_RUN) || [];
+      const cores = runs.map(r => runParts(r)[2]).filter(Boolean);
+      const wrapped = c => c.startsWith(pre) && c.endsWith(post) && c.length > pl + ql;
       let ns, ne;
-      if (sel.startsWith(pre) && sel.endsWith(post) && sel.length > pre.length + post.length) {
-        // selection includes the markers -> unwrap
-        ta.value = v.slice(0, s) + sel.slice(pre.length, sel.length - post.length) + v.slice(en);
-        ns = s; ne = en - pre.length - post.length;
-      } else if (v.slice(Math.max(0, s - pre.length), s) === pre && v.slice(en, en + post.length) === post) {
+      if (cores.length && cores.every(wrapped)) {
+        // every styled line in the selection already carries the markers -> unwrap them all
+        ta.value = v.slice(0, s) + sel.replace(LINE_RUN, r => {
+          const m = runParts(r);
+          return m[2] ? m[1] + m[2].slice(pl, m[2].length - ql) + m[3] : r;
+        }) + v.slice(en);
+        ns = s; ne = s + (en - s) - cores.length * (pl + ql);
+      } else if (v.slice(Math.max(0, s - pl), s) === pre && v.slice(en, en + ql) === post) {
         // markers sit just outside the selection -> unwrap
-        ta.value = v.slice(0, s - pre.length) + sel + v.slice(en + post.length);
-        ns = s - pre.length; ne = ns + sel.length;
-      } else {
-        ta.value = v.slice(0, s) + pre + sel + post + v.slice(en);
-        ns = s + pre.length; ne = ns + sel.length;
-      }
+        ta.value = v.slice(0, s - pl) + sel + v.slice(en + ql);
+        ns = s - pl; ne = ns + sel.length;
+      } else if (cores.length) {
+        const out = sel.replace(LINE_RUN, r => {
+          const m = runParts(r);
+          return m[2] ? m[1] + pre + m[2] + post + m[3] : r;
+        });
+        ta.value = v.slice(0, s) + out + v.slice(en);
+        ns = s; ne = s + out.length; // selection keeps the markers, so pressing again toggles off
+      } else return; // whitespace-only selection: nothing to style
       text = ta.value;
       saveBtn.disabled = !text.trim();
       ta.focus();
@@ -2281,11 +2309,11 @@ function openComposer(existing) {
 
     // photo button: pick from disk / photo library — the same pipeline as ⌘V,
     // for the phone (and anyone who doesn't live on the clipboard)
-    const imgInput = el("input", { type: "file", accept: "image/*", style: { display: "none" } });
+    const imgInput = el("input", { type: "file", accept: "image/*", multiple: true, style: { display: "none" } });
     imgInput.addEventListener("change", () => {
-      const file = imgInput.files && imgInput.files[0];
+      const files = imgInput.files ? [...imgInput.files] : [];
       imgInput.value = ""; // so the same photo can be picked again later
-      if (file) insertImageFile(file);
+      if (files.length) insertImageFiles(files);
     });
     const imgBtn = el("button", { class: "fmt-btn line-only", "aria-label": "Add photo", onclick: () => imgInput.click() });
     imgBtn.innerHTML = IMG_ICON;
