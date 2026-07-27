@@ -174,6 +174,20 @@
   /* line formatting: "- " lines render as bullets, leading two-space units as indent */
   .rt-line { padding-left: calc(var(--ind, 0) * 16px); }
   .rt-line:empty::before { content: "\00a0"; }
+  /* indented (non-bullet) lines read as a blockquote: a quiet warm bar down the left.
+     no vertical padding, so consecutive quoted lines share one continuous bar. the level
+     offsets the whole thing right, so a single bar nests instead of stacking. */
+  .rt-line.rt-quote {
+    margin-left: calc((var(--ind, 1) - 1) * 16px);
+    padding-left: 12px;
+    border-left: 2.5px solid #D8D4CC;
+    color: #5B5B60;
+  }
+  /* "---" divider: a quiet full-width warm rule, breathing room above and below */
+  .rt-hr {
+    border: none; border-top: 1.5px solid #E0DCD3;
+    margin: 12px 0; height: 0;
+  }
   .rt-bullet { display: flex; gap: 7px; }
   .rt-dot { flex: none; color: #C7C7CC; user-select: none; -webkit-user-select: none; }
   .rt-body { flex: 1; min-width: 0; }
@@ -829,6 +843,40 @@ function shiftWeek(year, week, delta) {
 function monthLabel(year, month) {
   return new Date(year, month, 1).toLocaleDateString("en-SG", { month: "long", year: "numeric" });
 }
+function stepMonth(m, delta) { // {year, month} ± n months, rolling the year over
+  const n = m.month + delta;
+  return { year: m.year + Math.floor(n / 12), month: ((n % 12) + 12) % 12 };
+}
+// the rows a month's calendar grid shows: each is an ISO week plus the seven UTC dates
+// under it (the first and last rows spill into the neighbouring months). shared by the
+// composer's week popover and the calendar sheet — they render and bind differently, but
+// this arithmetic has to agree, so it lives in one place.
+function monthGridRows(year, month) {
+  const lastDay = new Date(Date.UTC(year, month + 1, 0));
+  const first = new Date(Date.UTC(year, month, 1));
+  const start = new Date(first);
+  start.setUTCDate(first.getUTCDate() - ((first.getUTCDay() + 6) % 7)); // back to Monday
+  const rows = [];
+  for (let mon = new Date(start); mon <= lastDay; mon.setUTCDate(mon.getUTCDate() + 7)) {
+    const rowMon = new Date(mon);
+    const iso = getISOWeek(new Date(rowMon.getUTCFullYear(), rowMon.getUTCMonth(), rowMon.getUTCDate()));
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(rowMon);
+      d.setUTCDate(rowMon.getUTCDate() + i);
+      days.push(d);
+    }
+    rows.push({ iso, days });
+  }
+  return rows;
+}
+// grid cells are UTC dates; "today" is local — compare the parts, not the timestamps
+function isTodayCell(d) {
+  const t = new Date();
+  return d.getUTCFullYear() === t.getFullYear()
+    && d.getUTCMonth() === t.getMonth()
+    && d.getUTCDate() === t.getDate();
+}
 function pad2(n) { return String(n).padStart(2, "0"); }
 function weekdayIndex(date) { return (date.getDay() + 6) % 7; } // Mon=0 … Sun=6
 function entryDay(e) {
@@ -979,11 +1027,15 @@ function domainOf(u) {
 // which the per-rule regex can't reach) never leaks through to the summarizer either.
 function plainText(t, redactedAs) {
   if (redactedAs !== "keep") t = t.replace(/\|\|[\s\S]+?\|\|/g, () => redactedAs);
-  return t.replace(IMG_MARK_RE, "").replace(/^[ \t]*[-—] /gm, "").replace(RICH_RE, (m0, linkLabel, linkUrl, b, i, u, mono, red, img) => {
+  return t.replace(IMG_MARK_RE, "").replace(/^[ \t]*-{3,}[ \t]*$/gm, "").replace(/^[ \t]*[-—] /gm, "").replace(RICH_RE, (m0, linkLabel, linkUrl, b, i, u, mono, red, img) => {
     if (linkLabel != null) return linkLabel;
     if (red != null) return redactedAs === "keep" ? red : redactedAs;
     if (img != null) return "";
-    return b != null ? b : i != null ? i : u != null ? u : mono;
+    if (mono != null) return mono; // mono is literal — its content is not re-parsed
+    // bold/italic/underline can nest — flatten the inside too so no *markers* leak into
+    // summaries/search. safe with the shared global RICH_RE: String.replace finishes
+    // collecting matches before any callback runs, so this re-entry can't disturb it.
+    return plainText(b != null ? b : i != null ? i : u, redactedAs);
   });
 }
 
@@ -993,12 +1045,17 @@ function plainText(t, redactedAs) {
 const PHOTO_WRAPPED_RE = /(\*\*|__|\*|`)(!\[photo:[a-z0-9]+(?:@(?:inline|1x|2x|3x))?\])\1/g;
 function unwrapPhotoMarkers(t) { return t.replace(PHOTO_WRAPPED_RE, "$2"); }
 
+// bold / italic / underline recurse into their own content, so *italic* inside **bold**
+// (and any other combination the markers allow) renders as both, not as one style wrapping
+// the other's literal asterisks. a PRIVATE matcher is essential: renderRich drives a manual
+// exec loop, and recursing on the shared global RICH_RE mid-loop would clobber its lastIndex
+// and drop the rest of the outer text. mono/redaction/links stay literal — no recursion.
 function renderRich(text, images, onResize) {
   text = unwrapPhotoMarkers(text);
   const frag = document.createDocumentFragment();
+  const re = new RegExp(RICH_RE.source, "g");
   let last = 0, m;
-  RICH_RE.lastIndex = 0;
-  while ((m = RICH_RE.exec(text))) {
+  while ((m = re.exec(text))) {
     if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
     if (m[1] != null) {
       const a = el("a", {
@@ -1009,9 +1066,9 @@ function renderRich(text, images, onResize) {
       a.appendChild(document.createTextNode(m[1]));
       frag.appendChild(a);
     }
-    else if (m[3] != null) frag.appendChild(el("span", { class: "rt-b" }, m[3]));
-    else if (m[4] != null) frag.appendChild(el("span", { class: "rt-i" }, m[4]));
-    else if (m[5] != null) frag.appendChild(el("span", { class: "rt-u" }, m[5]));
+    else if (m[3] != null) frag.appendChild(el("span", { class: "rt-b" }, renderRich(m[3], images, onResize)));
+    else if (m[4] != null) frag.appendChild(el("span", { class: "rt-i" }, renderRich(m[4], images, onResize)));
+    else if (m[5] != null) frag.appendChild(el("span", { class: "rt-u" }, renderRich(m[5], images, onResize)));
     else if (m[6] != null) frag.appendChild(el("span", { class: "rt-m" }, m[6]));
     else if (m[8] != null) {
       const src = images && images[m[8]];
@@ -1037,15 +1094,23 @@ function renderRich(text, images, onResize) {
 }
 
 // line-level pass over renderRich: "- " at line start renders as a bullet row (hanging
-// indent via flex), leading two-space units as indentation. entries without either take
-// the plain renderRich path untouched, so nothing existing changes appearance.
+// indent via flex), leading two-space units as indentation, a lone "---" as a divider.
+// entries with none of these take the plain renderRich path untouched, so nothing
+// existing changes appearance.
+// a line of 3+ hyphens on its own = a horizontal rule (Notion/Obsidian's "---"). the space
+// after the first hyphen is what tells it apart from a "- " bullet, so no space here.
+const HR_LINE_RE = /^[ \t]*-{3,}[ \t]*$/;
 function renderRichBlocks(text, images, onResize) {
-  if (!/^[ \t]*[-—] |^(?: {2}|\t)\S/m.test(text)) return renderRich(text, images, onResize);
+  if (!/^[ \t]*[-—] |^(?: {2,}|\t)|^[ \t]*-{3,}[ \t]*$/m.test(text)) return renderRich(text, images, onResize);
   const frag = document.createDocumentFragment();
   for (const line of text.split("\n")) {
+    if (HR_LINE_RE.test(line)) { frag.appendChild(el("hr", { class: "rt-hr" })); continue; }
     const m = /^([ \t]*)([-—] )?(.*)$/.exec(line);
     const ind = Math.floor(m[1].replace(/\t/g, "  ").length / 2);
-    const row = el("div", { class: "rt-line" + (m[2] ? " rt-bullet" : "") });
+    // an indented line (that isn't a bullet) reads as a blockquote — a quiet left bar.
+    // it's driven purely by the leading indent, so backspacing the indent away removes it.
+    const quote = ind >= 1 && !m[2];
+    const row = el("div", { class: "rt-line" + (m[2] ? " rt-bullet" : "") + (quote ? " rt-quote" : "") });
     if (ind) row.style.setProperty("--ind", ind);
     if (m[2]) {
       row.appendChild(el("span", { class: "rt-dot" }, "•"));
@@ -1385,6 +1450,33 @@ async function initSync() {
   });
 }
 
+// ---------- anthropic ----------
+// one call shape for all three AI features. returns the assistant's text.
+// note: find the text block rather than indexing content[0] — models that think before
+// writing put thinking blocks first, so [0] is not the reply.
+async function anthropic(body) {
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error("api " + r.status);
+  const data = await r.json();
+  const block = (data.content || []).find(b => b.type === "text");
+  return ((block && block.text) || "").trim();
+}
+// for the features that want JSON back — tolerates a model that wraps its reply in a
+// ```json fence despite being told not to.
+async function anthropicJSON(body) {
+  const raw = await anthropic(body);
+  return JSON.parse(raw.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim());
+}
+
 const weekSumInFlight = new Set();
 async function generateWeekSummary(year, week, list) {
   const k = weekKey(year, week);
@@ -1395,24 +1487,12 @@ async function generateWeekSummary(year, week, list) {
       const labels = e.tags.map(tg => (topicById[tg] || modeById[tg] || {}).label).filter(Boolean).join(", ");
       return "- " + plainText(e.text, "[…]") + (labels ? " (" + labels + ")" : "");
     }).join("\n");
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 250,
-        system: "You summarize a week of personal journal fragments into a 2-3 sentence recap. lowercase, plain and warm, mention concrete specifics from the fragments, no lists, no preamble, no filler like 'a busy week'. Reply with only the summary.",
-        messages: [{ role: "user", content: input }]
-      })
+    const s = await anthropic({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 250,
+      system: "You summarize a week of personal journal fragments into a 2-3 sentence recap. lowercase, plain and warm, mention concrete specifics from the fragments, no lists, no preamble, no filler like 'a busy week'. Reply with only the summary.",
+      messages: [{ role: "user", content: input }]
     });
-    if (!r.ok) throw new Error("api " + r.status);
-    const data = await r.json();
-    const s = ((data.content && data.content[0] && data.content[0].text) || "").trim();
     if (!s) return;
     // version tracks AI takes only: first take is V1, each re-summarize bumps it —
     // counted across the week's whole back-catalogue so old takes are never overwritten
@@ -1477,26 +1557,12 @@ function segmentAnchorsToRanges(text, items) {
 
 async function segmentRamble(text) {
   const topicList = TOPICS.map(t => t.id + " (" + t.label + ")").join(", ");
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true"
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 600,
-      system: "You segment one long journal ramble into 2-6 self-contained deposits. Never rewrite, reorder, summarize or add words — you only decide where one thought ends and the next begins. Cut at genuine shifts of subject; prefer fewer, meatier segments over many tiny ones. Reply with only strict JSON, no code fences: {\"segments\":[{\"first_words\":string,\"topic\":string|null}]}. first_words is the exact first 4-8 words of that segment, copied verbatim from the input including punctuation and markdown markers. The first segment starts at the very beginning of the input. topic is the single best-fitting id from [" + topicList + "], or null if none fits.",
-      messages: [{ role: "user", content: text }]
-    })
+  const parsed = await anthropicJSON({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 600,
+    system: "You segment one long journal ramble into 2-6 self-contained deposits. Never rewrite, reorder, summarize or add words — you only decide where one thought ends and the next begins. Cut at genuine shifts of subject; prefer fewer, meatier segments over many tiny ones. Reply with only strict JSON, no code fences: {\"segments\":[{\"first_words\":string,\"topic\":string|null}]}. first_words is the exact first 4-8 words of that segment, copied verbatim from the input including punctuation and markdown markers. The first segment starts at the very beginning of the input. topic is the single best-fitting id from [" + topicList + "], or null if none fits.",
+    messages: [{ role: "user", content: text }]
   });
-  if (!r.ok) throw new Error("api " + r.status);
-  const data = await r.json();
-  let raw = ((data.content && data.content[0] && data.content[0].text) || "").trim();
-  raw = raw.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim();
-  const parsed = JSON.parse(raw);
   const list = Array.isArray(parsed) ? parsed : parsed.segments;
   if (!Array.isArray(list) || !list.length) throw new Error("bad segments payload");
   return segmentAnchorsToRanges(text, list);
@@ -1805,6 +1871,9 @@ function openComposer(existing) {
   const overlay = el("div", { class: "overlay", onclick: requestClose });
   const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
   overlay.appendChild(sheet);
+  // build() clears sheet's children but not sheet's own listeners, and it re-runs on every
+  // day/week/tag/lock change — so the tap-away handler is swapped, never stacked.
+  let sheetTapAway = null;
 
   function close() { bindFmtSelectionSync(null); sheetRoot.innerHTML = ""; unlockPageScroll(); }
   // tapping away with unsaved work is an easy way to lose a thought — warn first. covers a
@@ -1951,7 +2020,7 @@ function openComposer(existing) {
       calPop.innerHTML = "";
       calPop.appendChild(el("div", { class: "cal-head" },
         el("button", { class: "stepper-btn", onclick: () => {
-          calMonth = calMonth.month === 0 ? { year: calMonth.year - 1, month: 11 } : { year: calMonth.year, month: calMonth.month - 1 };
+          calMonth = stepMonth(calMonth, -1);
           renderCalPop();
         } }, "‹"),
         el("button", { class: "cal-title", onclick: () => { // tap the title = back to the current month
@@ -1960,7 +2029,7 @@ function openComposer(existing) {
           renderCalPop();
         } }, monthLabel(calMonth.year, calMonth.month)),
         el("button", { class: "stepper-btn", onclick: () => {
-          calMonth = calMonth.month === 11 ? { year: calMonth.year + 1, month: 0 } : { year: calMonth.year, month: calMonth.month + 1 };
+          calMonth = stepMonth(calMonth, 1);
           renderCalPop();
         } }, "›")
       ));
@@ -1968,43 +2037,36 @@ function openComposer(existing) {
       DAY_TOKENS.forEach(t => dow.appendChild(el("span", null, t)));
       calPop.appendChild(dow);
 
-      const lastDay = new Date(Date.UTC(calMonth.year, calMonth.month + 1, 0));
-      const first = new Date(Date.UTC(calMonth.year, calMonth.month, 1));
-      const start = new Date(first);
-      start.setUTCDate(first.getUTCDate() - ((first.getUTCDay() + 6) % 7)); // back to Monday
-      const today = new Date();
-      for (let mon = new Date(start); mon <= lastDay; mon.setUTCDate(mon.getUTCDate() + 7)) {
-        const rowMon = new Date(mon);
-        const iso = getISOWeek(new Date(rowMon.getUTCFullYear(), rowMon.getUTCMonth(), rowMon.getUTCDate()));
+      // commits on pointerdown: this popover lives above a focused textarea, so a click
+      // would land after the keyboard collapses the sheet. see the day-strip picker.
+      for (const { iso, days } of monthGridRows(calMonth.year, calMonth.month)) {
         const current = iso.year === cw.year && iso.week === cw.week;
         const row = el("div", { class: "cal-row wk-row" + (current ? " current" : "") });
         const wkCell = el("span", { class: "cal-wk" }, "W" + pad2(iso.week));
         wkCell.addEventListener("pointerdown", () => pickWeek(iso, null)); // week only — day stays
         row.appendChild(wkCell);
-        for (let i = 0; i < 7; i++) {
-          const d = new Date(rowMon);
-          d.setUTCDate(rowMon.getUTCDate() + i);
-          const isToday = d.getUTCFullYear() === today.getFullYear()
-            && d.getUTCMonth() === today.getMonth()
-            && d.getUTCDate() === today.getDate();
+        days.forEach((d, i) => {
           const cls = [
             d.getUTCMonth() !== calMonth.month ? "cal-out" : "",
-            isToday ? "cal-today" : "",
+            isTodayCell(d) ? "cal-today" : "",
             current && i === day ? "cal-sel" : ""
           ].filter(Boolean).join(" ");
           const cell = el("span", cls ? { class: cls } : null, String(d.getUTCDate()));
           cell.addEventListener("pointerdown", () => pickWeek(iso, i)); // a date sets week + day together
           row.appendChild(cell);
-        }
+        });
         calPop.appendChild(row);
       }
     }
 
-    // tap anywhere else in the sheet closes an open strip / calendar
-    sheet.addEventListener("click", ev => {
+    // tap anywhere else in the sheet closes an open strip / calendar. swapped rather than
+    // added, so a long editing session doesn't accumulate one handler per rebuild.
+    if (sheetTapAway) sheet.removeEventListener("click", sheetTapAway);
+    sheetTapAway = ev => {
       if (strip && !strip.contains(ev.target) && ev.target !== dayPill) closeStrip();
       if (calPop && !calPop.contains(ev.target) && ev.target !== weekPill) closeCalPop();
-    });
+    };
+    sheet.addEventListener("click", sheetTapAway);
 
     function doSave() {
       const imgs = imagesUsedIn(text, images); // pasted-then-deleted images don't persist
@@ -2394,26 +2456,55 @@ function openComposer(existing) {
     fmtBar.appendChild(imgBtn);
     sheet.appendChild(imgInput);
 
-    // enter on a bullet line continues the list; enter on an empty bullet ends it
+    // enter continues the current line's structure: a bullet keeps its marker+indent, an
+    // indented blockquote keeps its indent. an empty one of either ends it (drops the
+    // marker/indent instead of carrying a dangling one to the next line).
+    const INDENT_LINE = /^([ \t]+)(.*)$/;
     ta.addEventListener("keydown", ev => {
       if (ev.key !== "Enter" || ta.selectionStart !== ta.selectionEnd) return;
       const v = ta.value, s = ta.selectionStart;
       const ls = v.lastIndexOf("\n", s - 1) + 1;
       let le = v.indexOf("\n", s); if (le === -1) le = v.length;
-      const m = BULLET_LINE.exec(v.slice(ls, le));
-      if (!m) return;
+      const line = v.slice(ls, le);
+      const bm = BULLET_LINE.exec(line);
+      const im = bm ? null : INDENT_LINE.exec(line);
+      const carry = bm ? bm[1] + bm[2] : (im && (im[1].length >= 2 || im[1].includes("\t")) ? im[1] : null);
+      if (carry == null) return; // ordinary line: let Enter do its normal thing
+      const rest = bm ? bm[3] : im[2];
       ev.preventDefault();
-      if (!m[3].trim()) {
-        ta.value = v.slice(0, ls) + v.slice(le); // empty bullet: drop the marker instead of adding a line
+      if (!rest.trim()) {
+        ta.value = v.slice(0, ls) + v.slice(le); // empty bullet/quote: end it, don't carry the marker
         ta.setSelectionRange(ls, ls);
       } else {
-        const ins = "\n" + m[1] + m[2]; // continue with the same marker + indent
+        const ins = "\n" + carry; // continue with the same marker/indent
         ta.value = v.slice(0, s) + ins + v.slice(s);
         ta.setSelectionRange(s + ins.length, s + ins.length);
       }
       text = ta.value;
       saveBtn.disabled = !text.trim();
       autoGrow();
+    });
+
+    // backspace while the cursor sits inside a line's leading indent clears one whole level
+    // (a 2-space unit, or a tab) in a single press — so the blockquote she just made comes
+    // off as easily as it went on, matching the outdent button. mid-text backspace is
+    // untouched: this only fires when everything from line-start to the cursor is whitespace.
+    ta.addEventListener("keydown", ev => {
+      if (ev.key !== "Backspace" || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      if (ta.selectionStart !== ta.selectionEnd) return;
+      const v = ta.value, s = ta.selectionStart;
+      const ls = v.lastIndexOf("\n", s - 1) + 1;
+      const before = v.slice(ls, s);
+      if (!before || !/^[ \t]+$/.test(before)) return; // cursor must be within the leading indent
+      ev.preventDefault();
+      const unit = before[0] === "\t" ? 1 : Math.min(2, before.length); // one level = 2 spaces (or a tab)
+      ta.value = v.slice(0, ls) + v.slice(ls + unit);
+      const ns = s - unit;
+      ta.setSelectionRange(ns, ns);
+      text = ta.value;
+      saveBtn.disabled = !text.trim();
+      autoGrow();
+      updateBar();
     });
 
     [["B", "**", "**", "fmt-b"], ["I", "*", "*", "fmt-i"], ["U", "__", "__", "fmt-u"],
@@ -2666,40 +2757,29 @@ function openCalendar() {
     sheet.appendChild(el("div", { class: "grabber" }));
 
     sheet.appendChild(el("div", { class: "cal-head" },
-      el("button", { class: "stepper-btn", onclick: () => { cm = cm.month === 0 ? { year: cm.year - 1, month: 11 } : { year: cm.year, month: cm.month - 1 }; build(); } }, "‹"),
+      el("button", { class: "stepper-btn", onclick: () => { cm = stepMonth(cm, -1); build(); } }, "‹"),
       el("button", {
         class: "cal-title",
         onclick: () => { mo = { ...cm }; view = "month"; close(); render(); }
       }, monthLabel(cm.year, cm.month)),
-      el("button", { class: "stepper-btn", onclick: () => { cm = cm.month === 11 ? { year: cm.year + 1, month: 0 } : { year: cm.year, month: cm.month + 1 }; build(); } }, "›")
+      el("button", { class: "stepper-btn", onclick: () => { cm = stepMonth(cm, 1); build(); } }, "›")
     ));
 
     const dow = el("div", { class: "cal-row cal-dow" }, el("span", { class: "cal-wk" }, ""));
     DAY_TOKENS.forEach(t => dow.appendChild(el("span", null, t)));
     sheet.appendChild(dow);
 
-    const lastDay = new Date(Date.UTC(cm.year, cm.month + 1, 0));
-    const first = new Date(Date.UTC(cm.year, cm.month, 1));
-    const start = new Date(first);
-    start.setUTCDate(first.getUTCDate() - ((first.getUTCDay() + 6) % 7)); // back to Monday
-    const today = new Date();
-
-    for (let mon = new Date(start); mon <= lastDay; mon.setUTCDate(mon.getUTCDate() + 7)) {
-      const rowMon = new Date(mon);
-      const iso = getISOWeek(new Date(rowMon.getUTCFullYear(), rowMon.getUTCMonth(), rowMon.getUTCDate()));
+    // the whole row commits, on click: this sheet closes and re-renders the list beneath
+    // it, so a pointerdown commit would let the trailing click land on an entry.
+    for (const { iso, days } of monthGridRows(cm.year, cm.month)) {
       const current = view === "week" && iso.year === wk.year && iso.week === wk.week;
       const row = el("div", {
         class: "cal-row wk-row" + (current ? " current" : ""),
         onclick: () => { wk = iso; view = "week"; close(); render(); }
       });
       row.appendChild(el("span", { class: "cal-wk" }, "W" + pad2(iso.week)));
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(rowMon);
-        d.setUTCDate(rowMon.getUTCDate() + i);
-        const isToday = d.getUTCFullYear() === today.getFullYear()
-          && d.getUTCMonth() === today.getMonth()
-          && d.getUTCDate() === today.getDate();
-        const cls = [d.getUTCMonth() !== cm.month ? "cal-out" : "", isToday ? "cal-today" : ""].filter(Boolean).join(" ");
+      for (const d of days) {
+        const cls = [d.getUTCMonth() !== cm.month ? "cal-out" : "", isTodayCell(d) ? "cal-today" : ""].filter(Boolean).join(" ");
         row.appendChild(el("span", cls ? { class: cls } : null, String(d.getUTCDate())));
       }
       sheet.appendChild(row);
@@ -2916,10 +2996,15 @@ function openWeekSummaryEditor(year, week, list) {
         resum.disabled = true;
         resum.textContent = "summarizing…";
         await generateWeekSummary(year, week, list); // increments the version off the prior take
-        if (weekSummaries[k]) ta.value = sentenceCase(weekSummaries[k].text);
-        refreshPill();
         resum.disabled = false;
         resum.textContent = "re-summarize";
+        // a fresh take isn't just a new line — replay it Wrapped-style, the same reveal the
+        // week's first reading gets. close the editor first so the deck isn't behind it.
+        if (weekSummaries[k]) {
+          sheetRoot.innerHTML = "";
+          render();
+          setTimeout(() => openWeekReveal(year, week, list), 80); // let the render settle first
+        }
       }
     }, "re-summarize");
     sheet.appendChild(resum);
@@ -3062,27 +3147,13 @@ async function startMonthRecap(year, month) {
       + (mine.length ? "\n\nHER OWN WORDS, FOR VOICE (week summaries she wrote herself):\n" + mine.join("\n") : "")
       + feedback;
 
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-5", // reads a month better than haiku; one call a month, a few cents
-        max_tokens: 6000, // headroom: sonnet 5 thinks before writing, and thinking counts against this
-        output_config: { format: { type: "json_schema", schema: RECAP_SCHEMA } },
-        system: RECAP_SYSTEM,
-        messages: [{ role: "user", content: input }]
-      })
+    const parsed = await anthropicJSON({
+      model: "claude-sonnet-5", // reads a month better than haiku; one call a month, a few cents
+      max_tokens: 6000, // headroom: sonnet 5 thinks before writing, and thinking counts against this
+      output_config: { format: { type: "json_schema", schema: RECAP_SCHEMA } },
+      system: RECAP_SYSTEM,
+      messages: [{ role: "user", content: input }]
     });
-    if (!r.ok) throw new Error("api " + r.status);
-    const data = await r.json();
-    // thinking blocks precede the text block on sonnet 5 — find, don't index
-    const textBlock = (data.content || []).find(b => b.type === "text");
-    const parsed = JSON.parse((textBlock && textBlock.text) || "");
 
     // grounding pass: evidence ids must resolve to real entries; snapshots of her words
     // are stored on the card so a later edit/delete never breaks a saved recap
@@ -3143,6 +3214,75 @@ function monthRecapBlock(list) {
   return wrap;
 }
 
+// ---------- the story deck ----------
+// the chrome both reveals share: blobs/veil/grain, the dash progress row with its label and
+// close ×, the stage, and the stories tap grammar (left 22% steps back, anywhere else
+// forward). the caller owns what a card looks like and what its timers are.
+//   opts: { rootClass, blobs, label, total, buildCard(i), stopTimers(), tapGuard() }
+// tapGuard returns true to swallow a tap (a long-press that opened an editor, a count-up
+// that a tap should settle instead of advancing). the deck is NOT shown until show(0).
+function storyDeck(opts) {
+  const root = el("div", { class: opts.rootClass });
+  for (let i = 1; i <= opts.blobs; i++) root.appendChild(el("div", { class: "recap-blob b" + i }));
+  root.appendChild(el("div", { class: "recap-veil" }));
+  root.appendChild(el("div", { class: "recap-grain" }));
+
+  const dashes = el("div", { class: "recap-dashes" });
+  for (let i = 0; i < opts.total; i++) dashes.appendChild(el("span"));
+  root.appendChild(el("div", { class: "recap-top" },
+    el("span", { class: "recap-month" }, opts.label),
+    dashes,
+    el("button", { class: "recap-x", "aria-label": "Close", onclick: ev => { ev.stopPropagation(); close(); } }, "×")
+  ));
+
+  const stage = el("div", { class: "recap-stage" });
+  root.appendChild(stage);
+
+  let idx = 0, card = null;
+  const stopTimers = () => { if (opts.stopTimers) opts.stopTimers(); };
+
+  function close() { stopTimers(); root.remove(); unlockPageScroll(); }
+  function setDashes() { Array.from(dashes.children).forEach((d, i) => d.classList.toggle("on", i <= idx)); }
+  function show(i) {
+    idx = Math.max(0, Math.min(opts.total - 1, i));
+    setDashes();
+    stopTimers();
+    root.classList.remove("lit");
+    if (card) {
+      const old = card;
+      old.classList.add("out"); // recedes while the next one arrives — nothing teleports
+      setTimeout(() => old.remove(), 380);
+    }
+    card = opts.buildCard(idx);
+    stage.appendChild(card);
+  }
+
+  stage.addEventListener("click", ev => {
+    if (opts.tapGuard && opts.tapGuard()) return;
+    const r = stage.getBoundingClientRect();
+    if (ev.clientX - r.left < r.width * 0.22) { if (idx > 0) show(idx - 1); }
+    else if (idx < opts.total - 1) show(idx + 1);
+  });
+
+  const deck = { root, stage, show, close, get idx() { return idx; } };
+  // motes drifting off a card. the month bursts, the week whispers — same emitter,
+  // different dose. anchor is resolved by the caller so each keeps its own fallback.
+  deck.dust = (anchor, { count, dx, dyMin, dyVar, minH = 0 }) => {
+    const r = anchor.getBoundingClientRect();
+    for (let i = 0; i < count; i++) {
+      const d = el("span", { class: "recap-dust" });
+      d.style.left = (r.left + Math.random() * r.width) + "px";
+      d.style.top = (r.top + Math.random() * Math.max(minH, r.height)) + "px";
+      d.style.setProperty("--dx", (Math.random() * dx * 2 - dx) + "px");
+      d.style.setProperty("--dy", (dyMin - Math.random() * dyVar) + "px");
+      d.style.animationDelay = (Math.random() * 0.5) + "s";
+      root.appendChild(d);
+      setTimeout(() => d.remove(), 2700);
+    }
+  };
+  return deck;
+}
+
 // ---------- the reveal itself ----------
 function openRecap(year, month) {
   const k = monthKey(year, month);
@@ -3154,47 +3294,25 @@ function openRecap(year, month) {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   lockPageScroll();
-  const root = el("div", { class: "recap" });
-  ["b1", "b2", "b3"].forEach(b => root.appendChild(el("div", { class: "recap-blob " + b })));
-  root.appendChild(el("div", { class: "recap-veil" }));
-  root.appendChild(el("div", { class: "recap-grain" }));
-
   const total = take.cards.length + 3; // intro + cards + title + end
-  const dashes = el("div", { class: "recap-dashes" });
-  for (let i = 0; i < total; i++) dashes.appendChild(el("span"));
-  root.appendChild(el("div", { class: "recap-top" },
-    el("span", { class: "recap-month" }, monthName + " " + year),
-    dashes,
-    el("button", { class: "recap-x", "aria-label": "Close", onclick: ev => { ev.stopPropagation(); close(); } }, "×")
-  ));
+  let titleTimer = null, editHeld = false;
+  const deck = storyDeck({
+    rootClass: "recap", blobs: 3, label: monthName + " " + year, total,
+    buildCard: i => buildCard(i),
+    stopTimers: () => clearInterval(titleTimer),
+    tapGuard: () => { // the tap that ended a long-press isn't a step
+      if (!editHeld) return false;
+      editHeld = false;
+      return true;
+    }
+  });
+  const { root, stage, show, close } = deck;
+  stage.addEventListener("contextmenu", ev => ev.preventDefault()); // long-press belongs to the editor, not iOS
 
-  const stage = el("div", { class: "recap-stage" });
-  root.appendChild(stage);
-
-  let idx = 0, card = null, titleTimer = null, editHeld = false;
-
-  function close() {
-    clearInterval(titleTimer);
-    root.remove();
-    unlockPageScroll();
-  }
-  function setDashes() {
-    Array.from(dashes.children).forEach((d, i) => d.classList.toggle("on", i <= idx));
-  }
   function dustBurst(c) {
     const head = c.querySelector(".recap-head");
     if (!head) return;
-    const r = head.getBoundingClientRect();
-    for (let i = 0; i < 14; i++) {
-      const d = el("span", { class: "recap-dust" });
-      d.style.left = (r.left + Math.random() * r.width) + "px";
-      d.style.top = (r.top + Math.random() * r.height) + "px";
-      d.style.setProperty("--dx", (Math.random() * 60 - 30) + "px");
-      d.style.setProperty("--dy", (-30 - Math.random() * 50) + "px");
-      d.style.animationDelay = (Math.random() * 0.5) + "s";
-      root.appendChild(d);
-      setTimeout(() => d.remove(), 2700);
-    }
+    deck.dust(head, { count: 14, dx: 30, dyMin: -30, dyVar: 50 });
   }
 
   // long-press an observation card to reword it — with a field for telling claude
@@ -3230,7 +3348,7 @@ function openRecap(year, month) {
           if (f) cd.feedback = f; else delete cd.feedback;
           saveMonthRecaps();
           ov.remove();
-          show(idx); // re-render the card in her wording
+          show(deck.idx); // re-render the card in her wording
         }
       }, "Save")));
     sheet.appendChild(el("p", { class: "field-label", style: { marginTop: "6px" } }, "the observation"));
@@ -3247,20 +3365,6 @@ function openRecap(year, month) {
     sheet.appendChild(taF);
     if (cd.original) sheet.appendChild(el("p", { class: "settings-note" }, "originally: " + cd.original.headline));
     root.appendChild(ov);
-  }
-
-  function show(i) {
-    idx = Math.max(0, Math.min(total - 1, i));
-    setDashes();
-    clearInterval(titleTimer);
-    root.classList.remove("lit");
-    if (card) {
-      const old = card;
-      old.classList.add("out"); // recedes while the next one arrives — nothing teleports
-      setTimeout(() => old.remove(), 380);
-    }
-    card = buildCard(idx);
-    stage.appendChild(card);
   }
 
   function buildCard(i) {
@@ -3372,16 +3476,6 @@ function openRecap(year, month) {
     return c;
   }
 
-  // stories grammar: left edge steps back, everywhere else steps forward.
-  // buttons stopPropagation, so verdicts/evidence never advance the deck.
-  stage.addEventListener("click", ev => {
-    if (editHeld) { editHeld = false; return; } // the tap that ended a long-press isn't a step
-    const r = stage.getBoundingClientRect();
-    if (ev.clientX - r.left < r.width * 0.22) { if (idx > 0) show(idx - 1); }
-    else if (idx < total - 1) show(idx + 1);
-  });
-  stage.addEventListener("contextmenu", ev => ev.preventDefault()); // long-press belongs to the editor, not iOS
-
   document.body.appendChild(root);
   show(0);
 }
@@ -3412,52 +3506,23 @@ function openWeekReveal(year, week, list, take) {
   const total = panels.length;
 
   lockPageScroll();
-  const root = el("div", { class: "recap week" });
-  ["b1", "b2"].forEach(b => root.appendChild(el("div", { class: "recap-blob " + b })));
-  root.appendChild(el("div", { class: "recap-veil" }));
-  root.appendChild(el("div", { class: "recap-grain" }));
-
-  const dashes = el("div", { class: "recap-dashes" });
-  for (let i = 0; i < total; i++) dashes.appendChild(el("span"));
-  root.appendChild(el("div", { class: "recap-top" },
-    el("span", { class: "recap-month" }, "W" + pad2(week) + " · " + range),
-    dashes,
-    el("button", { class: "recap-x", "aria-label": "Close", onclick: ev => { ev.stopPropagation(); close(); } }, "×")
-  ));
-
-  const stage = el("div", { class: "recap-stage" });
-  root.appendChild(stage);
-
-  let idx = 0, card = null, timer = null, raf = null, snap = null;
-
-  function stopTimers() { clearTimeout(timer); clearInterval(timer); cancelAnimationFrame(raf); }
-  function close() { stopTimers(); root.remove(); unlockPageScroll(); }
-  function setDashes() { Array.from(dashes.children).forEach((d, i) => d.classList.toggle("on", i <= idx)); }
+  let timer = null, raf = null, snap = null;
+  function stopTimers() { clearTimeout(timer); clearInterval(timer); cancelAnimationFrame(raf); snap = null; }
+  const deck = storyDeck({
+    rootClass: "recap week", blobs: 2, label: "W" + pad2(week) + " · " + range, total,
+    buildCard: i => buildCard(i),
+    stopTimers,
+    tapGuard: () => { // a tap mid count-up settles it instead of stepping on
+      if (!snap) return false;
+      snap(); // settle() clears snap itself
+      return true;
+    }
+  });
+  const { root, stage, show, close } = deck;
 
   // half the monthly's dust — the week earns a whisper, not the full burst
   function dustWhisper(c) {
-    const anchor = c.querySelector(".recap-head") || c;
-    const r = anchor.getBoundingClientRect();
-    for (let i = 0; i < 5; i++) {
-      const d = el("span", { class: "recap-dust" });
-      d.style.left = (r.left + Math.random() * r.width) + "px";
-      d.style.top = (r.top + Math.random() * Math.max(24, r.height)) + "px";
-      d.style.setProperty("--dx", (Math.random() * 40 - 20) + "px");
-      d.style.setProperty("--dy", (-24 - Math.random() * 36) + "px");
-      d.style.animationDelay = (Math.random() * 0.5) + "s";
-      root.appendChild(d);
-      setTimeout(() => d.remove(), 2700);
-    }
-  }
-
-  function show(i) {
-    idx = Math.max(0, Math.min(total - 1, i));
-    setDashes();
-    stopTimers(); snap = null;
-    root.classList.remove("lit");
-    if (card) { const old = card; old.classList.add("out"); setTimeout(() => old.remove(), 380); }
-    card = buildCard(idx);
-    stage.appendChild(card);
+    deck.dust(c.querySelector(".recap-head") || c, { count: 5, dx: 20, dyMin: -24, dyVar: 36, minH: 24 });
   }
 
   function buildCard(i) {
@@ -3580,14 +3645,6 @@ function openWeekReveal(year, week, list, take) {
     }
     return c;
   }
-
-  // stories grammar: a tap mid count-up settles it; the left edge steps back, else forward.
-  stage.addEventListener("click", ev => {
-    if (snap) { snap(); return; }
-    const r = stage.getBoundingClientRect();
-    if (ev.clientX - r.left < r.width * 0.22) { if (idx > 0) show(idx - 1); }
-    else if (idx < total - 1) show(idx + 1);
-  });
 
   document.body.appendChild(root);
   show(0);
