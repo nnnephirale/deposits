@@ -263,11 +263,21 @@
   /* photos added back to back: a scrollable row of equal rounded cards, so a burst of
      images reads as a set instead of a stack that buries the text under it */
   .rt-gallery {
+    position: relative;
     display: flex; gap: 8px; margin: 8px 0;
     overflow-x: auto; scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch; scrollbar-width: none;
   }
   .rt-gallery::-webkit-scrollbar { display: none; }
+  /* a vertical strip on the right edge, fading to the card's own white — the cue that the
+     row keeps going. absolutely positioned against the CONTAINER's own edge, so unlike the
+     images it never scrolls with the content; toggled off once she's scrolled to the end. */
+  .rt-gallery.scrollable::after {
+    content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 40px;
+    background: linear-gradient(to right, rgba(255,255,255,0), var(--card));
+    pointer-events: none; opacity: 1; transition: opacity 0.2s ease;
+  }
+  .rt-gallery.scrollable.at-end::after { opacity: 0; }
   .rt-gallery .rt-img {
     flex: none; width: 62%; max-width: 220px; aspect-ratio: 4 / 5;
     object-fit: cover; margin: 0; border-radius: 14px; scroll-snap-align: start;
@@ -466,15 +476,16 @@
   .fmt-bar:not(.has-sel) .line-only { display: flex; }
   .fmt-btn {
     flex: 1; font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
-    background: var(--field); color: var(--ink); border: none; border-radius: 8px;
-    height: 38px; padding: 0; align-items: center; justify-content: center;
+    background: var(--field); color: var(--ink); border: none; border-radius: 999px;
+    height: 31px; padding: 0; align-items: center; justify-content: center;
     user-select: none; -webkit-user-select: none;
   }
   .fmt-btn svg { display: block; }
-  /* line ops (bullet/indent/outdent): smaller, and the muted grey of the topic chips below */
+  /* line ops (bullet/indent/outdent): smaller, and the muted grey of the topic chips below —
+     31px tall to match the chip row's own height, not a separate, taller kind of control */
   .fmt-btn.line-only { color: #6B6B70; }
   .fmt-btn.line-only:active { color: #fff; } /* keep the press invert (specificity beats the rest colour) */
-  .fmt-btn.line-only svg { width: 19.2px; height: 19.2px; } /* 20% smaller than 24 */
+  .fmt-btn.line-only svg { width: 16.5px; height: 16.5px; }
   .fmt-btn:active { background: var(--ink); color: #fff; }
   .fmt-b { font-weight: 700; }
   .fmt-i { font-style: italic; }
@@ -652,8 +663,8 @@
      the bar's grey and rounding and settles into a tall flat white expanse — the field IS
      the surface, no inset box, so there's nothing to make the writing feel small. */
   .sheet.expanse {
-    /* --sheet-h is what the notch drags; 92% of the viewport is its ceiling */
-    height: var(--sheet-h, 92dvh); max-height: 92dvh;
+    /* --sheet-h is what the notch drags; 98% of the viewport is its ceiling */
+    height: var(--sheet-h, 98dvh); max-height: 98dvh;
     padding: 12px 20px calc(env(safe-area-inset-bottom) + 24px);
     animation: none; /* the unfold below replaces the generic slide-up */
     clip-path: inset(0 round 20px 20px 0 0);
@@ -682,7 +693,7 @@
   .sheet.expanse textarea.ta-entry {
     background: none; border-radius: 0; padding: 8px 0 0;
     font-size: 17px; line-height: 1.55;
-    min-height: calc(var(--sheet-h, 92dvh) - 250px); max-height: none;
+    min-height: calc(var(--sheet-h, 98dvh) - 250px); max-height: none;
   }
   .sheet.expanse textarea.ta-entry::placeholder { color: #B4B4B9; }
   /* the styling row rides under the head, above the field — always in view on a phone */
@@ -1408,9 +1419,12 @@ function renderRichBlocks(text, images, onResize, onCheck) {
         // keyed by the run's own markers, so a pinch survives the re-render that follows
         // ticking a checkbox elsewhere in the entry
         const key = run.join("|");
-        const gal = el("div", { class: "rt-gallery" + (stackedRuns.has(key) ? " stacked" : "") });
+        const scrollable = run.length > 2; // exactly 2 fill the width edge-to-edge — nothing to scroll to
+        const gal = el("div", { class: "rt-gallery"
+          + (scrollable ? " scrollable" : "") + (stackedRuns.has(key) ? " stacked" : "") });
         for (const r of run) gal.appendChild(renderRich(r, images, onResize));
         attachGalleryPinch(gal, key);
+        if (scrollable) attachGalleryFade(gal);
         frag.appendChild(gal);
         continue;
       }
@@ -1475,6 +1489,25 @@ function attachGalleryPinch(gal, key) {
   gal.addEventListener("touchend", () => { start = null; }, { passive: true });
 }
 
+// the right-edge fade (CSS, .scrollable::after) hides once she's scrolled to the end, so it
+// never implies more photos than there are. also flags the gallery as "mid-drag" for a beat
+// so a fast flick's tail can't register as the tap that opens the size rail — belt-and-braces
+// alongside the browser's own native click-cancel-on-scroll behaviour.
+function attachGalleryFade(gal) {
+  const updateEnd = () => {
+    const atEnd = gal.scrollLeft + gal.clientWidth >= gal.scrollWidth - 2;
+    gal.classList.toggle("at-end", atEnd);
+  };
+  let dragTimer = null;
+  gal.addEventListener("scroll", () => {
+    updateEnd();
+    gal.dataset.scrolling = "1";
+    clearTimeout(dragTimer);
+    dragTimer = setTimeout(() => { delete gal.dataset.scrolling; }, 150);
+  }, { passive: true });
+  requestAnimationFrame(updateEnd); // images size via aspect-ratio before they decode, so this is already accurate
+}
+
 // tap a rendered image to open the full-screen preview (and its size rail). this was a
 // press-and-hold, which lost the race on the phone too often — finger jitter past the move
 // threshold, or Safari's own image gesture, cancelled the timer and the size rail felt gone.
@@ -1482,6 +1515,7 @@ function attachGalleryPinch(gal, key) {
 // is zoom-in, so the image already advertises it.
 function attachImagePreview(img, src, id, size, onResize) {
   img.addEventListener("click", ev => {
+    if (img.closest(".rt-gallery")?.dataset.scrolling === "1") return; // the tail of a drag, not a tap
     ev.stopPropagation(); // don't also open the composer
     ev.preventDefault();
     openImagePreview(src, id, size, onResize);
@@ -2627,9 +2661,9 @@ function openComposer(existing) {
 
     // ---- notch = resize handle: drag it up to grow the sheet, down to shrink ----
     // it used to stretch the textarea, which does nothing now that the sheet is a fixed-height
-    // expanse. it resizes the SHEET instead, and the field follows via --sheet-h. 92% of the
-    // viewport is the ceiling — enough of the list stays visible to tap away.
-    const SHEET_MAX = () => Math.round(window.innerHeight * 0.92);
+    // expanse. it resizes the SHEET instead, and the field follows via --sheet-h. 98% of the
+    // viewport is the ceiling — just a sliver of the list left to tap away on.
+    const SHEET_MAX = () => Math.round(window.innerHeight * 0.98);
     const SHEET_MIN = () => Math.min(300, Math.round(window.innerHeight * 0.45));
     function setSheetHeight(h) {
       manualHeight = Math.max(SHEET_MIN(), Math.min(SHEET_MAX(), Math.round(h)));
@@ -2903,21 +2937,23 @@ function openComposer(existing) {
       if (linePop && !linePop.contains(ev.target) && !ev.target.closest(".fmt-lines")) closeLinePop();
     }, true);
 
-    const LINE_OPS = [];
-    [[BULLET_ICON, "Bullet", line => {
+    // checklist toggle is its own transform, shared by the standalone button below and by
+    // Bullet's "return to plain text" case in the popover
+    const checkboxTransform = line => {
+      const m = /^([ \t]*)(?:([-—] )(\[[ xX]\] ?)?)?([\s\S]*)$/.exec(line);
+      return m[3] ? m[1] + m[4] : m[1] + "- [ ] " + m[4];
+    };
+    const LINE_OPS = [
+     [BULLET_ICON, "Bullet", line => {
         const m = BULLET_LINE.exec(line);
         // a checklist counts as a bullet — toggling the dot returns it to plain text too
         return m ? m[1] + m[3].replace(CHECK_RE, "$2") : line.replace(/^([ \t]*)/, "$1- ");
       }],
-     [CHECKBOX_ICON, "Checkbox", line => {
-        // plain/bullet line -> "- [ ] "; an existing checklist item -> back to plain text
-        const m = /^([ \t]*)(?:([-—] )(\[[ xX]\] ?)?)?([\s\S]*)$/.exec(line);
-        return m[3] ? m[1] + m[4] : m[1] + "- [ ] " + m[4];
-      }],
      [INDENT_ICON, "Indent", line => "  " + line],
      [OUTDENT_ICON, "Outdent", line => line.startsWith("  ") ? line.slice(2) : line.replace(/^[ \t]/, "")]
-    ].forEach(entry => LINE_OPS.push(entry));
-    // one button stands for the four of them; it opens the list rather than doing anything itself
+    ];
+    // one button stands for bullet/indent/outdent; it opens the list rather than doing
+    // anything itself. checkbox gets used often enough on its own to earn a direct tap.
     const linesBtn = el("button", { class: "fmt-btn line-only fmt-lines", "aria-label": "Lists & indent" });
     linesBtn.innerHTML = LINES_ICON;
     linesBtn.addEventListener("pointerdown", ev => {
@@ -2926,6 +2962,9 @@ function openComposer(existing) {
       openLinePop(linesBtn, LINE_OPS);
     });
     fmtBar.appendChild(linesBtn);
+    const checkBtn = el("button", { class: "fmt-btn line-only", "aria-label": "Checkbox" });
+    checkBtn.innerHTML = CHECKBOX_ICON;
+    fmtBar.appendChild(fmtPress(checkBtn, () => lineOp(checkboxTransform)));
 
     // fold: drop a "+++" cut on its own line. everything below it collapses in the card
     // behind a Read-more that floats the whole entry in a centred modal.
