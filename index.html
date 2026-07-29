@@ -52,7 +52,7 @@
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     /* the extra bottom padding is the breathing room between W31 and the first card */
-    padding: calc(env(safe-area-inset-top) + 16px) 0 26px;
+    padding: calc(env(safe-area-inset-top) + 16px) 0 40px;
     transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   }
   /* scrolling down tucks the header away; any scroll up brings it back */
@@ -520,7 +520,7 @@
   }
   .compose-bar {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    width: 100%; min-height: 52px; padding: 15px 14px 15px 20px;
+    width: 100%; min-height: 44px; padding: 8px 10px 8px 20px;
     background: #E8E8EA; border: none; border-radius: 18px;
     font-family: var(--font); font-size: 15px; color: #9A9A9F; text-align: left;
     cursor: text; -webkit-tap-highlight-color: transparent;
@@ -534,7 +534,9 @@
   /* the bar's trailing controls: + to write, and a lozenge of three dots for the menu
      (which is where search and day view now live). each its own tap target, so neither
      opens the composer by accident. */
-  .compose-actions { flex: none; display: flex; align-items: center; gap: 2px; }
+  .compose-actions { flex: none; display: flex; align-items: center; gap: 4px; }
+  /* a hairline fence: the menu on its far side reads as its own thing, not part of typing */
+  .compose-divider { flex: none; width: 1px; height: 20px; background: rgba(0,0,0,0.11); }
   .compose-icon {
     flex: none; width: 34px; height: 34px; border-radius: 999px;
     background: none; border: none; color: #8A8A90;
@@ -543,15 +545,15 @@
   }
   .compose-icon svg { width: 19px; height: 19px; }
   .compose-icon:active { background: rgba(0,0,0,0.06); color: var(--ink); }
-  /* a vertical lozenge: taller than it is wide, three dots stacked inside */
+  /* three bare dots — no container, so nothing about it suggests a typing affordance */
   .compose-lozenge {
-    flex: none; width: 24px; height: 38px; border-radius: 999px;
-    background: rgba(0,0,0,0.04); border: none;
+    flex: none; width: 32px; height: 32px; border-radius: 999px;
+    background: none; border: none;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
     transition: background 0.15s ease;
   }
-  .compose-lozenge span { width: 3px; height: 3px; border-radius: 50%; background: #8A8A90; }
-  .compose-lozenge:active { background: rgba(0,0,0,0.09); }
+  .compose-lozenge span { width: 3.5px; height: 3.5px; border-radius: 50%; background: #8A8A90; }
+  .compose-lozenge:active { background: rgba(0,0,0,0.07); }
   .compose-bar.copied .compose-actions { display: none; }
   /* a translucent overlay would show the bar as a smudge underneath — take it out of frame,
      fading in step with the backdrop. */
@@ -576,6 +578,24 @@
   @keyframes slideUp { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
 
+  /* while the composer is unfolding, the list behind it recedes — a small shrink and fade,
+     so the sheet reads as coming forward rather than sliding over. timed to the unfold, and
+     the backdrop stays light enough that the recede is actually visible through it. */
+  .wrap, .compose-dock {
+    transform-origin: top center;
+    transition: transform 0.78s cubic-bezier(0.62, 0.01, 0.13, 1),
+                opacity 0.78s cubic-bezier(0.62, 0.01, 0.13, 1);
+  }
+  body.composing .wrap { transform: scale(0.93); opacity: 0.4; }
+  body.composing .compose-dock { opacity: 0; }
+  body.composing .overlay {
+    background: rgba(0,0,0,0.18);
+    -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wrap, .compose-dock { transition: none; }
+  }
+
   /* the composer: an unfolding of the compose bar rather than a panel over it. it opens at
      the bar's grey and rounding and settles into a tall flat white expanse — the field IS
      the surface, no inset box, so there's nothing to make the writing feel small. */
@@ -585,11 +605,11 @@
     padding: 12px 20px 88px;
     animation: none; /* the unfold below replaces the generic slide-up */
     clip-path: inset(0 round 20px 20px 0 0);
-    /* the toe matters: a split second of visible growth off the bar, THEN a snappy run out
-       to full size. so the first control point sits low (slow start) and the second sits
-       high and early (fast finish) — an S-curve, not an ease-out. */
-    transition: clip-path 0.58s cubic-bezier(0.5, 0.02, 0.16, 1),
-                background-color 0.5s cubic-bezier(0.5, 0.02, 0.16, 1);
+    /* the toe matters: a deliberate hold of visible growth off the bar, THEN a decisive run
+       out to full size. first control point low (slow start), second high and early (fast
+       finish) — a pronounced S-curve, not an ease-out. */
+    transition: clip-path 0.78s cubic-bezier(0.62, 0.01, 0.13, 1),
+                background-color 0.66s cubic-bezier(0.62, 0.01, 0.13, 1);
   }
   /* the folded state: the sheet clipped to the compose bar's exact rectangle, in its grey.
      --mt/--mr/--mb/--ml are measured from the real bar on open, so the two are the same
@@ -984,6 +1004,7 @@
     <span class="compose-hint">Start typing&#8230;</span>
     <span class="compose-actions">
       <button class="compose-icon" id="composeAdd" aria-label="New entry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg></button>
+      <span class="compose-divider"></span>
       <button class="compose-lozenge" id="menuBtn" aria-label="Menu"><span></span><span></span><span></span></button>
     </span>
   </div>
@@ -2209,7 +2230,10 @@ function openComposer(existing) {
   // day/week/tag/lock change — so the tap-away handler is swapped, never stacked.
   let sheetTapAway = null;
 
-  function close() { bindFmtSelectionSync(null); sheetRoot.innerHTML = ""; unlockPageScroll(); }
+  function close() {
+    document.body.classList.remove("composing"); // let the list come back forward
+    bindFmtSelectionSync(null); sheetRoot.innerHTML = ""; unlockPageScroll();
+  }
   // tapping away with unsaved work is an easy way to lose a thought — warn first. covers a
   // brand-new entry with text AND edits to an existing one; an unchanged entry (just opened
   // to read) or an empty new composer dismisses without friction.
@@ -3047,6 +3071,7 @@ function openComposer(existing) {
     sheet.style.setProperty("--mr", inset(s.right - b.right));
     sheet.style.setProperty("--mb", inset(s.bottom - b.bottom));
     sheet.style.setProperty("--ml", inset(b.left - s.left));
+    document.body.classList.add("composing"); // the list shrinks + fades as this unfolds
     sheet.classList.add("folded", "no-anim");
     void sheet.offsetHeight;              // paint the folded rectangle with transitions off
     sheet.classList.remove("no-anim");
