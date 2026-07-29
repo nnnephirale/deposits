@@ -191,6 +191,28 @@
   .rt-bullet { display: flex; gap: 7px; }
   .rt-dot { flex: none; color: #C7C7CC; user-select: none; -webkit-user-select: none; }
   .rt-body { flex: 1; min-width: 0; }
+  /* checklist item: a tappable box in place of the bullet dot. checked = filled + struck. */
+  .rt-check { display: flex; gap: 8px; align-items: flex-start; }
+  .rt-box {
+    flex: none; width: 18px; height: 18px; margin-top: 1px; border-radius: 5px;
+    border: 1.75px solid #C7C4BD; color: #fff; box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .rt-box.live { cursor: pointer; }
+  .rt-box.on { background: var(--ink); border-color: var(--ink); }
+  .rt-box svg { width: 14px; height: 14px; stroke-width: 2.4; }
+  .rt-check.done .rt-body { color: var(--subtle); text-decoration: line-through; text-decoration-color: #C7C4BD; }
+  /* read-more: the pill that floats the folded entry in a centred modal */
+  .read-more {
+    display: inline-flex; align-items: center; margin-top: 8px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.4px;
+    color: var(--subtle); background: var(--field);
+    border: none; border-radius: 999px; padding: 5px 12px; cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .read-more:active { transform: scale(0.98); }
+  .read-more:hover { color: var(--ink); }
   /* inline link — a tappable mono pill; label defaults to the domain, editable in raw text.
      display:inline + box-decoration-break:clone so a long label wraps across lines and each
      line fragment still gets the pill's padding/rounding, instead of overflowing/clipping. */
@@ -215,6 +237,30 @@
     display: inline; height: 1.35em; width: auto; max-width: 100%;
     margin: 0 3px; vertical-align: -0.28em; border-radius: 5px;
   }
+
+  /* read-more reading modal — a centred float: dark blurred backdrop, white card */
+  .read-back {
+    position: fixed; inset: 0; height: 100dvh; z-index: 88;
+    display: flex; align-items: center; justify-content: center; padding: 22px;
+    background: rgba(0,0,0,0.4);
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+    opacity: 0; transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .read-back.show { opacity: 1; }
+  .read-modal {
+    position: relative; width: 100%; max-width: 560px; max-height: 82vh; overflow: auto;
+    background: var(--card); border-radius: 20px; padding: 26px 24px 24px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.28), 0 8px 24px rgba(0,0,0,0.12);
+    transform: translateY(8px) scale(0.99); transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .read-back.show .read-modal { transform: none; }
+  .read-x {
+    position: absolute; top: 12px; right: 14px;
+    background: none; border: none; font-size: 22px; line-height: 1;
+    color: var(--subtle); cursor: pointer; padding: 4px;
+  }
+  .read-body { font-size: 15px; line-height: 1.55; white-space: pre-wrap; color: var(--ink); }
+  .read-body .rt-img { cursor: zoom-in; }
 
   /* full-screen image preview — frosted, blurred backdrop with an optional size rail */
   .img-preview-back {
@@ -1013,6 +1059,8 @@ const BULLET_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none"
 const INDENT_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M12 12h8M4 19h16"/><path d="M4 9.2v5.6L7.6 12Z" fill="currentColor" stroke="none"/></svg>';
 const OUTDENT_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M12 12h8M4 19h16"/><path d="M7.6 9.2v5.6L4 12Z" fill="currentColor" stroke="none"/></svg>';
 const IMG_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="9" cy="10.2" r="1.6"/><path d="m20.5 15.8-4.3-4.3a1.5 1.5 0 0 0-2.1 0L6.5 19"/></svg>';
+const CHECKBOX_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>';
+const FOLD_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16"/><path d="M8 13l4 4 4-4"/></svg>';
 
 // derive a compact display domain from a url (drops scheme, www, and path)
 function domainOf(u) {
@@ -1027,7 +1075,10 @@ function domainOf(u) {
 // which the per-rule regex can't reach) never leaks through to the summarizer either.
 function plainText(t, redactedAs) {
   if (redactedAs !== "keep") t = t.replace(/\|\|[\s\S]+?\|\|/g, () => redactedAs);
-  return t.replace(IMG_MARK_RE, "").replace(/^[ \t]*-{3,}[ \t]*$/gm, "").replace(/^[ \t]*[-—] /gm, "").replace(RICH_RE, (m0, linkLabel, linkUrl, b, i, u, mono, red, img) => {
+  return t.replace(IMG_MARK_RE, "")
+    .replace(/^[ \t]*[-+]{3,}[ \t]*$/gm, "")          // "---" dividers and "+++" fold markers
+    .replace(/^[ \t]*[-—] (?:\[[ xX]\] ?)?/gm, "")    // bullet + optional checkbox prefix
+    .replace(RICH_RE, (m0, linkLabel, linkUrl, b, i, u, mono, red, img) => {
     if (linkLabel != null) return linkLabel;
     if (red != null) return redactedAs === "keep" ? red : redactedAs;
     if (img != null) return "";
@@ -1094,25 +1145,49 @@ function renderRich(text, images, onResize) {
 }
 
 // line-level pass over renderRich: "- " at line start renders as a bullet row (hanging
-// indent via flex), leading two-space units as indentation, a lone "---" as a divider.
-// entries with none of these take the plain renderRich path untouched, so nothing
-// existing changes appearance.
+// indent via flex), leading two-space units as indentation, a lone "---" as a divider,
+// a "- [ ] "/"- [x] " bullet as a tappable checklist item. entries with none of these
+// take the plain renderRich path untouched, so nothing existing changes appearance.
 // a line of 3+ hyphens on its own = a horizontal rule (Notion/Obsidian's "---"). the space
 // after the first hyphen is what tells it apart from a "- " bullet, so no space here.
 const HR_LINE_RE = /^[ \t]*-{3,}[ \t]*$/;
-function renderRichBlocks(text, images, onResize) {
-  if (!/^[ \t]*[-—] |^(?: {2,}|\t)|^[ \t]*-{3,}[ \t]*$/m.test(text)) return renderRich(text, images, onResize);
+const FOLD_LINE_RE = /^[ \t]*\+{3,}[ \t]*$/m;        // the "read more" cut — handled by the card
+                                                     // (m flag: entryEl execs it against the whole entry)
+const CHECK_RE = /^\[([ xX])\] ?([\s\S]*)$/;          // a bullet's body when it's a checklist item
+const CHECK_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>';
+// onCheck(lineIndex, nextChecked) — supplied only where a toggle should persist (the card,
+// the read-more modal). left out of read-only previews, where the box renders but is inert.
+function renderRichBlocks(text, images, onResize, onCheck) {
+  if (!/^[ \t]*[-—] |^(?: {2,}|\t)|^[ \t]*[-+]{3,}[ \t]*$/m.test(text)) return renderRich(text, images, onResize);
   const frag = document.createDocumentFragment();
-  for (const line of text.split("\n")) {
+  const lines = text.split("\n");
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+    if (FOLD_LINE_RE.test(line)) continue;                        // the fold marker itself never shows
     if (HR_LINE_RE.test(line)) { frag.appendChild(el("hr", { class: "rt-hr" })); continue; }
     const m = /^([ \t]*)([-—] )?(.*)$/.exec(line);
     const ind = Math.floor(m[1].replace(/\t/g, "  ").length / 2);
+    const check = m[2] ? CHECK_RE.exec(m[3]) : null;              // "[ ] label" inside a bullet
     // an indented line (that isn't a bullet) reads as a blockquote — a quiet left bar.
     // it's driven purely by the leading indent, so backspacing the indent away removes it.
     const quote = ind >= 1 && !m[2];
-    const row = el("div", { class: "rt-line" + (m[2] ? " rt-bullet" : "") + (quote ? " rt-quote" : "") });
+    const row = el("div", { class: "rt-line" + (m[2] ? " rt-bullet" : "") + (quote ? " rt-quote" : "")
+      + (check ? " rt-check" + (/[xX]/.test(check[1]) ? " done" : "") : "") });
     if (ind) row.style.setProperty("--ind", ind);
-    if (m[2]) {
+    if (check) {
+      const on = /[xX]/.test(check[1]);
+      const box = el("span", { class: "rt-box" + (on ? " on" : ""), role: "checkbox", "aria-checked": String(on) });
+      if (on) box.innerHTML = CHECK_ICON;
+      if (onCheck) {
+        const idx = li; // captured per row so the right line toggles
+        box.classList.add("live");
+        box.addEventListener("click", ev => { ev.stopPropagation(); onCheck(idx, !on); });
+      }
+      row.appendChild(box);
+      const body = el("span", { class: "rt-body" });
+      body.appendChild(renderRich(check[2], images, onResize));
+      row.appendChild(body);
+    } else if (m[2]) {
       row.appendChild(el("span", { class: "rt-dot" }, "•"));
       const body = el("span", { class: "rt-body" });
       body.appendChild(renderRich(m[3], images, onResize));
@@ -1198,6 +1273,20 @@ function setImageSize(entryId, imgId, size) {
   entries = entries.map(e => e.id === entryId
     ? { ...e, text: e.text.replace(re, mark), updatedAt: new Date().toISOString() }
     : e);
+  saveEntries(entries);
+  render();
+}
+
+// toggle a checklist item in place by rewriting the box on that exact line (line index, so
+// identical item text can't cross wires). the state lives in the text, so it syncs for free.
+function setLineChecked(entryId, lineIndex, checked) {
+  entries = entries.map(e => {
+    if (e.id !== entryId) return e;
+    const lines = e.text.split("\n");
+    if (lineIndex >= lines.length) return e;
+    lines[lineIndex] = lines[lineIndex].replace(/^(\s*[-—] )\[[ xX]\]/, "$1[" + (checked ? "x" : " ") + "]");
+    return { ...e, text: lines.join("\n"), updatedAt: new Date().toISOString() };
+  });
   saveEntries(entries);
   render();
 }
@@ -1693,10 +1782,27 @@ function entryEl(e, opts) {
   opts = opts || {};
   const entry = el("div", { class: "entry", onclick: () => openComposer(e) });
   const collapse = compactView && entryWords(e) > SUMMARY_MIN_WORDS;
+  const onResize = (imgId, size) => setImageSize(e.id, imgId, size);
+  const onCheck = (li, c) => setLineChecked(e.id, li, c);
   const p = el("p");
+  // a "+++" line folds everything below it behind a Read-more that floats the whole entry
+  // in a centred modal — but only in the normal card; the pinch-collapsed view is its own
+  // truncation, and a fold with nothing under it is just a stray marker.
+  const fold = collapse ? null : FOLD_LINE_RE.exec(e.text);
+  const foldHasBody = fold && e.text.slice(fold.index + fold[0].length).trim();
   if (collapse) p.textContent = compactText(e);
-  else p.appendChild(renderRichBlocks(e.text, e.images, (imgId, size) => setImageSize(e.id, imgId, size)));
+  else if (foldHasBody) {
+    const above = e.text.slice(0, fold.index).replace(/\n+$/, "");
+    p.appendChild(renderRichBlocks(above, e.images, onResize, onCheck));
+  } else {
+    p.appendChild(renderRichBlocks(e.text, e.images, onResize, onCheck));
+  }
   entry.appendChild(p);
+  if (foldHasBody) {
+    const more = el("button", { class: "read-more",
+      onclick: ev => { ev.stopPropagation(); openReadModal(e); } }, "Read more");
+    entry.appendChild(more);
+  }
   const meta = el("div", { class: "entry-meta" });
   if (e.locked) {
     const lock = el("span", { class: "entry-lock", "aria-label": "locked" });
@@ -1723,6 +1829,41 @@ function entryEl(e, opts) {
   }
   if (meta.children.length) entry.appendChild(meta);
   return entry;
+}
+
+// Read-more opens the whole entry — above AND below the fold — floating in a centred modal
+// (her modal spec: dark blurred backdrop, white card, heavy shadow, 20px radius). read-only,
+// but the checklists stay live; toggling one rewrites the text and rebuilds the modal body
+// in place. tapping the entry card itself is still the way into the editor.
+function openReadModal(entry) {
+  const id = entry.id;
+  lockPageScroll();
+  const back = el("div", { class: "read-back" });
+  const modal = el("div", { class: "read-modal", onclick: ev => ev.stopPropagation() });
+  const body = el("div", { class: "read-body" });
+  const renderBody = () => {
+    const e = entries.find(x => x.id === id) || entry; // re-read: a toggle may have changed it
+    body.innerHTML = "";
+    // renderRichBlocks already drops the "+++" fold line, so the modal shows above+below seamlessly
+    body.appendChild(renderRichBlocks(e.text, e.images,
+      (imgId, size) => { setImageSize(id, imgId, size); renderBody(); },
+      (li, c) => { setLineChecked(id, li, c); renderBody(); }));
+  };
+  renderBody();
+  const close = () => {
+    back.classList.remove("show");
+    document.removeEventListener("keydown", onKey);
+    setTimeout(() => back.remove(), 200);
+    unlockPageScroll();
+  };
+  const onKey = ev => { if (ev.key === "Escape") close(); };
+  modal.appendChild(el("button", { class: "read-x", "aria-label": "Close", onclick: close }, "×"));
+  modal.appendChild(body);
+  back.appendChild(modal);
+  back.addEventListener("click", () => close()); // tap the backdrop to dismiss
+  document.addEventListener("keydown", onKey);
+  document.body.appendChild(back);
+  requestAnimationFrame(() => back.classList.add("show"));
 }
 
 function renderTopicGroups(list, dense) {
@@ -2427,7 +2568,13 @@ function openComposer(existing) {
     }
     [[BULLET_ICON, "Bullet", line => {
         const m = BULLET_LINE.exec(line);
-        return m ? m[1] + m[3] : line.replace(/^([ \t]*)/, "$1- "); // toggle off drops the marker; on inserts "- "
+        // a checklist counts as a bullet — toggling the dot returns it to plain text too
+        return m ? m[1] + m[3].replace(CHECK_RE, "$2") : line.replace(/^([ \t]*)/, "$1- ");
+      }],
+     [CHECKBOX_ICON, "Checkbox", line => {
+        // plain/bullet line -> "- [ ] "; an existing checklist item -> back to plain text
+        const m = /^([ \t]*)(?:([-—] )(\[[ xX]\] ?)?)?([\s\S]*)$/.exec(line);
+        return m[3] ? m[1] + m[4] : m[1] + "- [ ] " + m[4];
       }],
      [INDENT_ICON, "Indent", line => "  " + line],
      [OUTDENT_ICON, "Outdent", line => line.startsWith("  ") ? line.slice(2) : line.replace(/^[ \t]/, "")]
@@ -2436,6 +2583,26 @@ function openComposer(existing) {
       b.innerHTML = icon;
       fmtBar.appendChild(fmtPress(b, () => lineOp(transform)));
     });
+
+    // fold: drop a "+++" cut on its own line. everything below it collapses in the card
+    // behind a Read-more that floats the whole entry in a centred modal.
+    function insertFold() {
+      const v = ta.value, s = ta.selectionStart;
+      let le = v.indexOf("\n", s); if (le === -1) le = v.length;
+      const head = v.slice(0, le), tail = v.slice(le);
+      const ins = "\n+++" + (tail.startsWith("\n") ? "" : "\n");
+      ta.value = head + ins + tail;
+      const pos = head.length + ins.length;
+      ta.setSelectionRange(pos, pos);
+      text = ta.value;
+      saveBtn.disabled = !text.trim();
+      autoGrow();
+      ta.focus();
+      updateBar();
+    }
+    const foldBtn = el("button", { class: "fmt-btn line-only", "aria-label": "Fold (read more)" });
+    foldBtn.innerHTML = FOLD_ICON;
+    fmtBar.appendChild(fmtPress(foldBtn, insertFold));
 
     // photo button: pick from disk / photo library — the same pipeline as ⌘V,
     // for the phone (and anyone who doesn't live on the clipboard)
@@ -2467,10 +2634,13 @@ function openComposer(existing) {
       let le = v.indexOf("\n", s); if (le === -1) le = v.length;
       const line = v.slice(ls, le);
       const bm = BULLET_LINE.exec(line);
+      const cm = bm ? CHECK_RE.exec(bm[3]) : null; // a checklist item continues as a fresh unchecked box
       const im = bm ? null : INDENT_LINE.exec(line);
-      const carry = bm ? bm[1] + bm[2] : (im && (im[1].length >= 2 || im[1].includes("\t")) ? im[1] : null);
-      if (carry == null) return; // ordinary line: let Enter do its normal thing
-      const rest = bm ? bm[3] : im[2];
+      let carry, rest;
+      if (cm) { carry = bm[1] + "- [ ] "; rest = cm[2]; }
+      else if (bm) { carry = bm[1] + bm[2]; rest = bm[3]; }
+      else if (im && (im[1].length >= 2 || im[1].includes("\t"))) { carry = im[1]; rest = im[2]; }
+      else return; // ordinary line: let Enter do its normal thing
       ev.preventDefault();
       if (!rest.trim()) {
         ta.value = v.slice(0, ls) + v.slice(le); // empty bullet/quote: end it, don't carry the marker
