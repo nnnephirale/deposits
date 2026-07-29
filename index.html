@@ -66,20 +66,8 @@
     mask-image: linear-gradient(to bottom, black, transparent);
     pointer-events: none;
   }
-  /* the date line is centred in the row on its own; the tools float at the right so they
-     don't shift it off centre */
-  .header-top { position: relative; display: flex; justify-content: center; align-items: center; min-height: 22px; }
-  .header-tools {
-    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
-    display: flex; align-items: center; gap: 12px;
-  }
-  .icon-btn {
-    width: 30px; height: 30px; border-radius: 11px;
-    background: var(--card); border: none; color: var(--subtle);
-    display: flex; align-items: center; justify-content: center; line-height: 0;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 3px 10px rgba(0,0,0,0.04);
-  }
-  .icon-btn svg { width: 15px; height: 15px; }
+  /* nothing but the centred date line — anything flanking it crowded the row */
+  .header-top { display: flex; justify-content: center; align-items: center; min-height: 22px; }
 
   /* search sheet */
   .sheet.search-sheet {
@@ -492,8 +480,8 @@
     transition: opacity 0.2s ease;
   }
   .compose-bar {
-    display: flex; align-items: center; width: 100%;
-    min-height: 52px; padding: 15px 20px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    width: 100%; min-height: 52px; padding: 15px 14px 15px 20px;
     background: #E8E8EA; border: none; border-radius: 18px;
     font-family: var(--font); font-size: 15px; color: #9A9A9F; text-align: left;
     cursor: text; -webkit-tap-highlight-color: transparent;
@@ -501,8 +489,20 @@
     user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
   }
   .compose-bar:active { transform: scale(0.995); background: #E2E2E5; }
-  .compose-bar.copied { background: #2E7D3A; color: #fff; justify-content: center; }
-  .compose-bar svg { width: 19px; height: 19px; }
+  .compose-bar.copied { background: #2E7D3A; color: #fff; }
+  .compose-hint { display: flex; align-items: center; min-width: 0; }
+  .compose-hint svg { width: 18px; height: 18px; }
+  /* search lives here now: the bar is the one bit of persistent chrome, and the header
+     stays clean. its own tap target, so it never opens the composer by accident. */
+  .compose-search {
+    flex: none; width: 34px; height: 34px; border-radius: 999px;
+    background: none; border: none; color: #9A9A9F;
+    display: flex; align-items: center; justify-content: center; line-height: 0;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .compose-search svg { width: 18px; height: 18px; }
+  .compose-search:active { background: rgba(0,0,0,0.05); color: var(--ink); }
+  .compose-bar.copied .compose-search { display: none; }
   /* a translucent overlay would show the bar as a smudge underneath — take it out of frame,
      fading in step with the backdrop. */
   body:has(.img-preview-back) .compose-dock,
@@ -533,13 +533,28 @@
     height: 92dvh; max-height: 92dvh;
     /* bottom padding = room for the styling dock, so the tags can scroll clear of it */
     padding: 12px 20px 88px;
-    animation: expanseOpen 0.36s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: none; /* the unfold below replaces the generic slide-up */
+    clip-path: inset(0 round 20px 20px 0 0);
+    /* ease-out-CUBIC, not expo: expo puts half the travel in the first 60ms, which reads as
+       a pop rather than an expansion. she wants to watch the rectangle grow. */
+    transition: clip-path 0.72s cubic-bezier(0.33, 1, 0.68, 1),
+                background-color 0.55s ease-out;
   }
-  @keyframes expanseOpen {
-    from { transform: translateY(26px); background-color: #E8E8EA; border-radius: 18px; }
-    to { transform: none; background-color: #fff; border-radius: 20px 20px 0 0; }
+  /* the folded state: the sheet clipped to the compose bar's exact rectangle, in its grey.
+     --mt/--mr/--mb/--ml are measured from the real bar on open, so the two are the same
+     box — releasing the class opens the clip outward and the grey turns white. */
+  .sheet.expanse.folded {
+    clip-path: inset(var(--mt) var(--mr) var(--mb) var(--ml) round 18px);
+    background-color: #E8E8EA;
   }
-  @media (prefers-reduced-motion: reduce) { .sheet.expanse { animation: none; } }
+  /* the folded box has to be PAINTED before the transition is armed — otherwise adding
+     .folded just animates into it and the unfold has nowhere to travel from. */
+  .sheet.expanse.no-anim, .sheet.expanse.no-anim > * { transition: none; }
+  .sheet.expanse > * { transition: opacity 0.34s ease 0.2s; }
+  .sheet.expanse.folded > * { opacity: 0; transition-delay: 0s; }
+  @media (prefers-reduced-motion: reduce) {
+    .sheet.expanse, .sheet.expanse > * { transition: none; }
+  }
   /* the writing surface fills the sheet down to the dock */
   .sheet.expanse textarea.ta-entry {
     background: none; border-radius: 0; padding: 8px 0 0;
@@ -897,10 +912,6 @@
   <div class="header">
     <div class="header-top">
       <div class="stepper-center" id="periodLabel"></div>
-      <div class="header-tools">
-        <div class="layout-btns" id="layoutBtns"></div>
-        <button class="icon-btn" id="searchBtn" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></button>
-      </div>
     </div>
     <div class="period-row">
       <button class="stepper-btn" id="prevBtn">&lsaquo;</button>
@@ -918,7 +929,10 @@
 
 <div class="bottom-frost"></div>
 <div class="compose-dock" id="dock">
-  <button class="compose-bar" id="fab" aria-label="New entry"><span>Start typing…</span></button>
+  <div class="compose-bar" id="fab" role="button" tabindex="0" aria-label="New entry">
+    <span class="compose-hint">Start typing&#8230;</span>
+    <button class="compose-search" id="searchBtn" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></button>
+  </div>
 </div>
 <div id="sheetRoot"></div>
 
@@ -1863,9 +1877,9 @@ const entriesRoot = document.getElementById("entriesRoot");
 const periodLabel = document.getElementById("periodLabel");
 const navWeek = document.getElementById("navWeek");
 const navMonth = document.getElementById("navMonth");
-const layoutBtns = document.getElementById("layoutBtns");
+const layoutBtns = document.getElementById("layoutBtns"); // absent for now: day view's entry point is still undecided
 
-for (const name of LAYOUT_OPTIONS) {
+if (layoutBtns) for (const name of LAYOUT_OPTIONS) {
   layoutBtns.appendChild(el("button", {
     "data-name": name,
     onclick: () => {
@@ -2043,7 +2057,7 @@ function render() {
   navMonth.textContent = (mo.month + 1) + "\u6708";
   navWeek.classList.toggle("on", view === "week");
   navMonth.classList.toggle("on", view === "month");
-  Array.from(layoutBtns.children).forEach(b => {
+  if (layoutBtns) Array.from(layoutBtns.children).forEach(b => {
     const name = b.getAttribute("data-name");
     if (name) b.classList.toggle("on", name === layout);
   });
@@ -2967,10 +2981,32 @@ function openComposer(existing) {
 
   build();
   sheetRoot.appendChild(overlay);
+  // unfold from the compose bar: clip the sheet to that grey rectangle's real measured box,
+  // then release it so the clip opens outward into the full sheet. two frames because the
+  // folded state has to be painted before the transition has anything to travel from.
+  const barEl = document.querySelector(".compose-bar");
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (barEl && !still) {
+    const b = barEl.getBoundingClientRect(), s = sheet.getBoundingClientRect();
+    const inset = v => Math.max(0, Math.round(v)) + "px";
+    sheet.style.setProperty("--mt", inset(b.top - s.top));
+    sheet.style.setProperty("--mr", inset(s.right - b.right));
+    sheet.style.setProperty("--mb", inset(s.bottom - b.bottom));
+    sheet.style.setProperty("--ml", inset(b.left - s.left));
+    sheet.classList.add("folded", "no-anim");
+    void sheet.offsetHeight;              // paint the folded rectangle with transitions off
+    sheet.classList.remove("no-anim");
+    void sheet.offsetHeight;              // transition armed, style unchanged
+    // ...and open out. rAF alone can be throttled (a backgrounded tab never paints), which
+    // would strand the composer as a grey bar — so a timer races it, whichever lands first.
+    const release = () => sheet.classList.remove("folded");
+    requestAnimationFrame(release);
+    setTimeout(release, 70);
+  }
   setTimeout(() => {
     const ta = sheet.querySelector("textarea");
     if (ta && !existing) ta.focus();
-  }, 120);
+  }, still ? 120 : 520); // let the unfold land before the keyboard comes up
 }
 
 // read-only view of the original ramble a deposit was cut from. restoring swaps the
@@ -4229,6 +4265,7 @@ periodNav.addEventListener("contextmenu", e => e.preventDefault());
 
 // ---------- fab: tap = new entry, long-press = swap to export ----------
 const fab = document.getElementById("fab");
+const composeHint = document.querySelector(".compose-hint");
 const EXPORT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3.5"/><path d="M7.5 7.5 12 3l4.5 4.5"/><path d="M5 13v5.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V13"/></svg>';
 const PLUS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 const TICK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 17.5 19.5 7"/></svg>';
@@ -4242,11 +4279,11 @@ function setFabMode(mode) {
   clearTimeout(fabRevertTimer);
   fab.classList.remove("copied");
   if (mode === "export") {
-    fab.innerHTML = EXPORT_ICON + "<span style=\"margin-left:8px\">export markdown</span>";
+    composeHint.innerHTML = EXPORT_ICON + "<span style=\"margin-left:8px\">export markdown</span>";
     fab.setAttribute("aria-label", "Export markdown");
     fabRevertTimer = setTimeout(() => setFabMode("add"), 5000); // untouched: fall back to +
   } else {
-    fab.innerHTML = "<span>Start typing\u2026</span>";
+    composeHint.textContent = "Start typing\u2026";
     fab.setAttribute("aria-label", "New entry");
   }
 }
@@ -4257,7 +4294,7 @@ async function doExport() {
   try {
     await navigator.clipboard.writeText(md);
     fab.classList.add("copied");
-    fab.innerHTML = TICK_ICON + "<span style=\"margin-left:8px\">copied</span>";
+    composeHint.innerHTML = TICK_ICON + "<span style=\"margin-left:8px\">copied</span>";
     setTimeout(() => setFabMode("add"), 1200);
   } catch (e) {
     setFabMode("add");
@@ -4311,7 +4348,14 @@ window.addEventListener("scroll", () => {
 }, { passive: true });
 
 // ---------- wiring ----------
-document.getElementById("searchBtn").addEventListener("click", openSearch);
+document.getElementById("searchBtn").addEventListener("click", ev => {
+  ev.stopPropagation(); // it sits inside the compose bar — don't open the composer too
+  openSearch();
+});
+// the bar is a div (it holds a button), so give it the keyboard behaviour a button would have
+fab.addEventListener("keydown", ev => {
+  if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); fab.click(); }
+});
 document.getElementById("prevBtn").addEventListener("click", () => {
   if (view === "week") wk = shiftWeek(wk.year, wk.week, -1);
   else mo = mo.month === 0 ? { year: mo.year - 1, month: 11 } : { year: mo.year, month: mo.month - 1 };
