@@ -194,14 +194,14 @@
   /* checklist item: a tappable box in place of the bullet dot. checked = filled + struck. */
   .rt-check { display: flex; gap: 8px; align-items: flex-start; }
   .rt-box {
-    flex: none; width: 18px; height: 18px; margin-top: 1px; border-radius: 5px;
+    flex: none; width: 19px; height: 19px; margin-top: 1px; border-radius: 6px;
     border: 1.75px solid #C7C4BD; color: #fff; box-sizing: border-box;
     display: inline-flex; align-items: center; justify-content: center;
     transition: background 0.15s ease, border-color 0.15s ease;
   }
   .rt-box.live { cursor: pointer; }
   .rt-box.on { background: var(--ink); border-color: var(--ink); }
-  .rt-box svg { width: 14px; height: 14px; stroke-width: 2.4; }
+  .rt-box svg { width: 13px; height: 13px; }
   .rt-check.done .rt-body { color: var(--subtle); text-decoration: line-through; text-decoration-color: #C7C4BD; }
   /* read-more: the pill that floats the folded entry in a centred modal */
   .read-more {
@@ -1154,7 +1154,9 @@ const HR_LINE_RE = /^[ \t]*-{3,}[ \t]*$/;
 const FOLD_LINE_RE = /^[ \t]*\+{3,}[ \t]*$/m;        // the "read more" cut — handled by the card
                                                      // (m flag: entryEl execs it against the whole entry)
 const CHECK_RE = /^\[([ xX])\] ?([\s\S]*)$/;          // a bullet's body when it's a checklist item
-const CHECK_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>';
+// just the tick — the filled box is the .rt-box.on container itself, so no inner rect
+// (that "box in a box" read cluttered). iOS-clean: white checkmark on a solid fill.
+const CHECK_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 17.5 19.5 7"/></svg>';
 // onCheck(lineIndex, nextChecked) — supplied only where a toggle should persist (the card,
 // the read-more modal). left out of read-only previews, where the box renders but is inert.
 function renderRichBlocks(text, images, onResize, onCheck) {
