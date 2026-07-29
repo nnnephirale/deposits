@@ -16,10 +16,14 @@
   :root {
     --ink: #1C1C1E;
     --subtle: #8A8A8E;
-    --canvas: #F2F2F7;
+    /* warm light grey canvas, pure white blocks floating on it. --canvas-a is the same
+       colour with alpha, for the frosted header/dock/bottom fade. */
+    --canvas: #EFEEEC;
+    --canvas-a: rgba(239,238,236,0.82);
+    --canvas-0: rgba(239,238,236,0);
     --card: #FFFFFF;
-    --hairline: #E5E5EA;
-    --field: #F6F6F8;
+    --hairline: rgba(0,0,0,0.055);
+    --field: #F4F3F1;
     --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
     --mono: 'SF Mono', ui-monospace, Menlo, monospace;
   }
@@ -38,7 +42,7 @@
   /* header */
   .header {
     position: sticky; top: 0; z-index: 10;
-    background: rgba(242,242,247,0.85);
+    background: var(--canvas-a);
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     padding: calc(env(safe-area-inset-top) + 16px) 0 12px;
@@ -49,7 +53,7 @@
   @media (prefers-reduced-motion: reduce) { .header { transition: none; } }
   .header::after { /* frosted gradient hanging under the header instead of a hard edge */
     content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 22px;
-    background: rgba(242,242,247,0.85);
+    background: var(--canvas-a);
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     -webkit-mask-image: linear-gradient(to bottom, black, transparent);
@@ -63,11 +67,6 @@
   }
 
   .header-tools { display: flex; align-items: center; gap: 14px; }
-  .search-btn {
-    background: none; border: none; padding: 4px; line-height: 0;
-    color: var(--subtle);
-  }
-  .search-btn svg { width: 15px; height: 15px; }
 
   /* search sheet */
   .sheet.search-sheet {
@@ -111,38 +110,36 @@
   }
   .layout-btns button.on { color: var(--ink); font-weight: 700; }
 
-  .seg {
-    display: flex; background: #E4E4E9; border-radius: 10px;
-    padding: 2px; margin-top: 12px;
+  /* period tabs — the app's identity AND its view switcher, in the space the title wasted.
+     tap the inactive one to switch view; tap the active one to open the picker. */
+  .period-nav { display: flex; align-items: baseline; gap: 7px; }
+  .period-tab {
+    font-family: var(--mono); font-size: 22px; font-weight: 700; letter-spacing: -0.2px;
+    background: none; border: none; padding: 0; color: #C4C2BD;
+    line-height: 1.1; transition: color 0.18s ease;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    touch-action: manipulation;
   }
-  .seg button {
-    flex: 1; font-size: 13px; color: var(--ink);
-    background: transparent; border: none; border-radius: 8px;
-    padding: 7px 0; transition: all 0.15s ease;
-  }
-  .seg button.active {
-    background: var(--card); font-weight: 600;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-  }
+  .period-tab.on { color: var(--ink); }
+  .period-sep { font-family: var(--mono); font-size: 17px; color: #D5D3CE; user-select: none; }
 
-  /* stepper */
+  /* stepper — the header carries the period's identity now, so this is just the arrows
+     and a quiet context line (date range / year) */
   .stepper {
     display: flex; align-items: center; justify-content: space-between;
-    margin: 14px 0 18px;
+    margin: 10px 0 16px;
   }
   .stepper-btn {
-    font-size: 22px; color: var(--ink); background: var(--card);
-    border: 1px solid var(--hairline); border-radius: 10px;
-    width: 40px; height: 40px; line-height: 1;
+    font-size: 20px; color: var(--subtle); background: var(--card);
+    border: none; border-radius: 12px;
+    width: 34px; height: 34px; line-height: 1;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 3px 10px rgba(0,0,0,0.04);
   }
   .stepper-center {
-    text-align: center;
+    text-align: center; flex: 1;
     user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
-    touch-action: manipulation; cursor: pointer;
   }
-  .wk-num { font-family: var(--mono); font-size: 26px; font-weight: 700; }
-  .wk-num.month { font-size: 20px; }
-  .wk-range { font-size: 13px; color: var(--subtle); margin-top: 2px; }
+  .wk-range { font-size: 13px; color: var(--subtle); }
 
   /* groups */
   .group { margin-bottom: 24px; }
@@ -157,7 +154,11 @@
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
     text-transform: uppercase; font-weight: 600;
   }
-  .group-card { background: var(--card); border-radius: 16px; overflow: hidden; }
+  /* white block floating on the warm grey canvas: generous radius, soft layered shadow */
+  .group-card {
+    background: var(--card); border-radius: 20px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 6px 18px rgba(0,0,0,0.045);
+  }
 
   .entry { padding: 13px 16px; cursor: pointer; }
   .entry + .entry { border-top: 1px solid var(--hairline); }
@@ -373,6 +374,20 @@
   .pill.mode {
     border: 1px solid var(--hairline); color: var(--subtle); font-weight: 400;
   }
+  /* day view: the topic rides at the entry's top-right on a fixed width, truncated, so
+     every pill is the same length and the text keeps a clean edge instead of running under it */
+  .entry-side {
+    position: absolute; top: 13px; right: 16px;
+    width: 78px; display: flex; justify-content: flex-end;
+  }
+  /* width:100% (not max-width) so a short label like WORK is the same length as a long one —
+     uniform pills stacking into a tidy column, which is the whole point of moving them here */
+  .entry-side .pill {
+    width: 100%; text-align: center;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .entry.has-side { position: relative; }
+  .entry.has-side > p { padding-right: 88px; }
   .entry-day { font-family: var(--mono); font-size: 11px; color: #A9A9AD; } /* 15% darker than #C7C7CC — readable on a phone */
   .group.dense { margin-bottom: 12px; }
 
@@ -425,7 +440,7 @@
   .bottom-frost {
     position: fixed; left: 0; right: 0; bottom: 0;
     height: calc(env(safe-area-inset-bottom) + 64px);
-    background: linear-gradient(to top, rgba(242,242,247,0.72), rgba(242,242,247,0));
+    background: linear-gradient(to top, var(--canvas-a), var(--canvas-0));
     -webkit-backdrop-filter: blur(7px);
     backdrop-filter: blur(7px);
     -webkit-mask-image: linear-gradient(to top, black 30%, transparent);
@@ -433,25 +448,35 @@
     pointer-events: none; z-index: 30;
   }
 
-  /* fab */
-  .fab {
-    position: fixed; bottom: calc(env(safe-area-inset-bottom) + 24px);
+  /* dock — a floating frosted-white pill, the app's one persistent set of actions.
+     white on the warm grey canvas, so it reads as another block rather than a dark blob. */
+  .dock {
+    position: fixed; bottom: calc(env(safe-area-inset-bottom) + 20px);
     left: 50%; transform: translateX(-50%);
-    width: 58px; height: 58px; border-radius: 29px;
-    background: var(--ink); color: #fff; font-size: 28px; font-weight: 300;
-    border: none; box-shadow: 0 6px 20px rgba(0,0,0,0.25);
-    display: flex; align-items: center; justify-content: center;
-    line-height: 1; z-index: 40;
-    transition: background 0.2s ease, opacity 0.2s ease;
+    display: flex; align-items: center; gap: 4px;
+    padding: 7px; border-radius: 999px; z-index: 40;
+    background: rgba(255,255,255,0.82);
+    -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 10px 34px rgba(0,0,0,0.12);
+    transition: opacity 0.2s ease;
+  }
+  .dock-btn {
+    width: 44px; height: 44px; border-radius: 999px;
+    background: none; border: none; color: #6B6B70;
+    display: flex; align-items: center; justify-content: center; line-height: 0;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
     user-select: none; -webkit-user-select: none;
     -webkit-touch-callout: none; touch-action: manipulation;
   }
-  .fab svg { width: 22px; height: 22px; }
-  .fab.copied { background: #2E7D3A; font-size: 22px; }
-  /* the preview backdrop is translucent, so the fab reads as a smudge over the size rail.
+  .dock-btn svg { width: 20px; height: 20px; }
+  .dock-btn:active { transform: scale(0.94); }
+  .dock-btn.primary { background: var(--ink); color: #fff; }
+  .dock-btn.primary svg { width: 21px; height: 21px; }
+  .dock-btn.copied { background: #2E7D3A; color: #fff; }
+  /* the preview backdrop is translucent, so the dock reads as a smudge over the size rail.
      it sits below the overlay and never stole the taps — this just takes it out of frame,
      fading in step with the backdrop. */
-  body:has(.img-preview-back) .fab { opacity: 0; pointer-events: none; }
+  body:has(.img-preview-back) .dock, body:has(.read-back) .dock { opacity: 0; pointer-events: none; }
 
   /* sheet */
   .overlay {
@@ -806,15 +831,14 @@
 <div class="wrap">
   <div class="header">
     <div class="header-row">
-      <h1>deposits</h1>
+      <div class="period-nav">
+        <button class="period-tab" id="navWeek" aria-label="Week view"></button>
+        <span class="period-sep">/</span>
+        <button class="period-tab" id="navMonth" aria-label="Month view"></button>
+      </div>
       <div class="header-tools">
-        <button class="search-btn" id="searchBtn" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15.5 15.5 5 5"/></svg></button>
         <div class="layout-btns" id="layoutBtns"></div>
       </div>
-    </div>
-    <div class="seg">
-      <button id="segWeek" class="active">week</button>
-      <button id="segMonth">month</button>
     </div>
   </div>
 
@@ -828,7 +852,10 @@
 </div>
 
 <div class="bottom-frost"></div>
-<button class="fab" id="fab" aria-label="New entry">+</button>
+<div class="dock" id="dock">
+  <button class="dock-btn" id="searchBtn" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></button>
+  <button class="dock-btn primary" id="fab" aria-label="New entry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+</div>
 <div id="sheetRoot"></div>
 
 <script>
@@ -1735,13 +1762,12 @@ function el(tag, attrs, ...children) {
   return node;
 }
 
-// ---------- layout experiment (temporary — pick one, then strip the rest) ----------
-// "topic" = baseline (default on every open) — full header on every group.
-// day = day headers (week) / week headers (month). mix = day in week view, topic in month view.
-// dense = topic groups, tighter, no headers at all — every entry (single or
-// multi-entry topic alike) carries its topic pill in the bottom meta row, so
-// the tag position is consistent regardless of group size.
-const LAYOUT_OPTIONS = ["day", "mix", "dense"];
+// ---------- layout ----------
+// the experiment settled (29 Jul 2026): "topic" is the baseline and the default on every
+// open — full header on every group. "day" is the one alternative worth keeping: day headers
+// in week view, week headers in month view. mix and dense are gone.
+// tapping the active toggle returns to the baseline, so "nothing selected" is a real state.
+const LAYOUT_OPTIONS = ["day"];
 let layout = "topic";
 
 // topic group display order: latest-updated first
@@ -1765,8 +1791,8 @@ function confirmAction(message, okLabel, onConfirm) {
 // ---------- main render ----------
 const entriesRoot = document.getElementById("entriesRoot");
 const periodLabel = document.getElementById("periodLabel");
-const segWeek = document.getElementById("segWeek");
-const segMonth = document.getElementById("segMonth");
+const navWeek = document.getElementById("navWeek");
+const navMonth = document.getElementById("navMonth");
 const layoutBtns = document.getElementById("layoutBtns");
 
 for (const name of LAYOUT_OPTIONS) {
@@ -1783,7 +1809,12 @@ const LOCK_ICON = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="
 
 function entryEl(e, opts) {
   opts = opts || {};
-  const entry = el("div", { class: "entry", onclick: () => openComposer(e) });
+  // day view hoists the entry's topic to a fixed-width pill at the top-right, so the pills
+  // line up in a column and the text keeps a clean edge instead of wrapping under them.
+  const sideTopic = opts.sidePill
+    ? (e.tags || []).map(tg => topicById[tg]).find(t => t && t.id !== opts.skipTag)
+    : null;
+  const entry = el("div", { class: "entry" + (sideTopic ? " has-side" : ""), onclick: () => openComposer(e) });
   const collapse = compactView && entryWords(e) > SUMMARY_MIN_WORDS;
   const onResize = (imgId, size) => setImageSize(e.id, imgId, size);
   const onCheck = (li, c) => setLineChecked(e.id, li, c);
@@ -1827,10 +1858,17 @@ function entryEl(e, opts) {
   for (const tg of e.tags) {
     if (tg === opts.skipTag) continue;
     const tt = topicById[tg], mm = modeById[tg];
-    if (tt) meta.appendChild(el("span", { class: "pill", style: { background: tt.bg, color: tt.fg } }, tt.label));
+    if (tt) {
+      if (sideTopic && tt.id === sideTopic.id) continue; // already riding at the side
+      meta.appendChild(el("span", { class: "pill", style: { background: tt.bg, color: tt.fg } }, tt.label));
+    }
     else if (mm) meta.appendChild(el("span", { class: "pill mode" }, mm.label));
   }
   if (meta.children.length) entry.appendChild(meta);
+  if (sideTopic) {
+    entry.appendChild(el("div", { class: "entry-side" },
+      el("span", { class: "pill", style: { background: sideTopic.bg, color: sideTopic.fg } }, sideTopic.label)));
+  }
   return entry;
 }
 
@@ -1896,13 +1934,13 @@ function renderDayGroups(list) {
   const buckets = [];
   if (view === "week") {
     for (let d = DAY_TOKENS.length - 1; d >= 0; d--) {
-      buckets.push({ label: DAY_TOKENS[d], entries: list.filter(e => entryDay(e) === d), opts: { showDay: false } });
+      buckets.push({ label: DAY_TOKENS[d], entries: list.filter(e => entryDay(e) === d), opts: { showDay: false, sidePill: true } });
     }
-    buckets.push({ label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false } });
+    buckets.push({ label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false, sidePill: true } });
   } else {
     for (const w of [...new Set(list.map(e => e.week))]) {
       // the null-week bucket holds the month-scoped entries — "anytime", like week view's
-      buckets.push({ label: w == null ? "anytime" : "W" + pad2(w), entries: list.filter(e => e.week === w), opts: { showDate: true } });
+      buckets.push({ label: w == null ? "anytime" : "W" + pad2(w), entries: list.filter(e => e.week === w), opts: { showDate: true, sidePill: true } });
     }
   }
   for (const b of buckets) {
@@ -1916,8 +1954,12 @@ function renderDayGroups(list) {
 }
 
 function render() {
-  segWeek.classList.toggle("active", view === "week");
-  segMonth.classList.toggle("active", view === "month");
+  // the period tabs are both the identity and the switcher: W## reads the week being
+  // viewed, 7\u6708 the month. the active one is dark, the other recedes.
+  navWeek.textContent = "W" + pad2(wk.week);
+  navMonth.textContent = (mo.month + 1) + "\u6708";
+  navWeek.classList.toggle("on", view === "week");
+  navMonth.classList.toggle("on", view === "month");
   Array.from(layoutBtns.children).forEach(b => {
     const name = b.getAttribute("data-name");
     if (name) b.classList.toggle("on", name === layout);
@@ -1925,13 +1967,12 @@ function render() {
 
   periodLabel.innerHTML = "";
   if (view === "week") {
-    periodLabel.appendChild(el("div", { class: "wk-num" }, "W" + pad2(wk.week)));
     let sub = weekRangeLabel(wk.year, wk.week);
     if (wk.year !== currentWk.year) sub += " \u00B7 " + wk.year;
     if (wk.year === currentWk.year && wk.week === currentWk.week) sub += " \u00B7 this week";
     periodLabel.appendChild(el("div", { class: "wk-range" }, sub));
   } else {
-    periodLabel.appendChild(el("div", { class: "wk-num month" }, monthLabel(mo.year, mo.month)));
+    periodLabel.appendChild(el("div", { class: "wk-range" }, monthLabel(mo.year, mo.month)));
   }
 
   entriesRoot.innerHTML = "";
@@ -1949,9 +1990,8 @@ function render() {
     const recap = monthRecapBlock(list); // the month's wand: read it back / replay the reading
     if (recap) entriesRoot.appendChild(recap);
   }
-  const mode = layout === "mix" ? (view === "week" ? "day" : "topic") : layout;
-  if (mode === "day") renderDayGroups(list);
-  else renderTopicGroups(list, mode === "dense");
+  if (layout === "day") renderDayGroups(list);
+  else renderTopicGroups(list, false);
 }
 
 // ---------- composer ----------
@@ -2963,19 +3003,18 @@ function openCalendar() {
   sheetRoot.appendChild(overlay);
 }
 
-let calHoldTimer = null, calLongFired = false;
-periodLabel.addEventListener("pointerdown", () => {
-  calLongFired = false;
-  clearTimeout(calHoldTimer);
-  calHoldTimer = setTimeout(() => { calLongFired = true; openCalendar(); }, 500);
-});
-["pointerup", "pointerleave", "pointercancel"].forEach(evt =>
-  periodLabel.addEventListener(evt, () => clearTimeout(calHoldTimer)));
-periodLabel.addEventListener("contextmenu", e => e.preventDefault());
-periodLabel.addEventListener("click", () => {
-  if (calLongFired) { calLongFired = false; return; }
-  if (view === "month") openCalendar(); // month label opens on plain tap
-});
+// period tabs: tapping the OTHER one switches view; tapping the one you're already in
+// opens the picker. that's the whole of period navigation on plain taps — no long-press to
+// discover, and no separate calendar button competing for space in the dock.
+let titleLongFired = false; // set by the settings long-press below, so it can swallow this tap
+function periodTap(target) {
+  if (titleLongFired) { titleLongFired = false; return; }
+  if (view !== target) { view = target; render(); return; }
+  openCalendar();
+}
+navWeek.addEventListener("click", () => periodTap("week"));
+navMonth.addEventListener("click", () => periodTap("month"));
+[navWeek, navMonth].forEach(b => b.addEventListener("contextmenu", e => e.preventDefault()));
 
 // ---------- pinch to zoom the list ----------
 // pinch out (fingers apart) = full text; pinch in = compact view with summaries.
@@ -4090,22 +4129,30 @@ function openSettings() {
   sheetRoot.appendChild(overlay);
 }
 
-const appTitle = document.querySelector(".header h1");
+// settings used to hang off a long-press on the "deposits" title; the period tabs now
+// occupy that same top-left spot, so the gesture moves there and the muscle memory holds.
+// the flag stops the release from also registering as a period tap.
+const periodNav = document.querySelector(".period-nav");
 let titleHoldTimer = null;
-appTitle.addEventListener("pointerdown", () => {
+periodNav.addEventListener("pointerdown", () => {
+  titleLongFired = false;
   clearTimeout(titleHoldTimer);
-  titleHoldTimer = setTimeout(openSettings, 500);
+  titleHoldTimer = setTimeout(() => { titleLongFired = true; openSettings(); }, 500);
 });
 ["pointerup", "pointerleave", "pointercancel"].forEach(evt =>
-  appTitle.addEventListener(evt, () => clearTimeout(titleHoldTimer)));
-appTitle.addEventListener("contextmenu", e => e.preventDefault());
+  periodNav.addEventListener(evt, () => clearTimeout(titleHoldTimer)));
+periodNav.addEventListener("contextmenu", e => e.preventDefault());
 
 // ---------- fab: tap = new entry, long-press = swap to export ----------
 const fab = document.getElementById("fab");
 const EXPORT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3.5"/><path d="M7.5 7.5 12 3l4.5 4.5"/><path d="M5 13v5.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V13"/></svg>';
+const PLUS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+const TICK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 17.5 19.5 7"/></svg>';
 let fabMode = "add";
 let fabHoldTimer = null, fabLongFired = false, fabRevertTimer = null;
 
+// the dock's primary button is icon-based now, so every state swaps innerHTML — assigning
+// textContent would drop the svg and leave a bare glyph in a 44px circle.
 function setFabMode(mode) {
   fabMode = mode;
   clearTimeout(fabRevertTimer);
@@ -4115,7 +4162,7 @@ function setFabMode(mode) {
     fab.setAttribute("aria-label", "Export markdown");
     fabRevertTimer = setTimeout(() => setFabMode("add"), 5000); // untouched: fall back to +
   } else {
-    fab.textContent = "+";
+    fab.innerHTML = PLUS_ICON;
     fab.setAttribute("aria-label", "New entry");
   }
 }
@@ -4126,7 +4173,7 @@ async function doExport() {
   try {
     await navigator.clipboard.writeText(md);
     fab.classList.add("copied");
-    fab.textContent = "\u2713";
+    fab.innerHTML = TICK_ICON;
     setTimeout(() => setFabMode("add"), 1200);
   } catch (e) {
     setFabMode("add");
@@ -4181,8 +4228,6 @@ window.addEventListener("scroll", () => {
 
 // ---------- wiring ----------
 document.getElementById("searchBtn").addEventListener("click", openSearch);
-segWeek.addEventListener("click", () => { view = "week"; render(); });
-segMonth.addEventListener("click", () => { view = "month"; render(); });
 document.getElementById("prevBtn").addEventListener("click", () => {
   if (view === "week") wk = shiftWeek(wk.year, wk.week, -1);
   else mo = mo.month === 0 ? { year: mo.year - 1, month: 11 } : { year: mo.year, month: mo.month - 1 };
