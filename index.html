@@ -191,17 +191,18 @@
   .rt-bullet { display: flex; gap: 7px; }
   .rt-dot { flex: none; color: #C7C7CC; user-select: none; -webkit-user-select: none; }
   .rt-body { flex: 1; min-width: 0; }
-  /* checklist item: a tappable box in place of the bullet dot. checked = filled + struck. */
-  .rt-check { display: flex; gap: 8px; align-items: flex-start; }
+  /* checklist item: a tappable circle in place of the bullet dot. checked = filled + struck.
+     roomier vertical rhythm than a plain paragraph — items want to breathe. */
+  .rt-check { display: flex; gap: 9px; align-items: flex-start; padding: 3px 0; }
   .rt-box {
-    flex: none; width: 19px; height: 19px; margin-top: 1px; border-radius: 6px;
+    flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 50%;
     border: 1.75px solid #C7C4BD; color: #fff; box-sizing: border-box;
     display: inline-flex; align-items: center; justify-content: center;
     transition: background 0.15s ease, border-color 0.15s ease;
   }
   .rt-box.live { cursor: pointer; }
   .rt-box.on { background: var(--ink); border-color: var(--ink); }
-  .rt-box svg { width: 13px; height: 13px; }
+  .rt-box svg { width: 12px; height: 12px; }
   .rt-check.done .rt-body { color: var(--subtle); text-decoration: line-through; text-decoration-color: #C7C4BD; }
   /* read-more: the pill that floats the folded entry in a centred modal */
   .read-more {
