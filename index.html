@@ -260,6 +260,36 @@
     display: block; max-width: 100%; border-radius: 12px; margin: 6px 0; cursor: zoom-in;
     -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
   }
+  /* photos added back to back: a scrollable row of equal rounded cards, so a burst of
+     images reads as a set instead of a stack that buries the text under it */
+  .rt-gallery {
+    display: flex; gap: 8px; margin: 8px 0;
+    overflow-x: auto; scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .rt-gallery::-webkit-scrollbar { display: none; }
+  .rt-gallery .rt-img {
+    flex: none; width: 62%; max-width: 220px; aspect-ratio: 4 / 5;
+    object-fit: cover; margin: 0; border-radius: 14px; scroll-snap-align: start;
+  }
+  /* two fit the width exactly; three or more spill into a scroll */
+  .rt-gallery:not(.stacked):has(> :nth-child(2):last-child) .rt-img { width: calc(50% - 4px); max-width: none; }
+  .rt-gallery .rt-img {
+    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* pinched shut: a fanned deck. white ring so the cards still read as separate objects. */
+  .rt-gallery.stacked { overflow: visible; gap: 0; padding: 6px 0; }
+  .rt-gallery.stacked .rt-img {
+    width: 58%; max-width: 200px;
+    box-shadow: 0 0 0 3px var(--card), 0 6px 16px rgba(0,0,0,0.16);
+  }
+  .rt-gallery.stacked .rt-img + .rt-img { margin-left: -44%; }
+  .rt-gallery.stacked .rt-img:nth-child(1) { transform: rotate(-3deg); z-index: 4; }
+  .rt-gallery.stacked .rt-img:nth-child(2) { transform: rotate(2.2deg); z-index: 3; }
+  .rt-gallery.stacked .rt-img:nth-child(3) { transform: rotate(-1.4deg); z-index: 2; }
+  .rt-gallery.stacked .rt-img:nth-child(n+4) { transform: rotate(3deg); z-index: 1; }
+  @media (prefers-reduced-motion: reduce) { .rt-gallery .rt-img { transition: none; } }
   /* display sizes chosen from the preview (3x = full width, the default above) */
   .rt-img.sz-2x { max-width: 66%; }
   .rt-img.sz-1x { max-width: 33%; }
@@ -405,9 +435,31 @@
   .redacted.revealed { color: inherit; background: var(--field); animation: none; }
   @media (prefers-reduced-motion: reduce) { .redacted { animation: none; } }
 
+  /* the line-ops popover: one vertical list of labelled rows, so related controls collapse
+     into a single button instead of a wall of glyphs. floats above the format row. */
+  .line-pop {
+    position: absolute; left: 0; top: calc(100% + 8px); z-index: 8;
+    min-width: 196px; padding: 6px;
+    background: var(--card); border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 12px 34px rgba(0,0,0,0.16);
+    animation: lpDrop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes lpDrop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .line-pop { animation: none; } }
+  .line-pop-row {
+    display: flex; align-items: center; gap: 11px; width: 100%;
+    padding: 10px 11px; border-radius: 11px;
+    background: none; border: none; text-align: left;
+    font-family: var(--font); font-size: 14px; color: var(--ink);
+  }
+  .line-pop-row:active { background: var(--field); }
+  .line-pop-row .lp-icon { flex: none; line-height: 0; color: #6B6B70; }
+  .line-pop-row .lp-icon svg { width: 19px; height: 19px; }
+  .line-pop-row .lp-label { flex: 1; min-width: 0; }
+
   /* format bar — line ops (bullet/indent) while just typing, span ops (B I U…) once
      text is selected. one slim row either way; the contents swap, the row never grows. */
-  .fmt-bar { display: none; gap: 8px; margin-top: 8px; }
+  .fmt-bar { position: relative; display: none; gap: 8px; margin-top: 8px; }
   .fmt-bar.show { display: flex; }
   .fmt-bar .sel-only, .fmt-bar .line-only { display: none; }
   .fmt-bar.has-sel .sel-only { display: flex; }
@@ -600,9 +652,9 @@
      the bar's grey and rounding and settles into a tall flat white expanse — the field IS
      the surface, no inset box, so there's nothing to make the writing feel small. */
   .sheet.expanse {
-    height: 92dvh; max-height: 92dvh;
-    /* bottom padding = room for the styling dock, so the tags can scroll clear of it */
-    padding: 12px 20px 88px;
+    /* --sheet-h is what the notch drags; 92% of the viewport is its ceiling */
+    height: var(--sheet-h, 92dvh); max-height: 92dvh;
+    padding: 12px 20px calc(env(safe-area-inset-bottom) + 24px);
     animation: none; /* the unfold below replaces the generic slide-up */
     clip-path: inset(0 round 20px 20px 0 0);
     /* the toe matters: a deliberate hold of visible growth off the bar, THEN a decisive run
@@ -626,30 +678,19 @@
   @media (prefers-reduced-motion: reduce) {
     .sheet.expanse, .sheet.expanse > * { transition: none; }
   }
-  /* the writing surface fills the sheet down to the dock */
+  /* the writing surface tracks whatever height the notch has set, less the chrome above it */
   .sheet.expanse textarea.ta-entry {
     background: none; border-radius: 0; padding: 8px 0 0;
     font-size: 17px; line-height: 1.55;
-    min-height: calc(92dvh - 190px); max-height: none;
+    min-height: calc(var(--sheet-h, 92dvh) - 250px); max-height: none;
   }
   .sheet.expanse textarea.ta-entry::placeholder { color: #B4B4B9; }
-  /* the styling row is a real dock: fixed to the bottom of the screen, so it stays put while
-     the topics scroll underneath it. matched to the sheet's own width and centring. */
-  .sheet.expanse .fmt-bar {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
-    max-width: 520px; margin: 0 auto;
-    background: var(--card);
-    padding: 10px 20px calc(env(safe-area-inset-bottom) + 12px);
-  }
-  .sheet.expanse .fmt-bar::before { /* a soft top edge instead of a hard rule */
-    content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 20px;
-    background: linear-gradient(to top, var(--card), rgba(255,255,255,0));
-    pointer-events: none;
-  }
+  /* the styling row rides under the head, above the field — always in view on a phone */
+  .sheet.expanse .fmt-bar { margin: 2px 0 6px; }
 
   /* the notch doubles as a resize handle for the composer: drag it to set the height */
   .grabber {
-    width: 36px; height: 5px; border-radius: 3px;
+    width: 48px; height: 5px; border-radius: 3px;
     background: var(--hairline); background-clip: content-box; box-sizing: content-box;
     padding: 9px 22px; margin: -5px auto 3px;
     cursor: ns-resize; touch-action: none; user-select: none; -webkit-user-select: none;
@@ -1244,6 +1285,7 @@ const INDENT_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none"
 const OUTDENT_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M12 12h8M4 19h16"/><path d="M7.6 9.2v5.6L4 12Z" fill="currentColor" stroke="none"/></svg>';
 const IMG_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="9" cy="10.2" r="1.6"/><path d="m20.5 15.8-4.3-4.3a1.5 1.5 0 0 0-2.1 0L6.5 19"/></svg>';
 const CHECKBOX_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>';
+const LINES_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="5" cy="18" r="1.5" fill="currentColor" stroke="none"/><path d="M10 6h9M10 12h6M10 18h9"/></svg>';
 const FOLD_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16"/><path d="M8 13l4 4 4-4"/></svg>';
 
 // derive a compact display domain from a url (drops scheme, www, and path)
@@ -1338,19 +1380,43 @@ const HR_LINE_RE = /^[ \t]*-{3,}[ \t]*$/;
 const FOLD_LINE_RE = /^[ \t]*\+{3,}[ \t]*$/m;        // the "read more" cut — handled by the card
                                                      // (m flag: entryEl execs it against the whole entry)
 const CHECK_RE = /^\[([ xX])\] ?([\s\S]*)$/;          // a bullet's body when it's a checklist item
+const PHOTO_ONLY_LINE_RE = /^[ \t]*!\[photo:[a-z0-9]+(?:@(?:inline|1x|2x|3x))?\][ \t]*$/; // a line that is just a photo
 // just the tick — the filled box is the .rt-box.on container itself, so no inner rect
 // (that "box in a box" read cluttered). iOS-clean: white checkmark on a solid fill.
 const CHECK_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 17.5 19.5 7"/></svg>';
 // onCheck(lineIndex, nextChecked) — supplied only where a toggle should persist (the card,
 // the read-more modal). left out of read-only previews, where the box renders but is inert.
 function renderRichBlocks(text, images, onResize, onCheck) {
-  if (!/^[ \t]*[-—] |^(?: {2,}|\t)|^[ \t]*[-+]{3,}[ \t]*$/m.test(text)) return renderRich(text, images, onResize);
+  const needsBlocks = /^[ \t]*[-—] |^(?: {2,}|\t)|^[ \t]*[-+]{3,}[ \t]*$/m.test(text)
+    || /!\[photo:[a-z0-9]+(?:@(?:inline|1x|2x|3x))?\][ \t]*\n[ \t]*!\[photo:/.test(text); // a photo run
+  if (!needsBlocks) return renderRich(text, images, onResize);
   const frag = document.createDocumentFragment();
   const lines = text.split("\n");
   for (let li = 0; li < lines.length; li++) {
     const line = lines[li];
     if (FOLD_LINE_RE.test(line)) continue;                        // the fold marker itself never shows
     if (HR_LINE_RE.test(line)) { frag.appendChild(el("hr", { class: "rt-hr" })); continue; }
+    // photos added back to back gather into one row of rounded cards rather than stacking
+    // full-width. consume the whole run here so each image isn't its own block.
+    if (PHOTO_ONLY_LINE_RE.test(line)) {
+      const run = [];
+      while (li < lines.length && PHOTO_ONLY_LINE_RE.test(lines[li])) {
+        run.push(lines[li].trim()); li++;
+      }
+      li--; // the for-loop's own increment steps past the last one
+      if (run.length > 1) {
+        // keyed by the run's own markers, so a pinch survives the re-render that follows
+        // ticking a checkbox elsewhere in the entry
+        const key = run.join("|");
+        const gal = el("div", { class: "rt-gallery" + (stackedRuns.has(key) ? " stacked" : "") });
+        for (const r of run) gal.appendChild(renderRich(r, images, onResize));
+        attachGalleryPinch(gal, key);
+        frag.appendChild(gal);
+        continue;
+      }
+      frag.appendChild(el("div", { class: "rt-line" }, renderRich(run[0], images, onResize)));
+      continue;
+    }
     const m = /^([ \t]*)([-—] )?(.*)$/.exec(line);
     const ind = Math.floor(m[1].replace(/\t/g, "  ").length / 2);
     const check = m[2] ? CHECK_RE.exec(m[3]) : null;              // "[ ] label" inside a bullet
@@ -1384,6 +1450,29 @@ function renderRichBlocks(text, images, onResize, onCheck) {
     frag.appendChild(row);
   }
   return frag;
+}
+
+// pinch a run of photos closed and they collapse into a fanned deck; spread it and they lay
+// back out as a row. the state is remembered per run of markers, not stored on the entry, so
+// it survives re-renders without becoming data.
+const stackedRuns = new Set();
+function attachGalleryPinch(gal, key) {
+  let start = null;
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  gal.addEventListener("touchstart", ev => {
+    if (ev.touches.length !== 2) return;
+    ev.stopPropagation(); // the list's own pinch-to-compact must not also fire
+    start = dist(ev.touches);
+  }, { passive: true });
+  gal.addEventListener("touchmove", ev => {
+    if (start == null || ev.touches.length !== 2) return;
+    ev.stopPropagation();
+    ev.preventDefault(); // no page zoom while shaping the deck
+    const ratio = dist(ev.touches) / start;
+    if (ratio < 0.82) { gal.classList.add("stacked"); stackedRuns.add(key); start = null; }
+    else if (ratio > 1.22) { gal.classList.remove("stacked"); stackedRuns.delete(key); start = null; }
+  }, { passive: false });
+  gal.addEventListener("touchend", () => { start = null; }, { passive: true });
 }
 
 // tap a rendered image to open the full-screen preview (and its size rail). this was a
@@ -2527,35 +2616,36 @@ function openComposer(existing) {
     // grows with content up to the CSS max-height, then scrolls internally \u2014 so
     // "topic" stays peeking below rather than getting pushed off-screen entirely.
     // once the notch has been dragged, that height wins and content just scrolls within it.
+    // manualHeight is the SHEET's height now, not the field's — the field takes its size from
+    // the --sheet-h-derived min-height and simply grows with content past that.
     function autoGrow() {
-      if (manualHeight != null) { ta.style.height = manualHeight + "px"; return; }
       ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px";
     }
     ta.addEventListener("input", () => { text = ta.value; saveBtn.disabled = !text.trim(); autoGrow(); });
     sheet.appendChild(ta);
     requestAnimationFrame(autoGrow); // ta isn't attached to the document until after build() returns
 
-    // ---- notch = resize handle: drag it up to grow the writing surface, down to shrink ----
+    // ---- notch = resize handle: drag it up to grow the sheet, down to shrink ----
+    // it used to stretch the textarea, which does nothing now that the sheet is a fixed-height
+    // expanse. it resizes the SHEET instead, and the field follows via --sheet-h. 92% of the
+    // viewport is the ceiling — enough of the list stays visible to tap away.
+    const SHEET_MAX = () => Math.round(window.innerHeight * 0.92);
+    const SHEET_MIN = () => Math.min(300, Math.round(window.innerHeight * 0.45));
+    function setSheetHeight(h) {
+      manualHeight = Math.max(SHEET_MIN(), Math.min(SHEET_MAX(), Math.round(h)));
+      sheet.style.setProperty("--sheet-h", manualHeight + "px");
+      // autoGrow pins an explicit pixel height on the field; left alone it keeps the height
+      // it had at the OLD sheet size and overflows once the sheet shrinks under it.
+      ta.style.height = "";
+      autoGrow();
+    }
     grabber.addEventListener("pointerdown", ev => {
       ev.preventDefault();
       const startY = ev.clientY;
-      const startH = ta.getBoundingClientRect().height;
-      // maximise the writing surface up to the point where the sheet exactly fills the
-      // viewport minus a minimal tap-away gap — so dragging all the way up never spawns a
-      // scrollbar. chrome = everything in the sheet that isn't the textarea (grabber, head,
-      // format bar, topic/mode sections, paddings), measured live so it stays honest.
-      const TOP_GAP = Math.max(28, Math.round(window.innerHeight * 0.06));
-      const chrome = sheet.scrollHeight - startH;
-      const maxH = Math.max(120, Math.round(window.innerHeight - TOP_GAP - chrome));
-      sheet.style.maxHeight = (window.innerHeight - TOP_GAP) + "px"; // let the sheet grow to match
+      const startH = sheet.getBoundingClientRect().height;
       grabber.style.cursor = "grabbing";
       try { grabber.setPointerCapture(ev.pointerId); } catch (e) {}
-      const onMove = e => {
-        const h = Math.max(120, Math.min(maxH, Math.round(startH + (startY - e.clientY))));
-        manualHeight = h;
-        // an explicit height overrides the CSS min/max clamp so the drag feels 1:1
-        ta.style.maxHeight = "none"; ta.style.height = h + "px";
-      };
+      const onMove = e => setSheetHeight(startH + (startY - e.clientY)); // up = taller, 1:1
       const onUp = e => {
         grabber.removeEventListener("pointermove", onMove);
         grabber.removeEventListener("pointerup", onUp);
@@ -2566,7 +2656,7 @@ function openComposer(existing) {
       grabber.addEventListener("pointerup", onUp);
     });
     // a height chosen earlier survives a rebuild (day/week change)
-    if (manualHeight != null) { ta.style.maxHeight = "none"; ta.style.height = manualHeight + "px"; }
+    if (manualHeight != null) setSheetHeight(manualHeight);
 
     // shared image pipeline: ⌘V paste and the format-bar photo button both land here.
     // the image is downscaled (max 1100px), stored on the entry, and referenced inline
@@ -2785,6 +2875,35 @@ function openComposer(existing) {
       ta.focus();
       updateBar();
     }
+    // ---- line ops collapse into one button + a vertical popover ----
+    // six side-by-side icons was a wall of glyphs; the related ones (bullet, checkbox,
+    // indent, outdent) now live in a labelled vertical list, which also names what they do.
+    let linePop = null;
+    function closeLinePop() { if (linePop) { linePop.remove(); linePop = null; } }
+    function openLinePop(anchor, items) {
+      if (linePop) { closeLinePop(); return; }
+      linePop = el("div", { class: "line-pop" });
+      for (const [icon, label, transform] of items) {
+        const r = el("button", { class: "line-pop-row" });
+        const g = el("span", { class: "lp-icon" }); g.innerHTML = icon;
+        r.appendChild(g);
+        r.appendChild(el("span", { class: "lp-label" }, label));
+        r.addEventListener("pointerdown", ev => {
+          if (ev.button !== 0) return;
+          ev.preventDefault();
+          lineOp(transform);
+          closeLinePop();
+        });
+        linePop.appendChild(r);
+      }
+      anchor.parentElement.appendChild(linePop);
+    }
+    // a tap anywhere else in the sheet puts it away
+    sheet.addEventListener("pointerdown", ev => {
+      if (linePop && !linePop.contains(ev.target) && !ev.target.closest(".fmt-lines")) closeLinePop();
+    }, true);
+
+    const LINE_OPS = [];
     [[BULLET_ICON, "Bullet", line => {
         const m = BULLET_LINE.exec(line);
         // a checklist counts as a bullet — toggling the dot returns it to plain text too
@@ -2797,11 +2916,16 @@ function openComposer(existing) {
       }],
      [INDENT_ICON, "Indent", line => "  " + line],
      [OUTDENT_ICON, "Outdent", line => line.startsWith("  ") ? line.slice(2) : line.replace(/^[ \t]/, "")]
-    ].forEach(([icon, label, transform]) => {
-      const b = el("button", { class: "fmt-btn line-only", "aria-label": label });
-      b.innerHTML = icon;
-      fmtBar.appendChild(fmtPress(b, () => lineOp(transform)));
+    ].forEach(entry => LINE_OPS.push(entry));
+    // one button stands for the four of them; it opens the list rather than doing anything itself
+    const linesBtn = el("button", { class: "fmt-btn line-only fmt-lines", "aria-label": "Lists & indent" });
+    linesBtn.innerHTML = LINES_ICON;
+    linesBtn.addEventListener("pointerdown", ev => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      openLinePop(linesBtn, LINE_OPS);
     });
+    fmtBar.appendChild(linesBtn);
 
     // fold: drop a "+++" cut on its own line. everything below it collapses in the card
     // behind a Read-more that floats the whole entry in a centred modal.
@@ -2902,7 +3026,9 @@ function openComposer(existing) {
       fmtBar.appendChild(fmtPress(b, () => wrapSel(pre, post)));
     });
     fmtBar.appendChild(fmtPress(el("button", { class: "fmt-btn sel-only fmt-l" }, "L"), linkSel));
-    sheet.appendChild(fmtBar);
+    // directly under the day/week/Save row, NOT at the foot of the sheet: on a phone the
+    // keyboard covers the bottom third, and a styling row you can't see is a row you can't use.
+    head.insertAdjacentElement("afterend", fmtBar);
 
     // ---- segmentation offer: appears once the ramble is long enough (and a key exists) ----
     const segOffer = segState && segState.busy
