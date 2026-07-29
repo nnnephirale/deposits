@@ -12,6 +12,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <!-- supabase client for optional cloud sync; app stays fully functional (local-only) if this fails to load -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Lexend Exa Medium: the day letter in the badge. one weight, one use. -->
+<link href="https://fonts.googleapis.com/css2?family=Lexend+Exa:wght@500&display=swap" rel="stylesheet">
 <style>
   :root {
     --ink: #1C1C1E;
@@ -27,6 +31,7 @@
     --field: #F4F4F6;
     --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
     --mono: 'SF Mono', ui-monospace, Menlo, monospace;
+    --day: 'Lexend Exa', var(--mono);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; }
@@ -38,7 +43,7 @@
   }
   button { font-family: var(--font); cursor: pointer; }
 
-  .wrap { max-width: 520px; margin: 0 auto; padding: 0 16px 130px; }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 0 16px 150px; }
 
   /* header */
   .header {
@@ -61,13 +66,20 @@
     mask-image: linear-gradient(to bottom, black, transparent);
     pointer-events: none;
   }
-  .header-row { display: flex; justify-content: space-between; align-items: baseline; }
-  .header h1 {
-    font-size: 22px; font-weight: 700; margin: 0;
-    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  /* the date line is centred in the row on its own; the tools float at the right so they
+     don't shift it off centre */
+  .header-top { position: relative; display: flex; justify-content: center; align-items: center; min-height: 22px; }
+  .header-tools {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    display: flex; align-items: center; gap: 12px;
   }
-
-  .header-tools { display: flex; align-items: center; gap: 14px; }
+  .icon-btn {
+    width: 30px; height: 30px; border-radius: 11px;
+    background: var(--card); border: none; color: var(--subtle);
+    display: flex; align-items: center; justify-content: center; line-height: 0;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 3px 10px rgba(0,0,0,0.04);
+  }
+  .icon-btn svg { width: 15px; height: 15px; }
 
   /* search sheet */
   .sheet.search-sheet {
@@ -111,58 +123,83 @@
   }
   .layout-btns button.on { color: var(--ink); font-weight: 700; }
 
-  /* period tabs — the app's identity AND its view switcher, in the space the title wasted.
-     tap the inactive one to switch view; tap the active one to open the picker. */
-  .period-nav { display: flex; align-items: baseline; gap: 7px; }
+  /* the period row: arrows flanking the tabs, all on one centred line. the tabs are both
+     the app's identity and its view switcher — tap the inactive one to switch view, tap the
+     active one to open the picker. */
+  .period-row {
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    margin-top: 10px;
+  }
+  .period-nav { display: flex; align-items: baseline; gap: 8px; }
   .period-tab {
-    font-family: var(--mono); font-size: 22px; font-weight: 700; letter-spacing: -0.2px;
-    background: none; border: none; padding: 0; color: #C4C2BD;
-    line-height: 1.1; transition: color 0.18s ease;
+    font-family: var(--mono); font-size: 30px; font-weight: 700; letter-spacing: -0.5px;
+    background: none; border: none; padding: 0; color: #C9C9CC;
+    line-height: 1.05; transition: color 0.18s ease;
     user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
     touch-action: manipulation;
   }
   .period-tab.on { color: var(--ink); }
-  .period-sep { font-family: var(--mono); font-size: 17px; color: #D5D3CE; user-select: none; }
+  .period-sep { font-family: var(--mono); font-size: 19px; color: #D8D8DB; user-select: none; }
 
-  /* stepper — the header carries the period's identity now, so this is just the arrows
-     and a quiet context line (date range / year) */
-  .stepper {
-    display: flex; align-items: center; justify-content: space-between;
-    margin: 10px 0 16px;
-  }
   .stepper-btn {
-    font-size: 20px; color: var(--subtle); background: var(--card);
+    flex: none;
+    font-size: 18px; color: var(--subtle); background: var(--card);
     border: none; border-radius: 12px;
-    width: 34px; height: 34px; line-height: 1;
+    width: 32px; height: 32px; line-height: 1;
     box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 3px 10px rgba(0,0,0,0.04);
   }
   .stepper-center {
-    text-align: center; flex: 1;
+    text-align: center;
     user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
   }
-  .wk-range { font-size: 13px; color: var(--subtle); }
+  .wk-range { font-size: 13px; color: #A8A8AC; }
 
-  /* groups */
-  .group { margin-bottom: 24px; }
+  /* groups — the topic label lives INSIDE the white block now, as its heading */
+  .group { margin-bottom: 18px; }
   .group-head {
-    display: flex; align-items: center; gap: 7px;
-    margin-bottom: 8px; padding-left: 4px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 18px 20px 2px;
     touch-action: none; user-select: none; -webkit-user-select: none;
     cursor: grab;
   }
-  .group-dot { width: 8px; height: 8px; border-radius: 4px; display: inline-block; }
+  .group-dot { width: 8px; height: 8px; border-radius: 4px; display: inline-block; flex: none; }
   .group-label {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
     text-transform: uppercase; font-weight: 600;
   }
-  /* white block floating on the warm grey canvas: generous radius, soft layered shadow */
+  /* white block floating on the grey canvas: generous radius, soft layered shadow */
   .group-card {
-    background: var(--card); border-radius: 20px; overflow: hidden;
+    background: var(--card); border-radius: 24px; overflow: hidden;
     box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 6px 18px rgba(0,0,0,0.045);
   }
 
-  .entry { padding: 13px 16px; cursor: pointer; }
-  .entry + .entry { border-top: 1px solid var(--hairline); }
+  /* an entry is a left gutter (the day badge, with a hairline threading between badges)
+     and a body. the divider between entries starts at the body, not the card edge. */
+  .entry {
+    position: relative; display: flex; gap: 16px;
+    padding: 15px 20px; cursor: pointer;
+  }
+  .entry-gutter { position: relative; flex: none; width: 22px; }
+  /* the thread linking one day badge to the next — from under this badge to the next one.
+     suppressed on the last entry so it doesn't dangle into the card's bottom padding. */
+  .entry:not(:last-child) .entry-gutter::after {
+    content: ""; position: absolute; left: 50%; width: 1px;
+    top: 28px; bottom: -32px; margin-left: -0.5px;
+    background: var(--hairline);
+  }
+  .day-badge {
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 7px;
+    background: #F1F1F3; color: #8E8E93;
+    font-family: var(--day); font-weight: 500; font-size: 9px; letter-spacing: 0;
+    user-select: none; -webkit-user-select: none;
+  }
+  .day-badge sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
+  .entry-body { flex: 1; min-width: 0; }
+  .entry + .entry::before {
+    content: ""; position: absolute; top: 0; left: 58px; right: 20px;
+    height: 1px; background: var(--hairline);
+  }
   .entry p { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
 
   /* inline formatting */
@@ -388,7 +425,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .entry.has-side { position: relative; }
-  .entry.has-side > p { padding-right: 88px; }
+  .entry.has-side .entry-body > p { padding-right: 88px; }
   .entry-day { font-family: var(--mono); font-size: 11px; color: #A9A9AD; } /* 15% darker than #C7C7CC — readable on a phone */
   .group.dense { margin-bottom: 12px; }
 
@@ -438,46 +475,38 @@
   .wsum-wand svg { width: 13.5px; height: 13.5px; } /* 10% smaller than the eye */
 
   /* subtle frost at the bottom edge — content softly fades behind the fab zone */
+  /* a white fade the list scrolls up into, so the compose bar always sits on clean ground */
   .bottom-frost {
     position: fixed; left: 0; right: 0; bottom: 0;
-    height: calc(env(safe-area-inset-bottom) + 64px);
-    background: linear-gradient(to top, var(--canvas-a), var(--canvas-0));
-    -webkit-backdrop-filter: blur(7px);
-    backdrop-filter: blur(7px);
-    -webkit-mask-image: linear-gradient(to top, black 30%, transparent);
-    mask-image: linear-gradient(to top, black 30%, transparent);
+    height: calc(env(safe-area-inset-bottom) + 150px);
+    background: linear-gradient(to top, #fff 34%, rgba(255,255,255,0.86) 62%, rgba(255,255,255,0));
     pointer-events: none; z-index: 30;
   }
 
-  /* dock — a floating frosted-white pill, the app's one persistent set of actions.
-     white on the warm grey canvas, so it reads as another block rather than a dark blob. */
-  .dock {
-    position: fixed; bottom: calc(env(safe-area-inset-bottom) + 20px);
-    left: 50%; transform: translateX(-50%);
-    display: flex; align-items: center; gap: 4px;
-    padding: 7px; border-radius: 999px; z-index: 40;
-    background: rgba(255,255,255,0.82);
-    -webkit-backdrop-filter: blur(20px) saturate(1.6); backdrop-filter: blur(20px) saturate(1.6);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 10px 34px rgba(0,0,0,0.12);
+  /* the compose bar: a resting grey field that says "Start typing…". tapping it opens the
+     composer, which unfolds from this same bar into a full flat-white expanse. */
+  .compose-dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    padding: 0 16px calc(env(safe-area-inset-bottom) + 18px);
+    max-width: 520px; margin: 0 auto;
     transition: opacity 0.2s ease;
   }
-  .dock-btn {
-    width: 44px; height: 44px; border-radius: 999px;
-    background: none; border: none; color: #6B6B70;
-    display: flex; align-items: center; justify-content: center; line-height: 0;
-    transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
-    user-select: none; -webkit-user-select: none;
-    -webkit-touch-callout: none; touch-action: manipulation;
+  .compose-bar {
+    display: flex; align-items: center; width: 100%;
+    min-height: 52px; padding: 15px 20px;
+    background: #E8E8EA; border: none; border-radius: 18px;
+    font-family: var(--font); font-size: 15px; color: #9A9A9F; text-align: left;
+    cursor: text; -webkit-tap-highlight-color: transparent;
+    transition: background 0.18s ease, transform 0.12s ease;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
   }
-  .dock-btn svg { width: 20px; height: 20px; }
-  .dock-btn:active { transform: scale(0.94); }
-  .dock-btn.primary { background: var(--ink); color: #fff; }
-  .dock-btn.primary svg { width: 21px; height: 21px; }
-  .dock-btn.copied { background: #2E7D3A; color: #fff; }
-  /* the preview backdrop is translucent, so the dock reads as a smudge over the size rail.
-     it sits below the overlay and never stole the taps — this just takes it out of frame,
+  .compose-bar:active { transform: scale(0.995); background: #E2E2E5; }
+  .compose-bar.copied { background: #2E7D3A; color: #fff; justify-content: center; }
+  .compose-bar svg { width: 19px; height: 19px; }
+  /* a translucent overlay would show the bar as a smudge underneath — take it out of frame,
      fading in step with the backdrop. */
-  body:has(.img-preview-back) .dock, body:has(.read-back) .dock { opacity: 0; pointer-events: none; }
+  body:has(.img-preview-back) .compose-dock,
+  body:has(.read-back) .compose-dock { opacity: 0; pointer-events: none; }
 
   /* sheet */
   .overlay {
@@ -496,6 +525,41 @@
   }
   @keyframes slideUp { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+
+  /* the composer: an unfolding of the compose bar rather than a panel over it. it opens at
+     the bar's grey and rounding and settles into a tall flat white expanse — the field IS
+     the surface, no inset box, so there's nothing to make the writing feel small. */
+  .sheet.expanse {
+    height: 92dvh; max-height: 92dvh;
+    /* bottom padding = room for the styling dock, so the tags can scroll clear of it */
+    padding: 12px 20px 88px;
+    animation: expanseOpen 0.36s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes expanseOpen {
+    from { transform: translateY(26px); background-color: #E8E8EA; border-radius: 18px; }
+    to { transform: none; background-color: #fff; border-radius: 20px 20px 0 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { .sheet.expanse { animation: none; } }
+  /* the writing surface fills the sheet down to the dock */
+  .sheet.expanse textarea.ta-entry {
+    background: none; border-radius: 0; padding: 8px 0 0;
+    font-size: 17px; line-height: 1.55;
+    min-height: calc(92dvh - 190px); max-height: none;
+  }
+  .sheet.expanse textarea.ta-entry::placeholder { color: #B4B4B9; }
+  /* the styling row is a real dock: fixed to the bottom of the screen, so it stays put while
+     the topics scroll underneath it. matched to the sheet's own width and centring. */
+  .sheet.expanse .fmt-bar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+    max-width: 520px; margin: 0 auto;
+    background: var(--card);
+    padding: 10px 20px calc(env(safe-area-inset-bottom) + 12px);
+  }
+  .sheet.expanse .fmt-bar::before { /* a soft top edge instead of a hard rule */
+    content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 20px;
+    background: linear-gradient(to top, var(--card), rgba(255,255,255,0));
+    pointer-events: none;
+  }
 
   /* the notch doubles as a resize handle for the composer: drag it to set the height */
   .grabber {
@@ -831,31 +895,30 @@
 <body>
 <div class="wrap">
   <div class="header">
-    <div class="header-row">
+    <div class="header-top">
+      <div class="stepper-center" id="periodLabel"></div>
+      <div class="header-tools">
+        <div class="layout-btns" id="layoutBtns"></div>
+        <button class="icon-btn" id="searchBtn" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></button>
+      </div>
+    </div>
+    <div class="period-row">
+      <button class="stepper-btn" id="prevBtn">&lsaquo;</button>
       <div class="period-nav">
         <button class="period-tab" id="navWeek" aria-label="Week view"></button>
         <span class="period-sep">/</span>
         <button class="period-tab" id="navMonth" aria-label="Month view"></button>
       </div>
-      <div class="header-tools">
-        <div class="layout-btns" id="layoutBtns"></div>
-      </div>
+      <button class="stepper-btn" id="nextBtn">&rsaquo;</button>
     </div>
-  </div>
-
-  <div class="stepper">
-    <button class="stepper-btn" id="prevBtn">&lsaquo;</button>
-    <div class="stepper-center" id="periodLabel"></div>
-    <button class="stepper-btn" id="nextBtn">&rsaquo;</button>
   </div>
 
   <div id="entriesRoot"></div>
 </div>
 
 <div class="bottom-frost"></div>
-<div class="dock" id="dock">
-  <button class="dock-btn" id="searchBtn" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></button>
-  <button class="dock-btn primary" id="fab" aria-label="New entry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+<div class="compose-dock" id="dock">
+  <button class="compose-bar" id="fab" aria-label="New entry"><span>Start typing…</span></button>
 </div>
 <div id="sheetRoot"></div>
 
@@ -958,6 +1021,9 @@ function entryDay(e) {
   if (e.day === undefined) return weekdayIndex(new Date(e.createdAt)); // legacy entries
   return e.day; // may be null = no day chosen
 }
+// ascending-order day key: no-day entries go to the very end (daySortKey's -1 only lands
+// last when sorting descending)
+function dayAsc(e) { const d = entryDay(e); return d == null ? 99 : d; }
 function daySortKey(e) {
   const d = entryDay(e);
   return d == null ? -1 : d; // sorted descending, so no-day entries land last
@@ -1693,7 +1759,10 @@ function activeEntries() {
   if (view === "week") {
     return entries
       .filter(e => !e.segmented && e.year === wk.year && e.week === wk.week)
-      .sort((a, b) => (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
+      // chronological through the week (Mon at the top), so the day badges thread downward
+      // the way the week actually ran. dayAsc sends no-day entries to the end instead of the
+      // front — daySortKey's -1 sentinel only sorts last when the order is descending.
+      .sort((a, b) => (dayAsc(a) - dayAsc(b)) || a.createdAt.localeCompare(b.createdAt));
   }
   return entriesForMonth(mo.year, mo.month);
 }
@@ -1816,6 +1885,17 @@ function entryEl(e, opts) {
     ? (e.tags || []).map(tg => topicById[tg]).find(t => t && t.id !== opts.skipTag)
     : null;
   const entry = el("div", { class: "entry" + (sideTopic ? " has-side" : ""), onclick: () => openComposer(e) });
+  // the day rides in a badge in the left gutter, with a hairline threading down to the next
+  // one. it replaces the day token that used to sit in the meta row.
+  const dayIdx = entryDay(e);
+  const badge = el("span", { class: "day-badge" });
+  const tok = dayIdx == null ? "–" : DAY_TOKENS[dayIdx];
+  const sup = tok.match(/^(.)([¹²])$/); // "T¹" -> T + a small raised 1
+  if (sup) { badge.appendChild(document.createTextNode(sup[1]));
+             badge.appendChild(el("sup", null, sup[2] === "¹" ? "1" : "2")); }
+  else badge.textContent = tok;
+  entry.appendChild(el("div", { class: "entry-gutter" }, badge));
+  const body = el("div", { class: "entry-body" });
   const collapse = compactView && entryWords(e) > SUMMARY_MIN_WORDS;
   const onResize = (imgId, size) => setImageSize(e.id, imgId, size);
   const onCheck = (li, c) => setLineChecked(e.id, li, c);
@@ -1832,11 +1912,11 @@ function entryEl(e, opts) {
   } else {
     p.appendChild(renderRichBlocks(e.text, e.images, onResize, onCheck));
   }
-  entry.appendChild(p);
+  body.appendChild(p);
   if (foldHasBody) {
     const more = el("button", { class: "read-more",
       onclick: ev => { ev.stopPropagation(); openReadModal(e); } }, "Read more");
-    entry.appendChild(more);
+    body.appendChild(more);
   }
   const meta = el("div", { class: "entry-meta" });
   if (e.locked) {
@@ -1844,12 +1924,12 @@ function entryEl(e, opts) {
     lock.innerHTML = LOCK_ICON;
     meta.appendChild(lock);
   }
-  const d = entryDay(e);
   const bits = [];
-  if (opts.showDay !== false && d != null) {
-    // month view leads with the date, day token in parens (15/07 (W)); week view is just the token
-    const dstr = opts.showDate ? entryDateStr(e) : null;
-    bits.push(dstr ? dstr + " (" + DAY_TOKENS[d] + ")" : DAY_TOKENS[d]);
+  // the gutter badge already says which day it was, so meta only adds what it can't:
+  // the calendar date in month view, plus week/year when those aren't implied by the view.
+  if (opts.showDate && dayIdx != null) {
+    const dstr = entryDateStr(e);
+    if (dstr) bits.push(dstr);
   }
   // week-tagged entries (day or not) show their W## in month view; month-scoped ones
   // have no week to show — the view itself is their scope
@@ -1865,11 +1945,12 @@ function entryEl(e, opts) {
     }
     else if (mm) meta.appendChild(el("span", { class: "pill mode" }, mm.label));
   }
-  if (meta.children.length) entry.appendChild(meta);
+  if (meta.children.length) body.appendChild(meta);
   if (sideTopic) {
-    entry.appendChild(el("div", { class: "entry-side" },
+    body.appendChild(el("div", { class: "entry-side" },
       el("span", { class: "pill", style: { background: sideTopic.bg, color: sideTopic.fg } }, sideTopic.label)));
   }
+  entry.appendChild(body);
   return entry;
 }
 
@@ -1912,13 +1993,14 @@ function renderTopicGroups(list, dense) {
   for (const g of orderGroupsForDisplay(groupByTopic(list))) {
     const t = topicById[g.key];
     const group = el("div", { class: "group" + (dense ? " dense" : "") });
+    let head = null;
     if (!dense) {
-      const head = el("div", { class: "group-head" });
+      head = el("div", { class: "group-head" });
       if (t) head.appendChild(el("span", { class: "group-dot", style: { background: t.dot } }));
       head.appendChild(el("span", { class: "group-label", style: { color: t ? t.fg : "var(--subtle)" } }, groupLabel(g.key)));
-      group.appendChild(head);
     }
     const card = el("div", { class: "group-card" });
+    if (head) card.appendChild(head); // the topic reads as the block's own heading now
     for (const e of g.entries) {
       card.appendChild(entryEl(e, {
         skipTag: dense ? null : g.key, // dense: every entry carries its own topic pill, headers or no
@@ -1946,11 +2028,11 @@ function renderDayGroups(list) {
   }
   for (const b of buckets) {
     if (!b.entries.length) continue;
-    const head = el("div", { class: "group-head" },
-      el("span", { class: "group-label", style: { color: "var(--ink)" } }, b.label));
     const card = el("div", { class: "group-card" });
+    card.appendChild(el("div", { class: "group-head" },
+      el("span", { class: "group-label", style: { color: "var(--ink)" } }, b.label)));
     for (const e of b.entries) card.appendChild(entryEl(e, b.opts));
-    entriesRoot.appendChild(el("div", { class: "group" }, head, card));
+    entriesRoot.appendChild(el("div", { class: "group" }, card));
   }
 }
 
@@ -1970,7 +2052,6 @@ function render() {
   if (view === "week") {
     let sub = weekRangeLabel(wk.year, wk.week);
     if (wk.year !== currentWk.year) sub += " \u00B7 " + wk.year;
-    if (wk.year === currentWk.year && wk.week === currentWk.week) sub += " \u00B7 this week";
     periodLabel.appendChild(el("div", { class: "wk-range" }, sub));
   } else {
     periodLabel.appendChild(el("div", { class: "wk-range" }, monthLabel(mo.year, mo.month)));
@@ -1980,7 +2061,7 @@ function render() {
   const list = activeEntries();
   if (list.length === 0) {
     const empty = el("div", { class: "empty" });
-    empty.innerHTML = "nothing deposited " + (view === "week" ? "this week" : "this month") + " yet.<br/>tap + to file a thought.";
+    empty.innerHTML = "nothing deposited " + (view === "week" ? "this week" : "this month") + " yet.<br/>start typing below to file a thought.";
     entriesRoot.appendChild(empty);
     return;
   }
@@ -2054,7 +2135,7 @@ function openComposer(existing) {
   sheetRoot.innerHTML = ""; // never stack on another sheet (composer can open from search results)
   lockPageScroll();
   const overlay = el("div", { class: "overlay", onclick: requestClose });
-  const sheet = el("div", { class: "sheet", onclick: e => e.stopPropagation() });
+  const sheet = el("div", { class: "sheet expanse", onclick: e => e.stopPropagation() });
   overlay.appendChild(sheet);
   // build() clears sheet's children but not sheet's own listeners, and it re-runs on every
   // day/week/tag/lock change — so the tap-away handler is swapped, never stacked.
@@ -2338,8 +2419,10 @@ function openComposer(existing) {
     } else {
       head.appendChild(el("div", { class: "head-pills" }, dayPill, weekPill));
     }
-    head.appendChild(el("span", { class: "title" },
-      segState && segState.ranges ? segState.ranges.length + " deposits" : (existing ? "Edit entry" : "New entry")));
+    // no "New entry" label: an empty field that says "Start typing…" is already the message.
+    if (segState && segState.ranges) {
+      head.appendChild(el("span", { class: "title" }, segState.ranges.length + " deposits"));
+    }
     head.appendChild(saveBtn);
     sheet.appendChild(head);
 
@@ -2347,7 +2430,7 @@ function openComposer(existing) {
     if (segState && segState.ranges) { buildSegPreview(); return; }
 
     // ---- text ----
-    const ta = el("textarea", { rows: "4", class: "ta-entry", placeholder: "deposit a thought\u2026" });
+    const ta = el("textarea", { rows: "4", class: "ta-entry", placeholder: "Start typing\u2026" });
     ta.value = text;
     // grows with content up to the CSS max-height, then scrolls internally \u2014 so
     // "topic" stays peeking below rather than getting pushed off-screen entirely.
@@ -4159,11 +4242,11 @@ function setFabMode(mode) {
   clearTimeout(fabRevertTimer);
   fab.classList.remove("copied");
   if (mode === "export") {
-    fab.innerHTML = EXPORT_ICON;
+    fab.innerHTML = EXPORT_ICON + "<span style=\"margin-left:8px\">export markdown</span>";
     fab.setAttribute("aria-label", "Export markdown");
     fabRevertTimer = setTimeout(() => setFabMode("add"), 5000); // untouched: fall back to +
   } else {
-    fab.innerHTML = PLUS_ICON;
+    fab.innerHTML = "<span>Start typing\u2026</span>";
     fab.setAttribute("aria-label", "New entry");
   }
 }
@@ -4174,7 +4257,7 @@ async function doExport() {
   try {
     await navigator.clipboard.writeText(md);
     fab.classList.add("copied");
-    fab.innerHTML = TICK_ICON;
+    fab.innerHTML = TICK_ICON + "<span style=\"margin-left:8px\">copied</span>";
     setTimeout(() => setFabMode("add"), 1200);
   } catch (e) {
     setFabMode("add");
