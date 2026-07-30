@@ -82,7 +82,9 @@ run states the day once and the gutter thread carries it:
 ```
 
 Same `--hairline` throughout — dashed, not a lighter colour — so it reads as the thread
-pausing rather than as a second kind of rule. Three details that matter:
+pausing rather than as a second kind of rule. The gap before the dashes is `--badge-gap`,
+the *same* breath a solid thread leaves under its badge, so the two are equal by
+construction rather than by eye. Three details that matter:
 
 - **The elbow's stub lands on the repeat's first line**, the same axis as the badge it stands
   in for: `bottom: calc(-1 * (var(--entry-pad-y) * 2 + var(--line-box) / 2))`. Two traps here.
@@ -228,12 +230,22 @@ the left, the content as its own rounded surface, a quiet panel on the right.
   64px          600px             248px
 ```
 
-**The icon rail is icon-only at rest and expands on hover** into icon + name — Week, Month,
-divider, Day view, Export markdown, Settings. It is *absolutely positioned*, so widening is
-an overlay rather than a reflow: expanding it in the grid would re-wrap every line of every
-entry as the pointer crossed it. It hugs its rows rather than filling the rail, because a
-full-height panel covers a screenful of entries to show five labels. `:focus-within` expands
-it too, so tabbing in works.
+**The icon rail has no panel.** It's a column of glyphs on the wash; the *row* under the
+pointer grows into a lozenge and names itself, and nothing else moves — opening a whole
+panel to answer one question brought four blank rows along for the ride. The rows are
+absolutely positioned within the rail so a lozenge overlays the mat rather than reflowing
+it: widening in the grid would re-wrap every line of every entry as the pointer crossed.
+Each row is sized to the *expanded* width and clipped, so the label never re-wraps mid
+transition. `:focus-visible` opens it too, so tabbing works.
+
+**Haptics** (`haptic(kind)`) use the `web-haptics` vocabulary — selection / light / medium /
+heavy / success / warning / error — inlined rather than installed, since this app has no
+build step. They supplement and never replace: every call site already has its own visual
+change. Reserved for meaningful moments (save, day/date pick, format press, tag toggle,
+checklist, gallery deck commit, destructive confirm), never on every tap. `navigator.vibrate`
+is Android-only; on iOS the fallback clicks a hidden `<input type="checkbox" switch>`, which
+fires the system switch haptic on 17.4+ — one fixed tap, so the vocabulary collapses to
+"something happened", and it's an unpromised side effect that could stop working.
 
 **Week and Month share one frame box** (`x3 y4.5 18×16 r3`) — week draws the columns, month
 adds the rows. Drawing them at different heights made one look like the lesser control.

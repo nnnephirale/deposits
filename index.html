@@ -176,13 +176,19 @@
     --entry-pad-y: 15px;
     --line-box: 22.5px;
     --pill-h: 18px;
+    /* the breath between a mark and the thread leaving it. One number, so the badge→thread
+       gap and the elbow→dashes gap are the same by construction rather than by eye. */
+    --badge-gap: 5.75px;
   }
   .entry-gutter { position: relative; flex: none; width: 22px; }
   /* the thread linking one day badge to the next — from under this badge to the next one.
      suppressed on the last entry so it doesn't dangle into the card's bottom padding. */
   .entry:not(:last-child) .entry-gutter::after {
     content: ""; position: absolute; left: 50%; width: 1px;
-    top: 28px; bottom: -32px; margin-left: -0.5px;
+    /* badge bottom + the gap: (line-box + 22)/2 + 5.75 — the same 28px it always was, but
+       now stated as "below the badge" so the dashed variant can reuse the gap */
+    top: calc((var(--line-box) + 22px) / 2 + var(--badge-gap));
+    bottom: -32px; margin-left: -0.5px;
     background: var(--hairline);
   }
 
@@ -208,9 +214,12 @@
   .entry.rep .entry-gutter::after { display: none; }
   .entry.rep .entry-gutter::before {
     content: ""; position: absolute; left: 50%; margin-left: -0.5px;
-    /* exactly the solid thread's own geometry — the dashes occupy the track the badge and
-       its thread would have used, so the gap above them is the elbow's, not an extra offset */
-    top: 28px; bottom: -32px;
+    /* The dashes start the SAME distance below the elbow that a solid thread starts below
+       its badge (--badge-gap). The elbow's stub sits at half a line box into this gutter, so
+       that plus the gap is where the dashes begin — not the badge-relative 28px, which left
+       a gap twice the size because there is no 22px badge here to clear. */
+    top: calc(var(--line-box) / 2 + var(--badge-gap));
+    bottom: -32px;
     border-left: 1px dashed var(--hairline);
   }
   .entry.rep:last-child .entry-gutter::before { bottom: 16px; }
@@ -1261,23 +1270,32 @@
        positioned so widening is an overlay, never a reflow — expanding it in the grid
        would re-wrap every line of every entry as the pointer crossed it. */
     .rail-l { position: relative; overflow: visible; }
+    /* No panel. The bar is just a column of glyphs on the wash; the ROW under the pointer
+       grows into a lozenge and names itself, and nothing else moves. Opening a whole panel
+       to answer one question meant four blank rows came along for the ride. */
     .iconbar {
-      /* hugs its rows rather than filling the rail: expanded it is an overlay on the
-         mat, and a full-height panel covers a screenful of entries to show five labels */
       position: absolute; left: 0; top: var(--mat-y);
       width: var(--rail-i); z-index: 5;
       display: flex; flex-direction: column; gap: 2px;
-      padding: 8px 0; border-radius: 22px; overflow: hidden;
-      background: rgba(255,255,255,0);
-      box-shadow: 0 0 0 rgba(0,0,0,0);
-      transition: width 0.34s cubic-bezier(0.16, 1, 0.3, 1),
-                  background-color 0.28s ease, box-shadow 0.28s ease;
+      padding: 8px 0;
+      overflow: visible;  /* the hovered lozenge extends past the rail, over the mat */
     }
     .ico-row {
       flex: none; display: flex; align-items: center; gap: 12px;
-      width: var(--rail-x); padding: 0 13px; height: 42px;
+      width: var(--rail-i); padding: 0 13px; height: 42px;
       background: none; border: none; text-align: left;
+      border-radius: 999px; overflow: hidden; white-space: nowrap;
+      transition: width 0.34s cubic-bezier(0.16, 1, 0.3, 1),
+                  background-color 0.24s ease, box-shadow 0.24s ease;
     }
+    .ico-row:hover, .ico-row:focus-visible {
+      width: var(--rail-x);
+      background: rgba(255,255,255,0.92);
+      -webkit-backdrop-filter: blur(22px) saturate(160%);
+      backdrop-filter: blur(22px) saturate(160%);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 8px 26px rgba(0,0,0,0.10);
+    }
+    @media (prefers-reduced-motion: reduce) { .ico-row { transition: none; } }
     .ico-glyph {
       position: relative; flex: none;
       width: 38px; height: 38px; border-radius: 999px;
@@ -1304,19 +1322,13 @@
     }
     .ico-dot.live { background: #55A862; }
 
-    .iconbar:hover, .iconbar:focus-within {
-      width: var(--rail-x);
-      background: rgba(255,255,255,0.9);
-      -webkit-backdrop-filter: blur(24px) saturate(160%);
-      backdrop-filter: blur(24px) saturate(160%);
-      box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 12px 36px rgba(0,0,0,0.08);
-    }
-    /* the panel opens as one, but only the row under the pointer names itself — five labels
-       at once is a menu, and the rail is meant to answer one question at a time */
     .ico-row:hover .ico-label, .ico-row:focus-visible .ico-label {
       opacity: 1; transition-delay: 0.04s;
     }
-    @media (prefers-reduced-motion: reduce) { .iconbar { transition: none; } }
+    /* the lozenge IS the hover feedback, so the glyph drops its own; an active glyph keeps a
+       circle, switched to grey so it stays visible against the white lozenge */
+    .ico-row:hover .ico-glyph { color: var(--ink); background: none; box-shadow: none; }
+    .ico-row.on:hover .ico-glyph { background: rgba(0,0,0,0.055); }
 
     /* ---- right: topics ---- */
     .rail-r { padding: var(--mat-y) 0 16px; }
@@ -1338,9 +1350,14 @@
       transition: color 0.15s ease, background 0.15s ease;
     }
     .rail-row .rr-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .rail-row .rr-count { flex: none; font-family: var(--mono); font-size: 11px; color: #C2C2C7; }
+    .rail-row .rr-count { flex: none; margin-left: auto; font-family: var(--mono); font-size: 11px; color: #C2C2C7; }
     .rail-row.on { color: var(--ink); font-weight: 600; }
-    .rail-row.on .rr-count { color: var(--subtle); }
+    .rail-row.on .rr-count { color: var(--ink); }
+    /* the topic pill, truncating rather than pushing the count off the rail */
+    .rail-row > .pill { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* a filter is on: the chosen pill keeps its colour, the rest step back */
+    .rail-scroll:has(.rail-row.on) .rail-row:not(.on) > .pill { opacity: 0.45; }
+    .rail-row > .pill { transition: opacity 0.18s ease; }
     .rr-mark { flex: none; width: 5px; height: 5px; border-radius: 50%; background: #D4D4D9; }
 
     .rail-search {
@@ -1409,8 +1426,6 @@
       .rail-scope:hover { color: var(--ink); background: rgba(0,0,0,0.085); }
       .rail-scope.open:hover { color: #fff; background: var(--ink); }
       .rail-scope-opt:hover { color: var(--ink); background: rgba(0,0,0,0.032); }
-      .ico-row:hover .ico-glyph { color: var(--ink); background: rgba(0,0,0,0.05); }
-      .ico-row.on:hover .ico-glyph { background: var(--card); }
       .entry:hover { background: rgba(0,0,0,0.016); }
       .stepper-btn:hover { background: #EAEAED; color: var(--ink); }
       .compose-bar:hover { background: #E4E4E7; }
@@ -1499,6 +1514,63 @@
 
 <script>
 "use strict";
+
+// ---------- haptics ----------
+// The web-haptics package's vocabulary, inlined — this app is one file with no build step,
+// so an npm dependency isn't available to it. Same trigger names, same Vibration API
+// underneath, so swapping in the real package later is a find-and-replace.
+//
+// PLATFORM: navigator.vibrate is Android-only. iOS Safari has never shipped it, so on an
+// iPhone (including the home-screen app) every one of these is a silent no-op. That's the
+// documented behaviour of the library too, and it's why rule 1 below is not optional.
+//
+// Apple HIG rules this follows: haptics SUPPLEMENT, never replace — every call site here
+// already has its own visual change, and the UI is complete without any of them. Intensity
+// matches significance, and they're reserved for moments that mean something rather than
+// fired on every tap.
+const HAPTICS = {
+  selection: [8],                      // discrete tick: a picker cell, a day, a date
+  light:     [11],                     // a small toggle
+  medium:    [20],                     // a press that commits, something landing
+  heavy:     [34],
+  success:   [16, 55, 26],             // two beats, rising
+  warning:   [26, 70, 26],
+  error:     [30, 55, 30, 55, 30]      // three, insistent
+};
+let hapticsOK = null;
+
+// iOS fallback. Safari has no Vibration API, but since iOS 17.4 a <input type="checkbox"
+// switch> fires the system's own switch haptic when toggled — so clicking a hidden one
+// inside a user gesture buys a real tap on a phone that has nothing else. Two limits worth
+// knowing: it is ONE fixed tap, so the whole vocabulary collapses to "something happened",
+// and it is a side effect Apple never promised, so it can stop working. It's a floor.
+let hapticSwitch = null;
+function iosHapticTap() {
+  if (!hapticSwitch) {
+    const input = el("input", { type: "checkbox", id: "haptic-switch", tabindex: "-1", "aria-hidden": "true" });
+    input.setAttribute("switch", "");           // the attribute is what makes it a switch
+    const label = el("label", { for: "haptic-switch", "aria-hidden": "true" });
+    // clipped, not display:none — a switch that isn't rendered doesn't fire anything
+    const wrap = el("div", { "aria-hidden": "true", style: {
+      position: "fixed", bottom: "0", left: "0", width: "1px", height: "1px",
+      overflow: "hidden", opacity: "0", pointerEvents: "none", zIndex: "-1"
+    } }, input, label);
+    document.body.appendChild(wrap);
+    hapticSwitch = label;
+  }
+  hapticSwitch.click();
+}
+
+function haptic(kind) {
+  if (hapticsOK === null) hapticsOK = typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
+  // a pattern queued as the page goes away outlives the visual it belonged to — a stray buzz
+  if (document.hidden) return;
+  if (hapticsOK) {
+    try { navigator.vibrate(HAPTICS[kind] || HAPTICS.medium); return; } catch (e) { hapticsOK = false; }
+  }
+  // only worth building the switch on a touch device; on desktop there's nothing to feel
+  if (navigator.maxTouchPoints > 0) { try { iosHapticTap(); } catch (e) {} }
+}
 
 // ---------- taxonomy ----------
 const TOPICS = [
@@ -1882,7 +1954,7 @@ function renderRichBlocks(text, images, onResize, onCheck) {
       if (onCheck) {
         const idx = li; // captured per row so the right line toggles
         box.classList.add("live");
-        box.addEventListener("click", ev => { ev.stopPropagation(); onCheck(idx, !on); });
+        box.addEventListener("click", ev => { ev.stopPropagation(); haptic("light"); onCheck(idx, !on); });
       }
       row.appendChild(box);
       const body = el("span", { class: "rt-body" });
@@ -1930,8 +2002,9 @@ function attachGalleryPinch(gal, key) {
     ev.stopPropagation();
     ev.preventDefault(); // no page zoom while shaping the deck
     const ratio = dist(ev.touches) / start;
-    if (ratio < 0.82) { gal.classList.add("stacked"); stackedRuns.add(key); start = null; }
-    else if (ratio > 1.22) { gal.classList.remove("stacked"); stackedRuns.delete(key); start = null; }
+    // the deck snapping shut / fanning open is a physical landing — medium, once per commit
+    if (ratio < 0.82) { gal.classList.add("stacked"); stackedRuns.add(key); start = null; haptic("medium"); }
+    else if (ratio > 1.22) { gal.classList.remove("stacked"); stackedRuns.delete(key); start = null; haptic("medium"); }
     if (start === null) gal.dispatchEvent(new Event("galchange")); // let the edge fades re-measure
   }, { passive: false });
   gal.addEventListener("touchend", () => { start = null; }, { passive: true });
@@ -2573,6 +2646,7 @@ function orderGroupsForDisplay(groups) {
 
 // ---------- confirm dialog ----------
 function confirmAction(message, okLabel, onConfirm) {
+  haptic("warning"); // something irreversible is being proposed — cautionary, not an error
   const ov = el("div", { class: "confirm-overlay", onclick: () => ov.remove() });
   ov.appendChild(el("div", { class: "confirm-box", onclick: e => e.stopPropagation() },
     el("p", null, message),
@@ -2902,7 +2976,7 @@ function buildRightRail() {
   railR.innerHTML = "";
   const search = el("div", { class: "rail-search" });
   search.innerHTML = SEARCH_GLYPH;
-  const input = el("input", { type: "search", placeholder: "search\u2026", autocomplete: "off" });
+  const input = el("input", { type: "search", placeholder: "Search\u2026", autocomplete: "off" });
   input.addEventListener("input", () => {
     deskQuery = input.value.trim();
     if (deskQuery) deskTopic = null;
@@ -2971,10 +3045,11 @@ function renderRightRail(all) {
     scroll.appendChild(el("p", { class: "rail-empty" }, "\u2014"));
   } else {
     for (const t of present) {
+      // the same .pill the entries wear in the middle panel — a topic looks like one thing
+      // across the app, not like a list item here and a tag over there
       scroll.appendChild(railRow(deskTopic === t.id ? "on" : "",
         () => { deskTopic = deskTopic === t.id ? null : t.id; render(); },
-        el("span", { class: "rr-mark", style: { background: t.dot } }),
-        el("span", { class: "rr-label" }, t.label),
+        el("span", { class: "pill", style: { background: t.bg, color: t.fg } }, t.label),
         el("span", { class: "rr-count" }, String(counts[t.id]))
       ));
     }
@@ -3233,6 +3308,7 @@ function openComposer(existing) {
         s.addEventListener("pointerdown", ev => {
           ev.preventDefault();
           ev.stopPropagation();
+          haptic("selection"); // a discrete tick, like a picker detent
           commitDay(i);
         });
         s.addEventListener("click", ev => ev.stopPropagation()); // late click on a replaced sheet must not bubble anywhere
@@ -3344,7 +3420,7 @@ function openComposer(existing) {
         const current = iso.year === cw.year && iso.week === cw.week;
         const row = el("div", { class: "cal-row wk-row" + (current ? " current" : "") });
         const wkCell = el("span", { class: "cal-wk" }, "W" + pad2(iso.week));
-        wkCell.addEventListener("pointerdown", () => pickWeek(iso, null)); // week only — day stays
+        wkCell.addEventListener("pointerdown", () => { haptic("selection"); pickWeek(iso, null); }); // week only — day stays
         row.appendChild(wkCell);
         days.forEach((d, i) => {
           const cls = [
@@ -3353,7 +3429,7 @@ function openComposer(existing) {
             current && i === day ? "cal-sel" : ""
           ].filter(Boolean).join(" ");
           const cell = el("span", cls ? { class: cls } : null, String(d.getUTCDate()));
-          cell.addEventListener("pointerdown", () => pickWeek(iso, i)); // a date sets week + day together
+          cell.addEventListener("pointerdown", () => { haptic("selection"); pickWeek(iso, i); }); // a date sets week + day together
           row.appendChild(cell);
         });
         calPop.appendChild(row);
@@ -3431,7 +3507,9 @@ function openComposer(existing) {
       class: "save",
       onclick: () => {
         if (!text.trim()) return;
-        const save = (segState && segState.ranges) ? doSaveSegments : doSave;
+        const run = (segState && segState.ranges) ? doSaveSegments : doSave;
+        // fires as the sheet closes, not on the tap — and after the confirm, if there is one
+        const save = () => { haptic("success"); run(); };
         // moving an existing entry to a different week is easy to do by accident — confirm it
         if (existing && (cw.year !== existing.year || cw.week !== existing.week)) {
           const from = "W" + pad2(existing.week) + (existing.year !== cw.year ? " " + existing.year : "");
@@ -3713,6 +3791,7 @@ function openComposer(existing) {
       b.addEventListener("pointerdown", ev => {
         if (ev.button !== 0) return; // left/primary press only — a right-click isn't a format op
         ev.preventDefault();
+        haptic("light"); // fires with the button's own press-invert, not before it
         run();
       });
       return b;
@@ -4048,6 +4127,7 @@ function openComposer(existing) {
   }
 
   function toggleTag(id) {
+    haptic("light"); // a small toggle
     tags = tags.includes(id) ? tags.filter(t => t !== id) : [...tags, id];
   }
 
