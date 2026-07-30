@@ -292,17 +292,38 @@ its own stock blobs off — and the bloom stays for the deck's whole life, retre
 she closes it. A deck opened any other way (the auto-reveal when a summary lands) never gets
 that class and keeps its stock background.
 
-**The status bar is not a Safari limitation, but it is a trap.** Installed to the home screen,
-`apple-mobile-web-app-status-bar-style` has exactly one value that lets the page paint under
-the clock — `black-translucent` — and it also forces the clock and battery to **white**, which
-is invisible on this app's near-white list. So it stays `default`, iOS keeps the glyphs dark
-and fills the strip with `theme-color`, and the way to stop that strip reading as a foreign
-grey band is to keep `theme-color` matching what's on screen. `setThemeColor()` does that and
-the wrapped drives it: set once when the bloom reaches full (a whole-OS repaint is not
-something to drive per frame), restored in `heatClose`. The colour is derived from whichever
-field ended up highest on screen, composited over the wash at ~0.34 — approximated rather than
-sampled, because reading a real pixel would mean a canvas snapshot of a blurred animating layer.
-`viewport-fit=cover` was already set, so nothing else had to move.
+**The status bar: `black-translucent`, and the clock goes white** (30 Jul 2026). Installed to
+the home screen, `apple-mobile-web-app-status-bar-style` has exactly one value that lets the
+page paint under the clock, and that is `black-translucent`. Every other value makes iOS
+reserve an opaque strip and fill it — which reads as a hard band across the top whatever
+colour goes in it. **Matching the colour instead does not work:** `theme-color` is not
+re-read at runtime by an installed web app, so driving it per screen changed nothing on
+device (tried first, 30 Jul — the band stayed grey). The cost of `black-translucent` is that
+the clock and battery render white and are not controllable from CSS. Marilyn's call, asked
+and answered directly: *"it has to look full screen at all times, not bothered by what colour
+the clock and battery look."* Don't quietly revert it for legibility.
+
+`setThemeColor()` is kept — it still drives Safari's own chrome and Android — but it is no
+longer what removes the band.
+
+**Everything that measures the viewport now has to subtract the inset.** `window.innerHeight`
+includes the status bar once the page paints under it, and `env(safe-area-inset-top)` went
+from 0 to ~59px. What that broke, all fixed together: the composer's `98dvh` ceiling slid the
+grabber under the clock (now `100dvh - env(safe-area-inset-top) - 10px`, and `SHEET_MAX()`
+matches it exactly); the reveal stage's flat `84px` top padding; and the two centred
+full-screen overlays (`.read-back`, `.img-preview-back`).
+
+**`env()` cannot be read from JS**, which matters because `SHEET_MAX()` and
+`revealTextSize()` both need the number. It does *not* survive into a custom property —
+unregistered custom properties are substituted as raw tokens, so `--sat: env(...)` comes back
+out of `getComputedStyle` as the literal string `"env(safe-area-inset-top)"`. The fix is a
+zero-size `#satProbe` whose `padding-top` **is** the inset: `getComputedStyle(probe).paddingTop`
+resolves to real pixels. `safeTop()` wraps it.
+
+*Testing note:* a desktop preview always reports an inset of 0, so none of this is visible
+there. Simulate it by injecting a stylesheet that substitutes a literal `59px` everywhere
+`env(safe-area-inset-top)` appears, plus a tinted `body::after` strip marking where the real
+status bar would sit — then check nothing lands under it.
 
 **The composer unfold.** The sheet is `clip-path`-ed to the compose bar's *measured*
 rectangle — same grey, same 18px rounding — then released, so the box physically opens

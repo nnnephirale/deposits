@@ -4,12 +4,14 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
-<!-- NOT black-translucent, deliberately. That is the only value that lets the page paint
-     under the status bar, but it also forces the clock and battery to WHITE — invisible on
-     a near-white list. `default` keeps them dark and gives iOS a strip it fills with
-     theme-color, so the way to lose the grey band is to keep theme-color matching whatever
-     is actually on screen. setThemeColor() does that, and the wrapped drives it. -->
-<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<!-- black-translucent is the ONLY value that lets the page paint under the status bar. Every
+     other value (default / black) makes iOS reserve an opaque strip and fill it, which reads
+     as a hard grey band across the top no matter what colour it is put — and theme-color does
+     not update that strip at runtime in an installed web app, so chasing the colour can't work
+     either. The cost is that the clock and battery go white and are not controllable from CSS.
+     Accepted deliberately (30 Jul 2026): full bleed at all times matters more here.
+     Everything below the meta assumes env(safe-area-inset-top) is now REAL (~59px), not 0. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="theme-color" content="#F0F0F1" />
 <title>deposits</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -83,6 +85,15 @@
      It is not sticky, on purpose. The header is (z-index 10), so this can never sit inside
      the header's padding: it would be painted over by the frost. Instead the header gives
      up most of its bottom padding whenever the cue is showing, and the cue takes that room. */
+  /* env() cannot be read from JS: an unregistered custom property is substituted as raw
+     tokens, so `--sat: env(safe-area-inset-top)` comes back out of getComputedStyle as the
+     literal string. A zero-size probe whose PADDING is the inset resolves to real pixels. */
+  #satProbe {
+    position: fixed; top: 0; left: 0; width: 0; height: 0;
+    padding-top: env(safe-area-inset-top);
+    visibility: hidden; pointer-events: none;
+  }
+
   .wrapped-cue { display: flex; justify-content: center; padding: 0 0 18px; }
   .wrapped-cue[hidden] { display: none; }
   .wrap.has-cue > .header { padding-bottom: 12px; }
@@ -468,7 +479,10 @@
   /* read-more reading modal — a centred float: dark blurred backdrop, white card */
   .read-back {
     position: fixed; inset: 0; height: 100dvh; z-index: 88;
-    display: flex; align-items: center; justify-content: center; padding: 22px;
+    display: flex; align-items: center; justify-content: center;
+    /* the page paints under the status bar now, so every full-screen overlay has to
+       keep its own content out from under the clock itself */
+    padding: calc(env(safe-area-inset-top) + 22px) 22px calc(env(safe-area-inset-bottom) + 22px);
     background: rgba(0,0,0,0.4);
     -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
     opacity: 0; transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -530,7 +544,7 @@
   .img-preview-back {
     position: fixed; inset: 0; height: 100dvh; z-index: 90;
     display: flex; align-items: center; justify-content: center;
-    padding: 20px;
+    padding: calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 20px);
     background: rgba(28,28,30,0.34);
     -webkit-backdrop-filter: blur(18px) saturate(1.1); backdrop-filter: blur(18px) saturate(1.1);
     opacity: 0; transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
@@ -861,8 +875,10 @@
      the bar's grey and rounding and settles into a tall flat white expanse — the field IS
      the surface, no inset box, so there's nothing to make the writing feel small. */
   .sheet.expanse {
-    /* --sheet-h is what the notch drags; 98% of the viewport is its ceiling */
-    height: var(--sheet-h, 98dvh); max-height: 98dvh;
+    /* --sheet-h is what the notch drags. The ceiling has to leave the status bar alone:
+       100dvh now includes it, so a bare 98dvh slid the grabber up under the clock. */
+    height: var(--sheet-h, 98dvh);
+    max-height: calc(100dvh - env(safe-area-inset-top) - 10px);
     padding: 12px 20px calc(env(safe-area-inset-bottom) + 24px);
     animation: none; /* the unfold below replaces the generic slide-up */
     clip-path: inset(0 round 20px 20px 0 0);
@@ -1137,16 +1153,22 @@
     display: flex; justify-content: center;
     overflow-y: auto; overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    padding: 84px 30px calc(env(safe-area-inset-bottom) + 84px);
+    padding: calc(env(safe-area-inset-top) + 84px) 30px calc(env(safe-area-inset-bottom) + 84px);
     cursor: pointer;
   }
   .recap-stage { scrollbar-width: none; }
   .recap-stage::-webkit-scrollbar { width: 0; height: 0; }
   .recap-card { max-width: 460px; width: 100%; margin: auto 0; }
-  /* text that scrolls up has to pass UNDER the label/dashes/×, not through them */
+  .recap.scrolled .recap-top::after { opacity: 1; }
+  /* text that scrolls up has to pass UNDER the label/dashes/×, not through them.
+     A masked white wash, not the grey canvas one: over the bloom a grey would read as
+     exactly the band at the top of the screen this app is trying not to have. And it is
+     only there while something is actually scrolling under it — at rest even a soft haze
+     is one more thing across the top of a screen that is supposed to be uninterrupted. */
   .recap-top::after {
     content: ""; position: absolute; inset: 0 0 auto; height: calc(env(safe-area-inset-top) + 54px);
-    background: linear-gradient(to bottom, var(--canvas-a), var(--canvas-0));
+    opacity: 0; transition: opacity 0.2s ease;
+    background: linear-gradient(to bottom, rgba(255,255,255,0.5), rgba(255,255,255,0));
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
     -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent);
     mask-image: linear-gradient(to bottom, black 55%, transparent);
@@ -1661,10 +1683,17 @@
 <!-- the heat bloom: the transition INTO the wrapped, scrubbed by the chevron's drag.
      One element, one --p from 0 to 1; the fields are built per period from her topics. -->
 <div class="heat" id="heat" aria-hidden="true"><div class="heat-wash"></div></div>
+<div id="satProbe" aria-hidden="true"></div>
 <div id="sheetRoot"></div>
 
 <script>
 "use strict";
+
+// The status bar's height in real pixels. The page paints under it (black-translucent), so
+// anything that measures against the viewport has to subtract it — window.innerHeight now
+// INCLUDES the strip. Read off a probe because env() doesn't survive into JS; see #satProbe.
+const satProbeEl = document.getElementById("satProbe");
+function safeTop() { return parseFloat(getComputedStyle(satProbeEl).paddingTop) || 0; }
 
 // ---------- taxonomy ----------
 // bg/fg/dot are the pills as they appear in the list. `heat` is the same topic turned up
@@ -3724,7 +3753,10 @@ function openComposer(existing) {
     // it used to stretch the textarea, which does nothing now that the sheet is a fixed-height
     // expanse. it resizes the SHEET instead, and the field follows via --sheet-h. 98% of the
     // viewport is the ceiling — just a sliver of the list left to tap away on.
-    const SHEET_MAX = () => Math.round(window.innerHeight * 0.98);
+    // matches the CSS ceiling exactly (100dvh - safe-area-top - 10px). It used to be
+    // 0.98 * innerHeight, which was fine when the viewport started BELOW the status bar;
+    // now innerHeight includes it, so that let the notch drag the sheet under the clock.
+    const SHEET_MAX = () => Math.round(window.innerHeight - safeTop() - 10);
     const SHEET_MIN = () => Math.min(300, Math.round(window.innerHeight * 0.45));
     function setSheetHeight(h) {
       manualHeight = Math.max(SHEET_MIN(), Math.min(SHEET_MAX(), Math.round(h)));
@@ -4836,7 +4868,8 @@ function revealTextSize(text) {
   const chars = (text || "").length;
   if (!chars) return "27px";
   const w = Math.min(460, window.innerWidth - 60);      // .recap-card's real measure
-  const room = Math.max(360, window.innerHeight - 190); // the stage minus its own padding
+  // the stage minus its own padding — and the status bar, which innerHeight now includes
+  const room = Math.max(360, window.innerHeight - safeTop() - 190);
   // this serif averages ~0.5em a character and .recap-head sets 1.22 line-height, so
   //   height ≈ (chars · 0.5f / w) · 1.22f   →   f = √(w · room / (0.61 · chars))
   const fit = Math.sqrt((w * room) / (0.61 * chars));
@@ -4888,6 +4921,9 @@ function storyDeck(opts) {
 
   // now that the stage scrolls, a swipe to read a long card must not also turn the page.
   // Same 4px rule the photo row already uses: past that it was a drag, not a tap.
+  // the scrim under the top row is only earned once something is actually behind it
+  stage.addEventListener("scroll", () => root.classList.toggle("scrolled", stage.scrollTop > 8),
+    { passive: true });
   let tapX = 0, tapY = 0, tapDrag = false;
   stage.addEventListener("pointerdown", ev => { tapX = ev.clientX; tapY = ev.clientY; tapDrag = false; });
   stage.addEventListener("pointermove", ev => {
