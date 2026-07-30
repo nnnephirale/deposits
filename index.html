@@ -153,6 +153,9 @@
     cursor: grab;
   }
   .group-dot { width: 8px; height: 8px; border-radius: 4px; display: inline-block; flex: none; }
+  /* a day bucket has no heading — its entries' badges name the day — so the card's first
+     entry needs the breathing room the heading used to provide */
+  .group-card > .entry:first-child { padding-top: 20px; }
   .group-label {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
     text-transform: uppercase; font-weight: 600;
@@ -167,7 +170,12 @@
      and a body. the divider between entries starts at the body, not the card edge. */
   .entry {
     position: relative; display: flex; gap: 16px;
-    padding: 15px 20px; cursor: pointer;
+    padding: var(--entry-pad-y) 20px; cursor: pointer;
+    /* the measurements the badge / first line / first pill / elbow all key off.
+       --line-box is the body text's own line box: 15px × 1.5. */
+    --entry-pad-y: 15px;
+    --line-box: 22.5px;
+    --pill-h: 18px;
   }
   .entry-gutter { position: relative; flex: none; width: 22px; }
   /* the thread linking one day badge to the next — from under this badge to the next one.
@@ -177,6 +185,35 @@
     top: 28px; bottom: -32px; margin-left: -0.5px;
     background: var(--hairline);
   }
+
+  /* --- back-to-back repeats of the same day ---------------------------------------
+     A run of entries on one day states the day once. The thread then carries it forward:
+     where the next badge would have been it turns toward the text on a rounded elbow,
+     then continues dashed. Same hairline throughout, so it reads as the thread pausing
+     rather than as a second kind of rule. */
+  .entry:has(+ .entry.rep) .entry-gutter::after {
+    background: none;
+    width: 11px;      /* how far the elbow reaches toward the text */
+    /* The stub lands on the CENTRE OF THE REPEAT'S FIRST LINE — same axis as the badge it
+       stands in for. .entry-gutter is the entry's CONTENT box, so getting there means
+       clearing this row's padding-bottom AND the next row's padding-top before the half
+       line box; measuring from the border box instead leaves the elbow a full 30px high. */
+    bottom: calc(-1 * (var(--entry-pad-y) * 2 + var(--line-box) / 2));
+    border-left: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+    border-bottom-left-radius: 9px;
+  }
+  /* the repeat's own gutter: dashed through the space its badge would have occupied, and
+     on to the next entry. Replaces the solid thread rather than sitting on top of it. */
+  .entry.rep .entry-gutter::after { display: none; }
+  .entry.rep .entry-gutter::before {
+    content: ""; position: absolute; left: 50%; margin-left: -0.5px;
+    /* exactly the solid thread's own geometry — the dashes occupy the track the badge and
+       its thread would have used, so the gap above them is the elbow's, not an extra offset */
+    top: 28px; bottom: -32px;
+    border-left: 1px dashed var(--hairline);
+  }
+  .entry.rep:last-child .entry-gutter::before { bottom: 16px; }
   .day-badge {
     display: flex; align-items: center; justify-content: center;
     width: 22px; height: 22px; border-radius: 7px;
@@ -185,6 +222,9 @@
     user-select: none; -webkit-user-select: none;
   }
   .day-badge sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
+  /* centre the 22px badge on the 22.5px first line box, same axis as the first side pill.
+     Scoped to the gutter so day view's group heading keeps its own alignment. */
+  .entry-gutter .day-badge { margin-top: calc((var(--line-box) - 22px) / 2); }
   .entry-body { flex: 1; min-width: 0; }
   .entry + .entry::before {
     content: ""; position: absolute; top: 0; left: 58px; right: 20px;
@@ -269,6 +309,15 @@
     -webkit-overflow-scrolling: touch; scrollbar-width: none;
   }
   .rt-gallery::-webkit-scrollbar { display: none; }
+  /* the grab cursor only appears where there is actually somewhere to drag to: the wrapper
+     carries show-left/show-right from the same overflow measurement the edge fades use. It
+     overrides the images' own zoom-in, because at that moment the row is the thing you're
+     holding — a click without a drag still opens the preview. */
+  .rt-gal-wrap.show-left .rt-gallery, .rt-gal-wrap.show-right .rt-gallery,
+  .rt-gal-wrap.show-left .rt-gallery .rt-img, .rt-gal-wrap.show-right .rt-gallery .rt-img {
+    cursor: grab;
+  }
+  .rt-gallery.dragging, .rt-gallery.dragging .rt-img { cursor: grabbing !important; }
   /* the fades live on a WRAPPER, not on the scroller. an absolutely positioned pseudo-element
      inside an overflow container joins that container's scrollable content, so it drifts with
      the images instead of staying pinned to the visible edge — which is why the right-hand
@@ -520,20 +569,26 @@
   .pill.mode {
     border: 1px solid var(--hairline); color: var(--subtle); font-weight: 400;
   }
-  /* day view: the topic rides at the entry's top-right on a fixed width, truncated, so
-     every pill is the same length and the text keeps a clean edge instead of running under it */
+  /* day view: the topics ride at the entry's right on a fixed width, truncated, so every
+     pill is the same length and the text keeps a clean edge instead of running under them.
+     A real third flex column — NOT an absolute overlay — so an entry with three tags grows
+     to hold them instead of spilling its pills past its own bottom edge. */
   .entry-side {
-    position: absolute; top: 13px; right: 16px;
-    width: 78px; display: flex; justify-content: flex-end;
+    flex: none; width: 78px;
+    display: flex; flex-direction: column; gap: 5px;
+    /* centres the FIRST pill on the first line of text. The day badge is centred on that
+       same line, so badge, first line and a lone pill all sit on one axis. */
+    margin-top: calc((var(--line-box) - var(--pill-h)) / 2);
   }
   /* width:100% (not max-width) so a short label like WORK is the same length as a long one —
-     uniform pills stacking into a tidy column, which is the whole point of moving them here */
+     uniform pills stacking into a tidy column, which is the whole point of moving them here.
+     Fixed height + matching line-height centres the text without flex, which would break
+     the ellipsis. */
   .entry-side .pill {
-    width: 100%; text-align: center;
+    width: 100%; height: var(--pill-h); line-height: var(--pill-h);
+    padding: 0 8px; text-align: center;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .entry.has-side { position: relative; }
-  .entry.has-side .entry-body > p { padding-right: 88px; }
   .entry-day { font-family: var(--mono); font-size: 11px; color: #A9A9AD; } /* 15% darker than #C7C7CC — readable on a phone */
   .group.dense { margin-bottom: 12px; }
 
@@ -660,15 +715,17 @@
   .compose-icon svg { width: 19px; height: 19px; }
   .compose-icon:active { background: rgba(0,0,0,0.06); color: var(--ink); }
   /* three bare dots — no container, so nothing about it suggests a typing affordance.
-     the stack measures 19px (4px dots + two 3.5px gaps), the same as the + glyph beside it,
-     and the button box matches too, so the pair reads as one row of controls. */
+     Sizing note: matching the + SVG's 19px BOX was the old mistake — the drawn glyph inside
+     it spans only 13 of 24 viewBox units, i.e. 13/24 × 19 ≈ 10.3px, so a 19px dot stack read
+     nearly twice the height of the + beside it. 2.6px dots + two 1.3px gaps = 10.4px, which
+     matches the ink. The 34px button boxes still match, so the pair is one row of controls. */
   .compose-lozenge {
     flex: none; width: 34px; height: 34px; border-radius: 999px;
     background: none; border: none;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3.5px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.3px;
     transition: background 0.15s ease;
   }
-  .compose-lozenge span { width: 4px; height: 4px; border-radius: 50%; background: #8A8A90; }
+  .compose-lozenge span { width: 2.6px; height: 2.6px; border-radius: 50%; background: #8A8A90; }
   .compose-lozenge:active { background: rgba(0,0,0,0.07); }
   .compose-bar.copied .compose-actions { display: none; }
   /* a translucent overlay would show the bar as a smudge underneath — take it out of frame,
@@ -1084,38 +1141,359 @@
     resize: none;
   }
   .export-note { font-size: 13px; color: var(--subtle); margin: 0 0 10px; }
+
+  /* ============================================================================
+     DESKTOP — icon rail · mat · topics
+     ----------------------------------------------------------------------------
+     Below the breakpoint .deck and .deck-main are `display: contents`: they leave
+     the box tree entirely, so .wrap / .bottom-frost / .compose-dock lay out as the
+     body children they used to be. Nothing above this block is touched.
+
+     There is no window frame. The deck is a bare transparent grid; the only painted
+     surface is the centre MAT, a rounded white card floating on the canvas wash.
+     Both rails sit directly on that wash — which is why the wash has to carry the
+     whole composition, and why nothing here paints a grey of its own.
+
+     The wash is pure --canvas family: same #F0F0F1, lifted and settled by a few
+     percent of lightness only. No hue is introduced anywhere, and no text colour
+     exists on desktop that doesn't exist on mobile.
+     ============================================================================ */
+  .deck, .deck-main { display: contents; }
+  .rail { display: none; }
+
+  @media (min-width: 1080px) {
+    :root {
+      --rail-i: 64px;    /* icon rail at rest — one 38px glyph plus its gutters */
+      --rail-x: 212px;   /* …and expanded on hover, as an overlay, never a reflow */
+      --rail-t: 248px;   /* topics rail */
+      --deck-x: 20px;    /* viewport inset */
+      --deck-cap: 1400px;
+      --mat-y: 14px; --mat-x: 12px;
+    }
+    html, body { height: 100%; overflow: hidden; }
+    body {
+      background:
+        radial-gradient(115% 85% at 8% -8%,   #FDFDFE 0%, rgba(253,253,254,0) 60%),
+        radial-gradient(95% 75%  at 96% 4%,   #FAFAFB 0%, rgba(250,250,251,0) 55%),
+        radial-gradient(90% 75%  at 84% 108%, #E1E1E4 0%, rgba(225,225,228,0) 64%),
+        radial-gradient(75% 65%  at -4% 96%,  #E5E5E8 0%, rgba(229,229,232,0) 60%),
+        var(--canvas);
+    }
+
+    /* the scroll affordance is the content moving; a grey bar in each pane is three
+       vertical lines the design doesn't have anywhere else — and the centre one was
+       stealing 15px off the reading column's right, knocking it off axis */
+    .wrap, .rail-scroll { scrollbar-width: none; }
+    .wrap::-webkit-scrollbar, .rail-scroll::-webkit-scrollbar { width: 0; height: 0; }
+
+    .deck {
+      display: grid;
+      grid-template-columns: var(--rail-i) minmax(0, 1fr) var(--rail-t);
+      /* the implicit row defaults to auto = max-content, which any tall rail blows
+         straight past; pin it to the deck's own height so the panes scroll internally */
+      grid-template-rows: minmax(0, 1fr);
+      /* capped and centred rather than edge-to-edge: past the cap the extra width
+         becomes field the mat floats on, instead of white margin growing around a
+         fixed reading column — which is the problem the rails were meant to solve. */
+      position: fixed; inset: var(--deck-x); z-index: 1;
+      max-width: var(--deck-cap); margin: 0 auto;
+      /* NO background, NO shadow, NO overflow clip. The deck is pure layout: the mat
+         carries the elevation, and the icon rail has to be able to expand over it. */
+      transform-origin: center center;
+      transition: transform 0.78s cubic-bezier(0.62, 0.01, 0.13, 1),
+                  opacity 0.78s cubic-bezier(0.62, 0.01, 0.13, 1);
+    }
+    /* everything recedes behind the composer together — mat and both rails */
+    body.composing .deck { transform: scale(0.965); opacity: 0.4; }
+    body.composing .wrap { transform: none; opacity: 1; }
+    @media (prefers-reduced-motion: reduce) { .deck { transition: none; } }
+
+    /* ---- the mat: the one painted surface, floating on the wash ---- */
+    .deck-main {
+      display: block; position: relative; min-width: 0; min-height: 0;
+      margin: var(--mat-y) var(--mat-x);
+      background: var(--card);
+      border-radius: 24px; overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 6px 18px rgba(0,0,0,0.045),
+                  0 24px 56px rgba(0,0,0,0.05);
+    }
+    /* the scroller. the page itself no longer scrolls, so the frost and the compose
+       bar can be absolute siblings that simply don't move. */
+    .wrap {
+      position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain;
+      max-width: none; margin: 0; padding: 0 24px 176px;
+    }
+    /* the reading column. 600 is the measure; the compose bar below matches it exactly so
+       the bar's edges line up with the cards' — change one, change the other. */
+    .wrap > .header, #entriesRoot { max-width: 600px; margin: 0 auto; }
+    .wrap > .header { padding: 34px 0 44px; }
+    /* over white content the header's grey frost read as a band — same recipe, white tint */
+    .header, .header::after {
+      background: rgba(255,255,255,0.86);
+      -webkit-backdrop-filter: blur(14px) saturate(150%);
+      backdrop-filter: blur(14px) saturate(150%);
+    }
+    .header.hidden { transform: none; } /* hide-on-scroll is a phone pattern */
+    .stepper-btn { box-shadow: none; background: var(--field); }
+
+    .bottom-frost, .compose-dock { position: absolute; }
+    /* inside the mat there is nothing behind this worth seeing through — on the phone the
+       0.94 base let the grey canvas glow through, here it just let entries peek out under
+       the compose bar. Same recipe, opaque at the base. */
+    .bottom-frost {
+      height: 172px;
+      background: linear-gradient(to top, #fff 30%, rgba(255,255,255,0.72) 66%, rgba(255,255,255,0));
+    }
+    .compose-dock { left: 24px; right: 24px; max-width: 600px; padding: 0 0 22px; }
+    /* the ⋮ menu held search, day view, export and settings — all four now have a visible
+       home in the rails, so the button is a second route to nothing. + is the whole bar. */
+    .compose-lozenge, .compose-divider { display: none; }
+
+    /* ---- rails: no surface of their own, they sit straight on the wash ---- */
+    .rail {
+      display: flex; flex-direction: column; min-width: 0; min-height: 0;
+      background: none;
+    }
+
+    /* ---- left: the icon rail ----
+       At rest it is nothing but a column of glyphs on the wash. On hover (or when
+       tabbed into) it widens into a floating panel with the names. It is ABSOLUTELY
+       positioned so widening is an overlay, never a reflow — expanding it in the grid
+       would re-wrap every line of every entry as the pointer crossed it. */
+    .rail-l { position: relative; overflow: visible; }
+    .iconbar {
+      /* hugs its rows rather than filling the rail: expanded it is an overlay on the
+         mat, and a full-height panel covers a screenful of entries to show five labels */
+      position: absolute; left: 0; top: var(--mat-y);
+      width: var(--rail-i); z-index: 5;
+      display: flex; flex-direction: column; gap: 2px;
+      padding: 8px 0; border-radius: 22px; overflow: hidden;
+      background: rgba(255,255,255,0);
+      box-shadow: 0 0 0 rgba(0,0,0,0);
+      transition: width 0.34s cubic-bezier(0.16, 1, 0.3, 1),
+                  background-color 0.28s ease, box-shadow 0.28s ease;
+    }
+    .ico-row {
+      flex: none; display: flex; align-items: center; gap: 12px;
+      width: var(--rail-x); padding: 0 13px; height: 42px;
+      background: none; border: none; text-align: left;
+    }
+    .ico-glyph {
+      position: relative; flex: none;
+      width: 38px; height: 38px; border-radius: 999px;
+      display: flex; align-items: center; justify-content: center; line-height: 0;
+      color: #B0B0B6;
+      transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .ico-glyph svg { width: 18px; height: 18px; }
+    .ico-label {
+      white-space: nowrap; font-size: 13px; color: var(--subtle);
+      opacity: 0; transition: opacity 0.16s ease;
+    }
+    .ico-row.on .ico-glyph {
+      background: var(--card); color: var(--ink);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .ico-row.on .ico-label { color: var(--ink); font-weight: 600; }
+    .ico-div { flex: none; height: 1px; margin: 7px 21px; background: var(--hairline); }
+    /* sync state, on the control that already owns it — one route, state still visible */
+    .ico-dot {
+      position: absolute; top: 6px; right: 6px;
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #CFCFD4; box-shadow: 0 0 0 2px var(--card);
+    }
+    .ico-dot.live { background: #55A862; }
+
+    .iconbar:hover, .iconbar:focus-within {
+      width: var(--rail-x);
+      background: rgba(255,255,255,0.9);
+      -webkit-backdrop-filter: blur(24px) saturate(160%);
+      backdrop-filter: blur(24px) saturate(160%);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 12px 36px rgba(0,0,0,0.08);
+    }
+    /* the panel opens as one, but only the row under the pointer names itself — five labels
+       at once is a menu, and the rail is meant to answer one question at a time */
+    .ico-row:hover .ico-label, .ico-row:focus-visible .ico-label {
+      opacity: 1; transition-delay: 0.04s;
+    }
+    @media (prefers-reduced-motion: reduce) { .iconbar { transition: none; } }
+
+    /* ---- right: topics ---- */
+    .rail-r { padding: var(--mat-y) 0 16px; }
+    .rail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
+    /* the room above TOPICS is the point: the search sits at the top edge, and the
+       list starts well down the rail so it reads as its own thing, not a second row */
+    .rail-r .rail-scroll { padding-top: 58px; }
+    .rail-head {
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+      text-transform: uppercase; color: var(--subtle);
+      margin: 0 0 10px; padding: 0 22px;
+    }
+
+    .rail-row {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; text-align: left; background: none; border: none;
+      padding: 7px 22px; font-family: var(--font); font-size: 13px;
+      color: var(--subtle); line-height: 1.3;
+      transition: color 0.15s ease, background 0.15s ease;
+    }
+    .rail-row .rr-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rail-row .rr-count { flex: none; font-family: var(--mono); font-size: 11px; color: #C2C2C7; }
+    .rail-row.on { color: var(--ink); font-weight: 600; }
+    .rail-row.on .rr-count { color: var(--subtle); }
+    .rr-mark { flex: none; width: 5px; height: 5px; border-radius: 50%; background: #D4D4D9; }
+
+    .rail-search {
+      display: flex; align-items: center; gap: 8px;
+      margin: 0 14px; padding: 9px 12px;
+      /* on the wash rather than on a panel, so it needs its own lift to read as a field */
+      background: rgba(255,255,255,0.72); border-radius: 12px;
+      color: var(--subtle);
+      transition: background 0.15s ease;
+    }
+    .rail-search svg { width: 14px; height: 14px; flex: none; }
+    .rail-search input {
+      flex: 1; min-width: 0; border: none; outline: none; background: none;
+      font-family: var(--font); font-size: 13px; color: var(--ink);
+    }
+    /* ghost input: reads as label until she's in it */
+    .rail-search input::placeholder { color: var(--subtle); }
+    .rail-search:focus-within { background: rgba(255,255,255,0.95); }
+    /* the scope flips week → month → all. It names itself in the app's own tokens (W31 / 7月)
+       rather than in words, so it reads as the same object as the header's identity. */
+    .rail-scope {
+      flex: none; font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+      background: rgba(0,0,0,0.055); border: none; border-radius: 999px;
+      padding: 3px 7px; color: var(--subtle); line-height: 1.35;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .rail-scope:active { transform: scale(0.96); }
+    .rail-scope.open { background: var(--ink); color: #fff; }
+
+    /* the pull-down. grid-template-rows 0fr→1fr is the one way to transition to a content
+       height without measuring it, so TOPICS below is pushed down by the real height of the
+       list rather than by a guessed max-height that would ease at the wrong rate. */
+    .rail-scope-wrap {
+      display: grid; grid-template-rows: 0fr;
+      transition: grid-template-rows 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .rail-scope-wrap.open { grid-template-rows: 1fr; }
+    .rail-scope-inner { overflow: hidden; min-height: 0; }
+    .rail-scope-list { padding: 6px 14px 0; }
+    .rail-scope-opt {
+      display: flex; align-items: center; gap: 8px;
+      width: 100%; text-align: left; background: none; border: none;
+      padding: 7px 8px; border-radius: 10px;
+      font-family: var(--font); font-size: 13px; color: var(--subtle);
+      /* the rows arrive a beat after the box starts opening, so it reads as unfolding
+         rather than as a block appearing at full strength */
+      opacity: 0; transform: translateY(-4px);
+      transition: opacity 0.28s ease 0.08s, transform 0.28s cubic-bezier(0.16, 1, 0.3, 1) 0.08s,
+                  background 0.15s ease, color 0.15s ease;
+    }
+    .rail-scope-wrap.open .rail-scope-opt { opacity: 1; transform: none; }
+    .rail-scope-opt .so-key {
+      flex: none; font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+      min-width: 34px; color: #C2C2C7;
+    }
+    .rail-scope-opt.on { color: var(--ink); font-weight: 600; }
+    .rail-scope-opt.on .so-key { color: var(--ink); }
+    @media (prefers-reduced-motion: reduce) {
+      .rail-scope-wrap, .rail-scope-opt { transition: none; }
+    }
+    .rail-empty { font-size: 12px; color: #C2C2C7; padding: 2px 22px 0; margin: 0; }
+
+    /* ---- hover, finally: the invisible interface has something to be invisible in ---- */
+    @media (hover: hover) {
+      .rail-row:hover { color: var(--ink); background: rgba(0,0,0,0.028); }
+      .rail-scope:hover { color: var(--ink); background: rgba(0,0,0,0.085); }
+      .rail-scope.open:hover { color: #fff; background: var(--ink); }
+      .rail-scope-opt:hover { color: var(--ink); background: rgba(0,0,0,0.032); }
+      .ico-row:hover .ico-glyph { color: var(--ink); background: rgba(0,0,0,0.05); }
+      .ico-row.on:hover .ico-glyph { background: var(--card); }
+      .entry:hover { background: rgba(0,0,0,0.016); }
+      .stepper-btn:hover { background: #EAEAED; color: var(--ink); }
+      .compose-bar:hover { background: #E4E4E7; }
+      .compose-icon:hover, .compose-lozenge:hover { background: rgba(0,0,0,0.05); }
+      .compose-icon:hover { color: var(--ink); }
+    }
+    .entry { transition: background 0.15s ease; }
+
+    /* ---- composer ----
+       The sheet is a VIEWPORT-level overlay but the compose bar now lives in the mat,
+       which is off-centre (64px rail one side, 248px the other). Pad the overlay by the
+       real gutters so `justify-content: center` lands the sheet on the mat's axis —
+       otherwise the unfold opens lopsided. --deck-x here is the deck's own left edge,
+       which is the inset until the cap kicks in and starts centring it. */
+    .overlay {
+      --gutter: max(var(--deck-x), (100vw - var(--deck-cap)) / 2);
+      padding-left: calc(var(--gutter) + var(--rail-i));
+      padding-right: calc(var(--gutter) + var(--rail-t));
+      padding-bottom: calc(var(--deck-x) + var(--mat-y));
+    }
+    /* wider than the 600px compose bar ON PURPOSE. The unfold clips the sheet to the bar's
+       measured rect, and inset() can't go negative — a bar wider than the sheet clamps
+       --ml/--mr to 0 and the box only opens vertically. 680 leaves 40px of travel a side. */
+    .sheet { border-radius: 20px; max-width: 680px; }
+    .sheet.expanse {
+      /* top and bottom both land on the mat's edges */
+      max-height: calc(100dvh - (var(--deck-x) + var(--mat-y)) * 2);
+      clip-path: inset(0 round 20px);
+    }
+    .sheet { scrollbar-width: none; }
+    .sheet::-webkit-scrollbar { width: 0; height: 0; }
+    .sheet.expanse.folded { clip-path: inset(var(--mt) var(--mr) var(--mb) var(--ml) round 18px); }
+    .sheet.expanse textarea.ta-entry { min-height: calc(var(--sheet-h, 92dvh) - 250px); }
+  }
+
+  /* between the phone column and the three-pane window, just let the column breathe */
+  @media (min-width: 700px) and (max-width: 1079px) {
+    .wrap { max-width: 600px; }
+    .compose-dock { max-width: 600px; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="header">
-    <div class="header-top">
-      <div class="stepper-center" id="periodLabel"></div>
-    </div>
-    <div class="period-row">
-      <button class="stepper-btn" id="prevBtn">&lsaquo;</button>
-      <div class="period-nav">
-        <button class="period-tab" id="navWeek" aria-label="Week view"></button>
-        <span class="period-sep">/</span>
-        <button class="period-tab" id="navMonth" aria-label="Month view"></button>
+<!-- the deck is `display: contents` below the desktop breakpoint, so on a phone this markup
+     lays out exactly as it did when .wrap, .bottom-frost and .compose-dock were body children.
+     At >=1080px it becomes the floating window: rail / entries / rail. -->
+<div class="deck">
+  <aside class="rail rail-l" id="railL" aria-label="Periods"></aside>
+
+  <div class="deck-main">
+    <div class="wrap">
+      <div class="header">
+        <div class="header-top">
+          <div class="stepper-center" id="periodLabel"></div>
+        </div>
+        <div class="period-row">
+          <button class="stepper-btn" id="prevBtn">&lsaquo;</button>
+          <div class="period-nav">
+            <button class="period-tab" id="navWeek" aria-label="Week view"></button>
+            <span class="period-sep">/</span>
+            <button class="period-tab" id="navMonth" aria-label="Month view"></button>
+          </div>
+          <button class="stepper-btn" id="nextBtn">&rsaquo;</button>
+        </div>
       </div>
-      <button class="stepper-btn" id="nextBtn">&rsaquo;</button>
+
+      <div id="entriesRoot"></div>
+    </div>
+
+    <div class="bottom-frost"></div>
+    <div class="compose-dock" id="dock">
+      <div class="compose-bar" id="fab" role="button" tabindex="0" aria-label="New entry">
+        <span class="compose-hint shimmer">Start typing&#8230;</span>
+        <span class="compose-actions">
+          <button class="compose-icon" id="composeAdd" aria-label="New entry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg></button>
+          <span class="compose-divider"></span>
+          <button class="compose-lozenge" id="menuBtn" aria-label="Menu"><span></span><span></span><span></span></button>
+        </span>
+      </div>
     </div>
   </div>
 
-  <div id="entriesRoot"></div>
-</div>
-
-<div class="bottom-frost"></div>
-<div class="compose-dock" id="dock">
-  <div class="compose-bar" id="fab" role="button" tabindex="0" aria-label="New entry">
-    <span class="compose-hint shimmer">Start typing&#8230;</span>
-    <span class="compose-actions">
-      <button class="compose-icon" id="composeAdd" aria-label="New entry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg></button>
-      <span class="compose-divider"></span>
-      <button class="compose-lozenge" id="menuBtn" aria-label="Menu"><span></span><span></span><span></span></button>
-    </span>
-  </div>
+  <aside class="rail rail-r" id="railR" aria-label="Topics"></aside>
 </div>
 <div id="sheetRoot"></div>
 
@@ -1481,6 +1859,7 @@ function renderRichBlocks(text, images, onResize, onCheck) {
         // the fades hang off a wrapper so they don't scroll away with the images
         const galWrap = el("div", { class: "rt-gal-wrap" }, gal);
         attachGalleryFade(galWrap, gal);
+        attachGalleryDrag(gal);
         frag.appendChild(galWrap);
         continue;
       }
@@ -1565,6 +1944,50 @@ function attachGalleryPinch(gal, key) {
 // also flags the gallery as "mid-drag" for a beat so a fast flick's tail can't register as
 // the tap that opens the size rail — belt-and-braces alongside the browser's own
 // click-cancel-on-scroll behaviour.
+// Drag-to-scroll for the photo row, MOUSE ONLY. Touch keeps native momentum scrolling and,
+// more importantly, keeps the two-finger pinch that fans the row into a deck — claiming
+// touch pointers here would fight it. A drag past the threshold swallows the click that
+// follows, so dragging across an image doesn't also open its preview.
+function attachGalleryDrag(gal) {
+  let id = null, startX = 0, startLeft = 0, moved = false;
+  gal.addEventListener("pointerdown", ev => {
+    if (ev.pointerType !== "mouse" || ev.button !== 0) return;
+    if (gal.classList.contains("stacked")) return; // a fanned deck has nothing to scroll
+    if (gal.scrollWidth - gal.clientWidth < 2) return;
+    id = ev.pointerId; startX = ev.clientX; startLeft = gal.scrollLeft; moved = false;
+  });
+  gal.addEventListener("pointermove", ev => {
+    if (ev.pointerId !== id) return;
+    const dx = ev.clientX - startX;
+    if (!moved && Math.abs(dx) < 4) return;
+    if (!moved) {
+      moved = true;
+      gal.classList.add("dragging");
+      // scroll-snap fights a live drag — it keeps yanking back to the nearest card
+      gal.style.scrollSnapType = "none";
+      gal.setPointerCapture(id);
+    }
+    ev.preventDefault();
+    gal.scrollLeft = startLeft - dx;
+  });
+  const end = ev => {
+    if (ev.pointerId !== id) return;
+    if (moved) {
+      gal.classList.add("swallow-click");
+      setTimeout(() => gal.classList.remove("swallow-click"), 0);
+    }
+    id = null;
+    gal.classList.remove("dragging");
+    gal.style.scrollSnapType = "";
+  };
+  gal.addEventListener("pointerup", end);
+  gal.addEventListener("pointercancel", end);
+  // capture phase, so it lands before the image's own click handler opens the preview
+  gal.addEventListener("click", ev => {
+    if (gal.classList.contains("swallow-click")) { ev.stopPropagation(); ev.preventDefault(); }
+  }, true);
+}
+
 function attachGalleryFade(wrap, gal) {
   const sync = () => {
     if (gal.classList.contains("stacked")) { // a fanned deck doesn't scroll — no edges to hint at
@@ -2179,24 +2602,43 @@ if (layoutBtns) for (const name of LAYOUT_OPTIONS) {
 
 const LOCK_ICON = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><rect x="2.5" y="5.2" width="7" height="4.8" rx="1.2" fill="none" stroke="#C7C7CC" stroke-width="1.2"/><path d="M4 5.2V3.8a2 2 0 0 1 4 0v1.4" fill="none" stroke="#C7C7CC" stroke-width="1.2"/></svg>';
 
-function entryEl(e, opts) {
-  opts = opts || {};
-  // day view hoists the entry's topic to a fixed-width pill at the top-right, so the pills
-  // line up in a column and the text keeps a clean edge instead of wrapping under them.
-  const sideTopic = opts.sidePill
-    ? (e.tags || []).map(tg => topicById[tg]).find(t => t && t.id !== opts.skipTag)
-    : null;
-  const entry = el("div", { class: "entry" + (sideTopic ? " has-side" : ""), onclick: () => openComposer(e) });
-  // the day rides in a badge in the left gutter, with a hairline threading down to the next
-  // one. it replaces the day token that used to sit in the meta row.
-  const dayIdx = entryDay(e);
+// the grey rounded square with the day's initial. Shared by the entry gutter and — since
+// 30 Jul — day view's group heading, which used to be mono black text saying the same thing.
+function dayBadgeEl(tok) {
   const badge = el("span", { class: "day-badge" });
-  const tok = dayIdx == null ? "–" : DAY_TOKENS[dayIdx];
   const sup = tok.match(/^(.)([¹²])$/); // "T¹" -> T + a small raised 1
   if (sup) { badge.appendChild(document.createTextNode(sup[1]));
              badge.appendChild(el("sup", null, sup[2] === "¹" ? "1" : "2")); }
   else badge.textContent = tok;
-  entry.appendChild(el("div", { class: "entry-gutter" }, badge));
+  return badge;
+}
+
+// Identity of the actual calendar day, not just the weekday index: two Mondays from
+// different weeks share entryDay() === 0 and must NOT collapse into one another in month
+// view. Month-scoped entries (no week) key off their month instead.
+function entryDayKey(e) {
+  return [e.year, e.week == null ? "m" + e.month : "w" + e.week, entryDay(e)].join("|");
+}
+
+function entryEl(e, opts) {
+  opts = opts || {};
+  // day view hoists the entry's topics to fixed-width pills in a column at the right, so
+  // they line up and the text keeps a clean edge instead of wrapping under them.
+  const sideTopics = opts.sidePill
+    ? (e.tags || []).map(tg => topicById[tg]).filter(t => t && t.id !== opts.skipTag)
+    : [];
+  // a run of entries on the same day shows the badge once; the rest are marked as repeats
+  // and the gutter thread carries the day forward instead (elbow + dashes, see the CSS)
+  const entry = el("div", {
+    class: "entry" + (opts.repeat ? " rep" : ""),
+    onclick: () => openComposer(e)
+  });
+  // the day rides in a badge in the left gutter, with a hairline threading down to the next
+  // one. it replaces the day token that used to sit in the meta row.
+  const dayIdx = entryDay(e);
+  const gutter = el("div", { class: "entry-gutter" });
+  if (!opts.repeat) gutter.appendChild(dayBadgeEl(dayIdx == null ? "–" : DAY_TOKENS[dayIdx]));
+  entry.appendChild(gutter);
   const body = el("div", { class: "entry-body" });
   const collapse = compactView && entryWords(e) > SUMMARY_MIN_WORDS;
   const onResize = (imgId, size) => setImageSize(e.id, imgId, size);
@@ -2242,17 +2684,22 @@ function entryEl(e, opts) {
     if (tg === opts.skipTag) continue;
     const tt = topicById[tg], mm = modeById[tg];
     if (tt) {
-      if (sideTopic && tt.id === sideTopic.id) continue; // already riding at the side
+      if (sideTopics.some(s => s.id === tt.id)) continue; // already riding at the side
       meta.appendChild(el("span", { class: "pill", style: { background: tt.bg, color: tt.fg } }, tt.label));
     }
     else if (mm) meta.appendChild(el("span", { class: "pill mode" }, mm.label));
   }
   if (meta.children.length) body.appendChild(meta);
-  if (sideTopic) {
-    body.appendChild(el("div", { class: "entry-side" },
-      el("span", { class: "pill", style: { background: sideTopic.bg, color: sideTopic.fg } }, sideTopic.label)));
-  }
   entry.appendChild(body);
+  // a real third column rather than an absolutely positioned overlay: every topic gets a
+  // pill, they stack downward, and the entry grows to hold them instead of them spilling out
+  if (sideTopics.length) {
+    const side = el("div", { class: "entry-side" });
+    for (const t of sideTopics) {
+      side.appendChild(el("span", { class: "pill", style: { background: t.bg, color: t.fg } }, t.label));
+    }
+    entry.appendChild(side);
+  }
   return entry;
 }
 
@@ -2303,12 +2750,16 @@ function renderTopicGroups(list, dense) {
     }
     const card = el("div", { class: "group-card" });
     if (head) card.appendChild(head); // the topic reads as the block's own heading now
+    let prevKey = null;
     for (const e of g.entries) {
+      const key = entryDayKey(e);
       card.appendChild(entryEl(e, {
         skipTag: dense ? null : g.key, // dense: every entry carries its own topic pill, headers or no
         showWeek: view === "month",
-        showDate: view === "month"
+        showDate: view === "month",
+        repeat: key === prevKey
       }));
+      prevKey = key;
     }
     group.appendChild(card);
     entriesRoot.appendChild(group);
@@ -2331,12 +2782,268 @@ function renderDayGroups(list) {
   for (const b of buckets) {
     if (!b.entries.length) continue;
     const card = el("div", { class: "group-card" });
-    card.appendChild(el("div", { class: "group-head" },
-      el("span", { class: "group-label", style: { color: "var(--ink)" } }, b.label)));
-    for (const e of b.entries) card.appendChild(entryEl(e, b.opts));
+    // The day used to be said twice: mono black text in the heading, and the grey badge in
+    // every entry's gutter. The badge wins — it's the same object the topic view uses, and
+    // it's the one that can sit centred on the first line beside the topic pill. So a day
+    // bucket has no heading at all; its first entry's badge names it, and the repeat run
+    // below carries it down. "anytime" and month view's W## buckets aren't days and have no
+    // badge equivalent, so they keep the label.
+    if (!DAY_TOKENS.includes(b.label)) {
+      card.appendChild(el("div", { class: "group-head" },
+        el("span", { class: "group-label", style: { color: "var(--ink)" } }, b.label)));
+    }
+    let prevKey = null;
+    for (const e of b.entries) {
+      const key = entryDayKey(e);
+      card.appendChild(entryEl(e, Object.assign({ repeat: key === prevKey }, b.opts)));
+      prevKey = key;
+    }
     entriesRoot.appendChild(el("div", { class: "group" }, card));
   }
 }
+
+// ---------- desktop rails ----------
+// Two panes that only exist at >=1080px. They hold nothing new \u2014 they're the \u22ee modal's
+// contents and the period stepper, given room to be visible at once instead of stacked
+// behind a tap. Everything here is a view over existing state; no new persistence.
+
+const railL = document.getElementById("railL");
+const railR = document.getElementById("railR");
+const deskMQ = window.matchMedia("(min-width: 1080px)");
+let deskQuery = "";   // right-rail search; non-empty takes over the centre pane
+let deskTopic = null; // right-rail topic filter; null = nothing selected, a real state
+let deskSearchInput = null;
+
+// search scope flips through the period being browsed, then everything. Same rule the
+// search sheet already uses: "a specific week/month" means navigate there first, and the
+// chip names whichever one it is.
+const DESK_SCOPES = ["week", "month", "all"];
+let deskScope = "all";
+let deskScopeOpen = false;
+function scopeLabelFor(s) {
+  if (s === "week") return "W" + pad2(wk.week);
+  if (s === "month") return (mo.month + 1) + "月";
+  return "ALL";
+}
+function scopeNameFor(s) {
+  if (s === "week") return "this week";
+  if (s === "month") return "this month";
+  return "everything";
+}
+function scopeLabel() { return scopeLabelFor(deskScope); }
+function scopeTitle() {
+  if (deskScope === "week") return "Searching W" + pad2(wk.week) + " — click for the month";
+  if (deskScope === "month") return "Searching " + monthLabel(mo.year, mo.month) + " — click for everything";
+  return "Searching every entry — click to narrow to the week";
+}
+function scopedEntries() {
+  if (deskScope === "week") return entries.filter(e => !e.segmented && e.year === wk.year && e.week === wk.week);
+  if (deskScope === "month") return entriesForMonth(mo.year, mo.month);
+  return entries.filter(e => !e.segmented);
+}
+
+function railRow(cls, onPick, ...kids) {
+  const b = el("button", { class: "rail-row" + (cls ? " " + cls : ""), onclick: onPick });
+  kids.forEach(k => k && b.appendChild(k));
+  return b;
+}
+
+// ---- the icon rail ----
+// Glyphs are drawn from the thing they select, not from a generic metaphor: a week is one
+// strip of day cells, a month is the grid of them, day view is the badge-gutter layout.
+// same frame box as the month glyph (x3 y4.5 18×16 r3) so the pair reads as one family and
+// one doesn't sit visually shorter than the other — week is columns, month adds the rows
+const ICO_WEEK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M9 4.5v16M15 4.5v16"/></svg>';
+const ICO_MONTH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.6h18M9 9.6v10.9M15 9.6v10.9M3 15h18"/></svg>';
+const ICO_DAY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 6.5h2.6M4 12h2.6M4 17.5h2.6"/><path d="M10.5 6.5h9.5M10.5 12h6.5M10.5 17.5h9.5"/></svg>';
+const ICO_EXPORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5V4"/><path d="M7.8 8.2 12 4l4.2 4.2"/><path d="M5 14v4.6A1.4 1.4 0 0 0 6.4 20h11.2a1.4 1.4 0 0 0 1.4-1.4V14"/></svg>';
+const ICO_SETTINGS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 7.5h8.2M17.2 7.5H20M4 16.5h2.8M11.8 16.5H20"/><circle cx="14.7" cy="7.5" r="2.4"/><circle cx="9.3" cy="16.5" r="2.4"/></svg>';
+
+function icoRow(label, glyph, on, onPick, dot) {
+  const b = el("button", {
+    class: "ico-row" + (on ? " on" : ""), onclick: onPick,
+    "aria-label": label, "aria-pressed": on ? "true" : "false"
+  });
+  const g = el("span", { class: "ico-glyph" });
+  g.innerHTML = glyph;
+  if (dot) g.appendChild(dot);
+  b.appendChild(g);
+  b.appendChild(el("span", { class: "ico-label" }, label));
+  return b;
+}
+
+function renderIconRail() {
+  railL.innerHTML = "";
+  const bar = el("div", { class: "iconbar" });
+
+  // period navigation stays in the header (\u2039 W31 / 7\u6708 \u203a) \u2014 these two only pick which
+  // of the two the header is showing, the same switch tapping the inactive tab makes
+  bar.appendChild(icoRow("Week", ICO_WEEK, view === "week",
+    () => { if (view !== "week") { view = "week"; deskTopic = null; render(); } }));
+  bar.appendChild(icoRow("Month", ICO_MONTH, view === "month",
+    () => { if (view !== "month") { view = "month"; deskTopic = null; render(); } }));
+
+  bar.appendChild(el("div", { class: "ico-div" }));
+
+  bar.appendChild(icoRow("Day view", ICO_DAY, layout === "day",
+    () => { layout = layout === "day" ? "topic" : "day"; render(); }));
+  bar.appendChild(icoRow("Export markdown", ICO_EXPORT, false, () => doExport()));
+  bar.appendChild(icoRow("Settings", ICO_SETTINGS, false, () => openSettings(),
+    el("span", { class: "ico-dot" + (session ? " live" : "") })));
+
+  railL.appendChild(bar);
+}
+
+// The search field is built ONCE and never rebuilt \u2014 the same lesson as the composer's
+// build(): re-creating a focused input on every keystroke drops the caret and breaks IME
+// composition (this app has \u6708 in its own title). Only the lists below it get refilled.
+let railRScroll = null, railScopeBtn = null, railScopeWrap = null, railScopeList = null;
+function buildRightRail() {
+  railR.innerHTML = "";
+  const search = el("div", { class: "rail-search" });
+  search.innerHTML = SEARCH_GLYPH;
+  const input = el("input", { type: "search", placeholder: "search\u2026", autocomplete: "off" });
+  input.addEventListener("input", () => {
+    deskQuery = input.value.trim();
+    if (deskQuery) deskTopic = null;
+    render();
+  });
+  input.addEventListener("keydown", ev => {
+    if (ev.key === "Escape") { ev.stopPropagation(); input.value = ""; deskQuery = ""; render(); input.blur(); }
+  });
+  search.appendChild(input);
+  // built once alongside the input; only its label is refreshed per render, so opening the
+  // scope never re-creates the field the caret is sitting in — and, just as importantly,
+  // the pull-down below keeps the same nodes so its transition actually has somewhere to
+  // travel from instead of being rebuilt mid-flight
+  railScopeBtn = el("button", { class: "rail-scope", onclick: () => {
+    deskScopeOpen = !deskScopeOpen;
+    render();
+  } });
+  search.appendChild(railScopeBtn);
+  deskSearchInput = input;
+  railR.appendChild(search);
+
+  railScopeWrap = el("div", { class: "rail-scope-wrap" });
+  const inner = el("div", { class: "rail-scope-inner" });
+  railScopeList = el("div", { class: "rail-scope-list" });
+  inner.appendChild(railScopeList);
+  railScopeWrap.appendChild(inner);
+  railR.appendChild(railScopeWrap);
+
+  railRScroll = el("div", { class: "rail-scroll" });
+  railR.appendChild(railRScroll);
+}
+
+function renderRightRail(all) {
+  if (!deskSearchInput || !deskSearchInput.isConnected) buildRightRail();
+  railScopeBtn.textContent = scopeLabel();
+  railScopeBtn.title = scopeTitle();
+  railScopeBtn.setAttribute("aria-label", scopeTitle());
+  railScopeBtn.setAttribute("aria-expanded", deskScopeOpen ? "true" : "false");
+  railScopeBtn.classList.toggle("open", deskScopeOpen);
+  railScopeWrap.classList.toggle("open", deskScopeOpen);
+  // refilled, never rebuilt — the wrapper it lives in owns the open/close transition
+  railScopeList.innerHTML = "";
+  for (const s of DESK_SCOPES) {
+    railScopeList.appendChild(el("button", {
+      class: "rail-scope-opt" + (s === deskScope ? " on" : ""),
+      tabindex: deskScopeOpen ? "0" : "-1",
+      onclick: () => { deskScope = s; deskScopeOpen = false; render(); if (deskSearchInput) deskSearchInput.focus(); }
+    },
+      el("span", { class: "so-key" }, scopeLabelFor(s)),
+      el("span", null, scopeNameFor(s))
+    ));
+  }
+
+  const scroll = railRScroll;
+  scroll.innerHTML = "";
+  scroll.appendChild(el("p", { class: "rail-head" }, "topics"));
+
+  // counted off the unfiltered period, in the order TOPICS declares \u2014 the same order the
+  // composer's chips use, so the two lists never disagree about what comes first
+  const counts = {};
+  for (const e of all) for (const t of e.tags) counts[t] = (counts[t] || 0) + 1;
+  const present = TOPICS.filter(t => counts[t.id]);
+  if (deskTopic && !counts[deskTopic]) deskTopic = null; // filter can't survive leaving its period
+
+  if (!present.length) {
+    scroll.appendChild(el("p", { class: "rail-empty" }, "\u2014"));
+  } else {
+    for (const t of present) {
+      scroll.appendChild(railRow(deskTopic === t.id ? "on" : "",
+        () => { deskTopic = deskTopic === t.id ? null : t.id; render(); },
+        el("span", { class: "rr-mark", style: { background: t.dot } }),
+        el("span", { class: "rr-label" }, t.label),
+        el("span", { class: "rr-count" }, String(counts[t.id]))
+      ));
+    }
+  }
+}
+
+function renderRails(all) {
+  if (!deskMQ.matches) {
+    // dropping below the breakpoint takes the rails' state with it, or the phone layout
+    // would silently stay filtered with no control left on screen to clear it
+    deskQuery = ""; deskTopic = null; deskScope = "all"; deskScopeOpen = false;
+    deskSearchInput = null; railScopeBtn = null; railScopeWrap = null; railScopeList = null;
+    railL.innerHTML = ""; railR.innerHTML = "";
+    return;
+  }
+  renderIconRail();
+  renderRightRail(all);
+}
+
+// the centre pane, when the rail's search field has something in it
+function renderDeskSearch() {
+  const q = deskQuery.toLowerCase();
+  const hay = e => (plainText(e.text, "keep") + " " + e.tags.map(groupLabel).join(" ")).toLowerCase();
+  const found = scopedEntries().filter(e => hay(e).includes(q))
+    .sort((a, b) => (b.year - a.year) || (weekSortKey(b) - weekSortKey(a))
+      || (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
+  const where = deskScope === "all" ? "" : " in " + scopeLabel();
+  entriesRoot.appendChild(el("p", { class: "search-count" }, found.length + " found" + where));
+  if (!found.length) {
+    // name the scope in the miss, or a narrowed search reads as "this word is nowhere"
+    entriesRoot.appendChild(el("p", { class: "search-hint" },
+      deskScope === "all"
+        ? "nothing matches \u201c" + deskQuery + "\u201d."
+        : "nothing matches \u201c" + deskQuery + "\u201d in " + scopeLabel() + ". flip the scope to widen it."));
+    return;
+  }
+  const card = el("div", { class: "group-card" });
+  for (const e of found) card.appendChild(searchResultEl(e, q));
+  entriesRoot.appendChild(card);
+}
+
+// Crossing the breakpoint rebuilds both sides — the rails' state doesn't survive it.
+// Driven off a remembered boolean rather than the event's own payload, and watched on
+// `resize` as well: matchMedia's change event does not fire under every viewport path
+// (it doesn't under devtools viewport emulation), and the CSS flipping to the desktop
+// grid while the rails still hold no children leaves two dead panes on screen.
+let deskWas = deskMQ.matches, bpTimer = null;
+function onBreakpointCross() {
+  // Deferred, NOT read inline: on a resize the event can arrive before matchMedia has
+  // re-evaluated, so an inline `matches === deskWas` compares a stale value, returns early,
+  // and — because deskWas never advances — the crossing is missed for good. Reading it once
+  // the resize has settled also avoids re-rendering on every pixel of a live window drag.
+  clearTimeout(bpTimer);
+  bpTimer = setTimeout(() => {
+    if (deskMQ.matches === deskWas) return;
+    deskWas = deskMQ.matches;
+    render();
+  }, 60);
+}
+deskMQ.addEventListener("change", onBreakpointCross);
+window.addEventListener("resize", onBreakpointCross, { passive: true });
+
+// a pull-down that only closes via its own trigger is a trap — anywhere else dismisses it
+document.addEventListener("pointerdown", ev => {
+  if (!deskScopeOpen) return;
+  if (ev.target.closest && ev.target.closest(".rail-scope, .rail-scope-wrap")) return;
+  deskScopeOpen = false;
+  render();
+}, true);
 
 function render() {
   // the period tabs are both the identity and the switcher: W## reads the week being
@@ -2360,19 +3067,32 @@ function render() {
   }
 
   entriesRoot.innerHTML = "";
-  const list = activeEntries();
+  const all = activeEntries();
+  // the rails read the *unfiltered* period, so the topic counts don't collapse to
+  // whatever is currently filtered — and so clearing a filter is always reachable
+  renderRails(all);
+
+  // desktop only: the right rail's search takes over the centre pane entirely
+  if (deskQuery) { renderDeskSearch(); return; }
+
+  const list = deskTopic ? all.filter(e => e.tags.includes(deskTopic)) : all;
   if (list.length === 0) {
     const empty = el("div", { class: "empty" });
-    empty.innerHTML = "nothing deposited " + (view === "week" ? "this week" : "this month") + " yet.<br/>start typing below to file a thought.";
+    empty.innerHTML = deskTopic
+      ? "nothing under " + groupLabel(deskTopic) + " " + (view === "week" ? "this week" : "this month") + ".<br/>pick another topic, or clear the filter."
+      : "nothing deposited " + (view === "week" ? "this week" : "this month") + " yet.<br/>start typing below to file a thought.";
     entriesRoot.appendChild(empty);
     return;
   }
-  if (view === "week") {
-    const wsum = weekSummaryBlock(list);
-    if (wsum) entriesRoot.appendChild(wsum);
-  } else {
-    const recap = monthRecapBlock(list); // the month's wand: read it back / replay the reading
-    if (recap) entriesRoot.appendChild(recap);
+  // a summary is about the whole period, so it has no business in a topic-filtered slice
+  if (!deskTopic) {
+    if (view === "week") {
+      const wsum = weekSummaryBlock(list);
+      if (wsum) entriesRoot.appendChild(wsum);
+    } else {
+      const recap = monthRecapBlock(list); // the month's wand: read it back / replay the reading
+      if (recap) entriesRoot.appendChild(recap);
+    }
   }
   if (layout === "day") renderDayGroups(list);
   else renderTopicGroups(list, false);
@@ -4796,15 +5516,45 @@ document.getElementById("menuBtn").addEventListener("click", ev => {
 fab.addEventListener("keydown", ev => {
   if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); fab.click(); }
 });
-document.getElementById("prevBtn").addEventListener("click", () => {
-  if (view === "week") wk = shiftWeek(wk.year, wk.week, -1);
-  else mo = mo.month === 0 ? { year: mo.year - 1, month: 11 } : { year: mo.year, month: mo.month - 1 };
+function stepPeriod(delta) {
+  if (view === "week") wk = shiftWeek(wk.year, wk.week, delta);
+  else mo = stepMonth(mo, delta);
+  deskTopic = null; // a filter belongs to the period it was set in
   render();
-});
-document.getElementById("nextBtn").addEventListener("click", () => {
-  if (view === "week") wk = shiftWeek(wk.year, wk.week, 1);
-  else mo = mo.month === 11 ? { year: mo.year + 1, month: 0 } : { year: mo.year, month: mo.month + 1 };
-  render();
+}
+document.getElementById("prevBtn").addEventListener("click", () => stepPeriod(-1));
+document.getElementById("nextBtn").addEventListener("click", () => stepPeriod(1));
+
+// ---------- keyboard (desktop) ----------
+// deliberately small: step the period, write, search. everything else already has a
+// visible control, and a shortcut nobody can see isn't a feature.
+function typingTarget(t) {
+  if (!t) return false;
+  const tag = t.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t.isContentEditable;
+}
+function anySheetOpen() {
+  return sheetRoot.childElementCount > 0 || !!document.querySelector(".read-back, .img-preview-back");
+}
+document.addEventListener("keydown", ev => {
+  // the scope pull-down closes before anything else claims Escape
+  if (ev.key === "Escape" && deskScopeOpen) { ev.stopPropagation(); deskScopeOpen = false; render(); return; }
+  const meta = ev.metaKey || ev.ctrlKey;
+  if (meta && (ev.key === "k" || ev.key === "K")) {
+    ev.preventDefault();
+    if (deskMQ.matches && deskSearchInput) deskSearchInput.focus();
+    else if (!anySheetOpen()) openMenu();
+    return;
+  }
+  if (meta && (ev.key === "n" || ev.key === "N")) {
+    if (anySheetOpen()) return;
+    ev.preventDefault();
+    openComposer(null);
+    return;
+  }
+  if (meta || ev.altKey || typingTarget(ev.target) || anySheetOpen()) return;
+  if (ev.key === "ArrowLeft") { ev.preventDefault(); stepPeriod(-1); }
+  else if (ev.key === "ArrowRight") { ev.preventDefault(); stepPeriod(1); }
 });
 
 render();

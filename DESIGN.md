@@ -33,7 +33,7 @@ hard border.
 
 ---
 
-## 2. The layout as built (mobile)
+## 2. The layout as built (mobile — desktop is §5)
 
 ```
 ┌─────────────────────────────┐
@@ -67,6 +67,53 @@ otherwise the settings list (Day view toggle, Export markdown, Settings).
 
 **Layouts:** only two. The default topic grouping, and a "Day view" toggle. `mix` and
 `dense` were experiments and are gone; "nothing selected" is a real, reachable state.
+
+### The day says itself once (30 Jul 2026)
+
+A run of entries on the same day used to stamp the same badge on every one of them. Now the
+run states the day once and the gutter thread carries it:
+
+```
+[M]│ entry text          badge, then a solid thread
+   ╰─                    a 9px elbow turns toward the text where the next badge would be
+   ┆                     …a gap, then dashes through the rest of the run
+   ┆  entry text         no badge
+[W]│ entry text          new day: badge and solid thread return
+```
+
+Same `--hairline` throughout — dashed, not a lighter colour — so it reads as the thread
+pausing rather than as a second kind of rule. Three details that matter:
+
+- **The elbow's stub lands on the repeat's first line**, the same axis as the badge it stands
+  in for: `bottom: calc(-1 * (var(--entry-pad-y) * 2 + var(--line-box) / 2))`. Two traps here.
+  Kept inside its own row it gets ~11px of height on a single-line entry — not enough for a
+  9px corner, and the curve disappears. And `.entry-gutter` is the entry's **content** box,
+  so reaching the next row's first line means clearing *both* paddings (this row's bottom and
+  the next row's top) before the half line box; measuring as if from the border box leaves it
+  a full 30px high.
+- **A repeat's dashed `::before` replaces the solid `::after`**, which is set to
+  `display: none`. Drawing both stacks two lines in the same column.
+- **Sameness is a full day key, not `entryDay()`.** Two Mondays from different weeks share
+  weekday index 0 and would silently merge in month view. `entryDayKey()` is
+  `year | week-or-month | weekday`.
+
+### Day view (30 Jul 2026)
+
+Day buckets have **no heading**. The day was being said twice — mono black text in the
+heading and the grey badge in every entry's gutter — and the badge won: it's the same object
+topic view uses, and it's the one that can sit centred on the first line beside the topic
+pill. Its first entry's badge names the bucket and the repeat run carries it down.
+`anytime` and month view's `W##` buckets aren't days and have no badge equivalent, so they
+keep the label.
+
+Topics ride in a **third flex column** at the right (78px), one pill per tag, stacked. It was
+an absolutely positioned box holding a single pill; an entry with three tags spilled its
+pills straight out of its own bottom edge. As a real column the entry grows to hold them.
+
+**Badge, first line, and first pill share one axis.** `.entry` carries `--line-box: 22.5px`
+(the body text's own line box, 15px × 1.5) and `--pill-h: 18px`; the side column's
+`margin-top` is `(--line-box - --pill-h) / 2` and the badge's is `(--line-box - 22px) / 2`.
+Change the body font size or line-height and `--line-box` is the one number to update.
 
 ---
 
@@ -159,32 +206,142 @@ hint and the composer's own. Three things it needs:
 
 ---
 
-## 5. Desktop upgrade — what's actually in the way
+## 5. Desktop — icon rail · mat · topics (30 Jul 2026)
 
-The app has never been designed for a wide viewport. `.wrap` is `max-width: 520px` centred,
-so desktop today is a phone-width column on a big grey field. The open questions, roughly in
-order of leverage:
+At `min-width: 1080px` the app becomes an icon rail, a floating mat, and a topics rail.
+Adapted from references she picked, the AI client most of all: a narrow column of glyphs on
+the left, the content as its own rounded surface, a quiet panel on the right.
 
-1. **What fills the width?** The obvious candidates: a 7-column week grid (one column per day,
-   which the day badges already imply), or a two-pane layout with weeks/months in a left rail
-   and entries on the right. The current single-column topic grouping doesn't scale sideways —
-   topic cards would become very wide and short.
-2. **The composer is a bottom sheet** (`.overlay` is `align-items: flex-end`, sheet is
-   `98dvh`). On desktop it probably wants to be a centred modal — but the unfold animation is
-   built around the compose bar's rectangle at the bottom of the screen. If the bar moves
-   (inline? a left rail?), the FLIP geometry follows it automatically (it measures the real
-   element), but the *direction* of the growth will want rethinking.
-3. **Two gestures are touch-only** and have no desktop equivalent: pinch-to-stack a gallery,
-   and pinch-to-compact the list. Both need a visible affordance on desktop. (The notch drag
-   and both long-presses use pointer events and already work with a mouse.)
-4. **Hover is almost entirely unused** — the app is mobile-first, so there's very little
-   hover state to build on. This is the cheapest visible win on desktop: card lift on hover,
-   revealed row actions, the "invisible interface" pattern from her global preferences.
-5. **No keyboard shortcuts** beyond ⌘B/I/U in the composer. Week navigation (←/→), new entry
-   (⌘N), search (⌘K) are all missing and all natural on desktop.
-6. **The header hides on scroll** — a mobile pattern that's usually wrong on desktop.
-7. `@media (min-width: 700px)` exists for the composer textarea but is now superseded by the
-   full-height expanse. Check it before relying on it.
+```
+┌────┬──────────────────────────┬────────────┐
+│ ▤  │ ╭──────────────────────╮ │ ⌕ … [ALL]  │
+│ ▦  │ │    27 Jul – 2 Aug    │ │            │
+│ ── │ │   ‹ W31 / 7月 ›      │ │            │
+│ ☰  │ │  ┌────────────────┐  │ │ TOPICS     │
+│ ↥  │ │  │ ● WORK         │  │ │ ● work   4 │
+│ ⚌• │ │  │ [M]│ entry text│  │ │ ● eats   2 │
+│    │ │  └────────────────┘  │ │            │
+│    │ │  ▒▒▒ fade ▒▒▒        │ │            │
+│    │ │  [ Start typing…  + ]│ │            │
+│    │ ╰──────────────────────╯ │            │
+└────┴──────────────────────────┴────────────┘
+  64px          600px             248px
+```
+
+**The icon rail is icon-only at rest and expands on hover** into icon + name — Week, Month,
+divider, Day view, Export markdown, Settings. It is *absolutely positioned*, so widening is
+an overlay rather than a reflow: expanding it in the grid would re-wrap every line of every
+entry as the pointer crossed it. It hugs its rows rather than filling the rail, because a
+full-height panel covers a screenful of entries to show five labels. `:focus-within` expands
+it too, so tabbing in works.
+
+**Week and Month share one frame box** (`x3 y4.5 18×16 r3`) — week draws the columns, month
+adds the rows. Drawing them at different heights made one look like the lesser control.
+
+**The `⋮` menu is gone on desktop.** All four of its items have a visible home now, so the
+button was a second route to nothing. It stays on mobile, where it's the only route. Sizing
+note for the mobile pair: matching the `+` SVG's 19px *box* was the old mistake — the drawn
+glyph spans 13 of 24 viewBox units, i.e. ≈10.3px, so a 19px dot stack read nearly twice its
+height. Dots are 2.6px with 1.3px gaps = 10.4px, measured against the path's own rect.
+
+**Search has a scope chip** that flips week → month → all, labelled in the app's own tokens
+(`W31` / `7月` / `ALL`) rather than words. Same rule the search sheet already used: "a
+specific week" means navigate there first. A zero-result miss names the scope, or a narrowed
+search reads as "this word is nowhere".
+
+**`display: contents` is what keeps the phone safe.** `.deck` and `.deck-main` wrap
+`.wrap` / `.bottom-frost` / `.compose-dock` in the markup, and below the breakpoint they
+leave the box tree entirely — the three lay out as the body children they used to be, with
+the fixed ones still fixed to the viewport. Verified: at 375px `.wrap` is static at 520px,
+the dock is `position: fixed`, the header is back to its grey `--canvas-a` frost, the `⋮` is
+reachable, and the rails are `display: none` *and* emptied of children.
+
+**There is no window frame.** The deck is a bare transparent grid — no background, no shadow,
+no overflow clip (the icon rail has to expand over the mat). The only painted surface is the
+mat; both rails sit directly on the canvas wash, which is why the wash carries the whole
+composition and nothing else paints a grey of its own. The wash is pure `--canvas` family:
+same `#F0F0F1`, lifted and settled a few percent in *lightness only*. No hue is introduced,
+and no text colour exists on desktop that doesn't exist on mobile.
+
+Things that cost real debugging, or that will bite the next change:
+
+- **A CSS grid's implicit row is `auto` = max-content.** A tall rail sized the row to 1293px
+  inside a 680px fixed deck and everything below the fold vanished (compose bar, account
+  row). `grid-template-rows: minmax(0, 1fr)` + `min-height: 0` on the panes.
+- **The composer sheet must be *wider* than the compose bar.** The unfold clips the sheet to
+  the bar's measured rect; a 600px bar inside a 520px sheet clamped `--ml`/`--mr` to 0 and the
+  box only opened vertically. Sheet is 680, bar 600, so there's 40px of travel a side.
+  (CSS `inset()` *does* accept negative values — verified — they just can't help: clipping
+  only removes area from an element's own box, so there is nothing outside the sheet to
+  reveal.) *Test it by reconstructing:* `sheet.left + --ml` etc. must equal the bar's rect.
+- **The overlay needs asymmetric padding now the rails differ** (64px vs 248px). The sheet is
+  a viewport-level fixed element, so `justify-content: center` centres it on the *viewport*,
+  not the mat — it unfolded lopsided until the overlay was padded by the real gutters
+  (`max(--deck-x, (100vw - --deck-cap)/2)` plus each rail).
+- **`matchMedia`'s `change` event does not fire on every viewport path** — it doesn't under
+  devtools viewport emulation. The CSS flipped to the desktop grid while the rails still held
+  no children: two dead panes. The watcher listens to `resize` as well.
+- **…and it must read `matches` on a timer, not inline.** A `resize` can arrive *before*
+  matchMedia re-evaluates, so `if (matches === deskWas) return` compares a stale value,
+  returns early, and — since `deskWas` never advances — the crossing is missed permanently
+  until the next resize. Debounced ~60ms, which also stops it re-rendering on every pixel of
+  a live window drag.
+- **The scope pull-down animates `grid-template-rows: 0fr → 1fr`**, not `max-height`. It's the
+  only way to transition to a *content* height, so TOPICS below is displaced by the list's
+  real height at the real rate. Its nodes are built once and refilled — rebuilding them per
+  render would restart the transition mid-flight.
+- **The photo row's grab cursor comes with actual drag-to-scroll**, mouse-only: touch keeps
+  native momentum *and* the two-finger pinch that fans the row into a deck. A drag past 4px
+  swallows the click that follows, so dragging across an image doesn't also open its preview,
+  and `scroll-snap-type` is suspended during the drag or it keeps yanking back to a card. The
+  cursor is gated on the wrapper's `show-left`/`show-right` — the same overflow measurement
+  the edge fades use — so it never promises a drag on a row that doesn't scroll.
+- **`elementFromPoint` will not find the bottom frost** — it's `pointer-events: none`, so a
+  hit test reports the entry text underneath as topmost and reads like a z-order bug. Tint
+  the element instead of hit-testing it.
+- **A wedged preview compositor can fake a layout bug for a long time.** A strip of stale
+  content under the compose bar survived opaque-white, opaque-red, `z-index: 999`, and
+  `backdrop-filter: none` completely unchanged — and an outline added to the mat refused to
+  draw along its bottom edge. Every measurement said the layout was correct; a forced full
+  repaint (navigate + resize) cleared it. When five different style states produce a
+  pixel-identical region, suspect the compositor, not the CSS.
+- **The compose bar's width must equal the reading column's** (both 600) or the bar's edges
+  stop lining up with the cards'. Change one, change the other.
+- **The page no longer scrolls; `.wrap` does.** `html, body` are `overflow: hidden`, so the
+  frost and the dock can be absolute siblings that simply don't move. The header's
+  hide-on-scroll listens on `window` and is therefore inert — deliberately, it's a phone
+  pattern — and `.header.hidden` is neutralised so nothing can strand it off-screen.
+- **The deck is capped at 1400px and centred.** Past that the centre pane just grows white
+  margin around a fixed reading column — the same "column stranded on a field" the rails were
+  meant to solve. Beyond the cap the extra width becomes field the window floats on.
+- **The rail's search field is built once and never rebuilt** (`buildRightRail`), the same
+  lesson as the composer's `build()`: re-creating a focused input every keystroke drops the
+  caret and breaks IME composition — and this app has 月 in its own title. Only the lists
+  below it refill. *Verified by node identity:* `document.activeElement === inp` still holds
+  after a render.
+- **Rail state doesn't survive the breakpoint.** Crossing below 1080 clears `deskQuery`,
+  `deskTopic` and `deskScope`, or the phone layout stays silently filtered with no control on
+  screen to clear it.
+- **The bottom frost is opaque at its base on desktop.** The 0.94 white was tuned to let the
+  grey canvas glow through on a phone; inside a white mat there is nothing behind it worth
+  seeing through, and the translucency just let entries peek out under the compose bar.
+
+Still open:
+
+1. **Two gestures are touch-only** with no desktop equivalent: pinch-to-stack a gallery, and
+   pinch-to-compact the list. Both still need a visible affordance. (The notch drag and both
+   long-presses use pointer events and already work with a mouse.)
+2. **Hover is in, lightly** — rail rows, entry rows, stepper, compose controls, all under
+   `@media (hover: hover)`. No card lift yet; lifting a whole topic card when the pointer
+   crosses any one of its entries is a lot of motion in a list.
+3. **Keyboard is deliberately small**: ←/→ steps the period, ⌘N opens the composer, ⌘K
+   focuses the rail search (falls back to `openMenu()` on mobile widths). Guarded on
+   `typingTarget()` and `anySheetOpen()`. Everything else already has a visible control.
+4. `@media (min-width: 700px)` on the composer textarea is superseded twice over now — by the
+   full-height expanse and by the desktop block. Check it before relying on it.
+5. **The week/month jump list is gone**, removed 30 Jul. Period navigation on desktop is the
+   header's `‹ W31 / 7月 ›` and ←/→ only; there is no way to leap several weeks back in one
+   move. If that starts to bite, it wants to return as a picker off the header, not as a rail.
 
 **Don't break:** the sync layer (localStorage-first, one Supabase row per doc,
 last-write-wins) is untouched by all of this and easy to damage — see the
@@ -198,6 +355,14 @@ last-write-wins) is untouched by all of this and easy to damage — see the
 - **Sample intermediate values** across an animation, not one `getComputedStyle` — a
   transition makes the computed value at t=0 the *old* one, which reads as "nothing applied".
 - **Measure, don't eyeball**, for "does this match that": pill heights, gaps, cap heights.
+- **To measure a first LINE box, range the first text node — not `el.getClientRects()[0]`.**
+  That returns *block* boxes, so on an entry `<p>` (whose rich-text renderer wraps content in
+  a child block) it hands back the whole paragraph. A two-line paragraph then reads as half a
+  line box "misaligned" and sends you chasing an alignment bug that isn't there:
+  `r.setStart(firstTextNode, 0); r.setEnd(firstTextNode, 3); r.getBoundingClientRect()`.
+- **Match icons by their drawn ink, not their SVG box.** A 19px `<svg>` whose path spans 13
+  of 24 viewBox units draws ~10.3px of glyph; sizing a neighbouring mark to 19px makes it
+  read twice as large. Measure `path.getBoundingClientRect()`.
 - **In a backgrounded preview tab, rAF and CSS transitions don't tick, and `.focus()`/`.blur()`
   change `document.activeElement` without dispatching focus events.** Several "bugs" were this.
   Force paints with a screenshot, or dispatch the events by hand.
