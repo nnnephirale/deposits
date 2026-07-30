@@ -166,6 +166,23 @@ the very top of the range `--sheet-h` can read 882px while the sheet renders 832
 round-trips to the same *visual* height, so the memory is stable — but the two numbers are not
 the same number.
 
+**`pointercancel` is not a quiet `pointerup` — never share a commit path between them**
+(30 Jul 2026). The wrapped chevron's scrub routed both through one `endPull`, so a gesture the
+*system* took away past the commit threshold opened the wrapped on its own. `pointercancel`
+fires when she never let go of anything: an edge-swipe back, a notification, the browser
+deciding late that this was a scroll. It must always retreat. `endPull(ev, mayCommit)` now,
+with `pointerup` passing true and `pointercancel` passing false — which also guarantees an
+interrupted drag can't strand a half-bloomed screen over the list.
+
+**Race every rAF animation with a timer.** A hidden tab gets *zero* `requestAnimationFrame`
+callbacks — verified: 0 ticks in 400ms with `document.hidden === true`. The composer unfold
+already knew this (`requestAnimationFrame(release)` + `setTimeout(release, 70)`); the heat
+bloom had to learn it again. If she pulls the chevron halfway and the phone locks, the retreat
+never runs and she comes back to a half-bloomed screen with no way out. `heatTo` runs both an
+rAF loop and a `setTimeout(finish, ms + 120)`, with a `settled` flag so `done()` fires exactly
+once whichever wins. *Testing note:* this is also why the preview harness makes rAF-driven
+work look broken — check `document.visibilityState` before believing an animation bug.
+
 **`selectionchange`, not `select`.** `select` fires when text *becomes* selected and never
 when it clears, and on iOS the tap that dismisses a selection is swallowed by the callout, so
 no pointerup arrives either. Bind `selectionchange` on both the element (newer engines) and
@@ -216,6 +233,44 @@ under the day/week/Save row.
 ---
 
 ## 4. Signature motion
+
+**The heat bloom — the door to the wrapped** (30 Jul 2026). One small `v` under the period,
+dragged down. It replaced two magic wands (`weekSummaryBlock` and `monthRecapBlock`) that were
+absolutely positioned over the *first entry card's* top-right corner, where they read as a
+smudge on the entry rather than a control. There is one door now, it sits under the thing the
+wrapped is about, and it is the same control in both views.
+
+*The colours are her data.* Each field is one of the period's topics, sized by how often it
+appeared — a month of nothing but work is one big blue field; a scattered month is six small
+ones. Positions come from a fixed golden-angle spiral, not `Math.random()`, so the same period
+always blooms the same way; random placement made a familiar month look like a new one.
+
+*The palette is derived, not picked.* Each topic's `dot` was read in OKLCH, its **hue kept**,
+and L + C replaced with one shared rule: `L = 0.72`, chroma at **85% of that hue's own sRGB
+maximum**. Same L is what makes eleven colours read as one family. Same *%-of-max* chroma
+(not the same absolute number) is what makes them equally vivid — the ceiling is 0.265 at
+magenta and 0.123 at teal, so one flat value would have left the teal muted and clipped the
+magenta. The source dots ranged L 0.605→0.826, which is why "just saturate the dots" would
+have produced a bloom with holes in it. Stored as hex in `TOPICS[].heat`; the derivation is
+written down beside it so it can be re-derived rather than re-guessed.
+
+*Two rendering decisions that cost a rebuild:*
+
+- **`mix-blend-mode: multiply` is wrong here.** It was the obvious choice — pigment, overlaps
+  deepen, no wash-out. But six large fields all overlapping meant every pixel got multiplied
+  five or six times, and the top half of the screen collapsed into grey-green mud: the exact
+  opposite of "saturated". Soft-edged radial fields blended *normally* over a near-white wash
+  keep each hue readable and let overlaps average into a new colour instead of racing to
+  black. Multiply only behaves when the fields are sparse enough not to stack.
+- **A radial-gradient falloff beats a hard disc + big blur** — smoother, cheaper, and the
+  shape is controllable instead of being whatever a 60px blur does to a circle's edge.
+
+*The bloom becomes the deck's sky.* `.recap` is opaque `var(--canvas)`, so tearing the bloom
+down when the deck opened cut from a screen full of her colours to a flat near-white one in a
+single frame. Now the deck opened *from the chevron* gets `.on-heat` — transparent background,
+its own stock blobs off — and the bloom stays for the deck's whole life, retreating only when
+she closes it. A deck opened any other way (the auto-reveal when a summary lands) never gets
+that class and keeps its stock background.
 
 **The composer unfold.** The sheet is `clip-path`-ed to the compose bar's *measured*
 rectangle — same grey, same 18px rounding — then released, so the box physically opens

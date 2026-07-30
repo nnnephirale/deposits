@@ -70,6 +70,82 @@
   /* nothing but the centred date line — anything flanking it crowded the row */
   .header-top { display: flex; justify-content: center; align-items: center; min-height: 22px; }
 
+  /* ---------- the wrapped cue: one small 'v' under the period ----------
+     It replaced a magic wand that sat absolutely-positioned over the first card's top
+     right corner, where it read as a smudge on the entry rather than a control of its own.
+     Down here it belongs to the PERIOD — the thing the wrapped is actually about.
+
+     It is not sticky, on purpose. The header is (z-index 10), so this can never sit inside
+     the header's padding: it would be painted over by the frost. Instead the header gives
+     up most of its bottom padding whenever the cue is showing, and the cue takes that room. */
+  .wrapped-cue { display: flex; justify-content: center; padding: 0 0 18px; }
+  .wrapped-cue[hidden] { display: none; }
+  .wrap.has-cue > .header { padding-bottom: 12px; }
+  .wc-chev {
+    background: none; border: none; padding: 6px 26px; line-height: 0;
+    color: #C4C4C9;                 /* barely there, like the eye it replaces */
+    touch-action: none;             /* the drag is ours — don't let it scroll the list */
+    -webkit-tap-highlight-color: transparent;
+    transition: color 0.2s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .wc-chev svg { width: 22px; height: 22px; display: block; }
+  @media (hover: hover) { .wc-chev:hover { color: #8A8A8E; } }
+  /* while dragging, the chevron follows the finger a little and darkens with the pull —
+     the control itself is the progress indicator, so nothing extra has to appear */
+  .wc-chev.pulling { transition: none; }
+  /* the whole cue fades out as the list scrolls up under the header. Driven by --cue-o
+     from the scroll handler rather than by a class, so it's continuous, not a snap.
+     Deliberately NO transition: scroll already delivers a value every frame, so a
+     transition on top of it only makes the fade lag behind the finger. */
+  .wrapped-cue { opacity: var(--cue-o, 1); }
+
+  /* ---------- the heat bloom ----------
+     Her topics for this period, blurred into fields and grown from the chevron. Everything
+     is driven by ONE custom property, --p (0 → 1), set from JS each frame: during the drag
+     it tracks the finger, on release it's animated to 0 or 1. No CSS transition on --p —
+     an un-registered custom property can't interpolate anyway, and the scrub needs to be
+     able to reverse mid-flight, which a transition would fight. */
+  .heat {
+    position: fixed; inset: 0; z-index: 60; pointer-events: none;
+    visibility: hidden; --p: 0;
+    /* its own stacking + paint context: the fields multiply against THIS box's wash,
+       not against the entries showing through from underneath */
+    isolation: isolate;
+  }
+  .heat.live { visibility: visible; }
+  /* paper for the ink. It comes in first so the fields always have something to multiply
+     into — over the bare list they'd read as stains on the text. */
+  .heat-wash {
+    position: absolute; inset: 0; background: #FCFCFB;
+    opacity: calc(var(--p) * 1.35);   /* opaque by p≈0.74, before the fields are at full */
+  }
+  /* Each field is a soft radial falloff, NOT a hard disc, and it blends normally.
+     multiply was tried first and it is wrong here: six large fields all overlapping meant
+     every pixel was multiplied five or six times, and the whole top half collapsed into
+     grey-green mud — the opposite of "saturated". Alpha-blending soft-edged fields over a
+     near-white wash keeps each hue readable and lets overlaps average into a new colour
+     instead of darkening toward black. The gradient also removes the need for a big blur. */
+  .heat-field {
+    position: absolute; border-radius: 50%;
+    background: radial-gradient(circle closest-side, var(--c) 0%, color-mix(in oklab, var(--c) 55%, transparent) 46%, transparent 78%);
+    filter: blur(var(--blur, 26px));
+    /* --x/--y are where this field ends up, as a fraction of the viewport; the field starts
+       at the chevron (--ox/--oy) and travels out. Scale from ~0 so it BLOOMS rather than
+       slides in already-formed. */
+    left: 0; top: 0; width: var(--d); height: var(--d);
+    margin-left: calc(var(--d) / -2); margin-top: calc(var(--d) / -2);
+    transform:
+      translate(
+        calc(var(--ox) + (var(--x) - var(--ox)) * var(--p)),
+        calc(var(--oy) + (var(--y) - var(--oy)) * var(--p))
+      )
+      scale(calc(0.04 + 0.96 * var(--p)));
+    opacity: calc(var(--p) * var(--w));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wc-chev { transition: none; }
+  }
+
   /* search sheet */
   .sheet.search-sheet {
     height: 76vh; overflow: hidden;
@@ -643,8 +719,6 @@
   }
   .wsum-eye svg { width: 15px; height: 15px; }
   /* magic wand: the summary offer once 3 days are filled — a touch more present than the eye */
-  .wsum-wand { color: #B9B9BF; }
-  .wsum-wand svg { width: 13.5px; height: 13.5px; } /* 10% smaller than the eye */
 
   /* subtle frost at the bottom edge — content softly fades behind the fab zone */
   /* a white fade the list scrolls up into, so the compose bar always sits on clean ground */
@@ -1010,6 +1084,13 @@
     background: var(--canvas); overflow: hidden;
     user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
   }
+  /* opened by dragging the chevron: the bloom that drag built stays as the deck's own sky,
+     so there is nothing to cut to. The deck's stock blobs stand down and its opaque canvas
+     goes transparent — .heat is the layer directly beneath (z 60 vs 70). The veil and grain
+     stay, and are what keep the text legible over her more saturated colours. */
+  .recap.on-heat { background: transparent; }
+  .recap.on-heat .recap-blob { display: none; }
+
   .recap-blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.55; }
   .recap-blob.b1 { width: 60vmax; height: 60vmax; top: -25vmax; left: -18vmax; background: #EDE4D8; animation: blobDrift1 52s ease-in-out infinite alternate; }
   .recap-blob.b2 { width: 50vmax; height: 50vmax; bottom: -20vmax; right: -15vmax; background: #DFE7EA; animation: blobDrift2 64s ease-in-out infinite alternate; }
@@ -1137,12 +1218,6 @@
     font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
     font-size: 19px; line-height: 1.4; color: var(--ink); margin: 16px 0 0;
   }
-  /* replay the week's reveal from the collapsed summary row */
-  .wsum-replay {
-    position: absolute; top: 0; right: 26px;
-    background: none; border: none; padding: 4px; line-height: 0; color: #D6D6DB;
-  }
-  .wsum-replay svg { width: 14px; height: 14px; }
 
   .export-area {
     width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.5;
@@ -1244,8 +1319,9 @@
     }
     /* the reading column. 600 is the measure; the compose bar below matches it exactly so
        the bar's edges line up with the cards' — change one, change the other. */
-    .wrap > .header, #entriesRoot { max-width: 600px; margin: 0 auto; }
+    .wrap > .header, .wrapped-cue, #entriesRoot { max-width: 600px; margin: 0 auto; }
     .wrap > .header { padding: 34px 0 44px; }
+    .wrap.has-cue > .header { padding-bottom: 10px; }
     /* the frost is tinted to the surface it sits on, or it reads as a band: on the phone
        that's the canvas, here it's the mat */
     .header, .header::after {
@@ -1526,6 +1602,17 @@
         </div>
       </div>
 
+      <!-- the door to the wrapped. Deliberately OUTSIDE .header: the header is sticky and
+           this must not be — it scrolls away with the list and fades as it goes. -->
+      <div class="wrapped-cue" id="wrappedCue" hidden>
+        <button class="wc-chev" id="wcChev" aria-label="Open the wrapped">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m6 9 6 6 6-6"/>
+          </svg>
+        </button>
+      </div>
+
       <div id="entriesRoot"></div>
     </div>
 
@@ -1544,25 +1631,42 @@
 
   <aside class="rail rail-r" id="railR" aria-label="Topics"></aside>
 </div>
+<!-- the heat bloom: the transition INTO the wrapped, scrubbed by the chevron's drag.
+     One element, one --p from 0 to 1; the fields are built per period from her topics. -->
+<div class="heat" id="heat" aria-hidden="true"><div class="heat-wash"></div></div>
 <div id="sheetRoot"></div>
 
 <script>
 "use strict";
 
 // ---------- taxonomy ----------
+// bg/fg/dot are the pills as they appear in the list. `heat` is the same topic turned up
+// for the wrapped bloom — see HARMONY below for why it isn't just `dot` at more saturation.
 const TOPICS = [
-  { id: "work", label: "work", bg: "#E3EDFB", fg: "#2B5FA8", dot: "#4A82D0" },
-  { id: "eats", label: "notable eats", bg: "#FBEBDD", fg: "#A85B22", dot: "#D98B4A" },
-  { id: "health", label: "health & fitness", bg: "#E2F2E4", fg: "#2E7D3A", dot: "#55A862" },
-  { id: "watched", label: "watched/watching", bg: "#EEE7F9", fg: "#6C46A8", dot: "#9670D4" },
-  { id: "internet", label: "internet things", bg: "#DFF2F2", fg: "#1F7A7A", dot: "#48A8A8" },
-  { id: "shopping", label: "shopping", bg: "#FBE5EE", fg: "#B03A6B", dot: "#D8699A" },
-  { id: "relationship", label: "relationships", bg: "#FBE3E1", fg: "#B0403A", dot: "#D8706A" },
-  { id: "home", label: "home", bg: "#F2ECDF", fg: "#8A6D2F", dot: "#B39554" },
-  { id: "listening", label: "listening to", bg: "#E5E7FB", fg: "#4A50A8", dot: "#7B80D4" },
-  { id: "discovered", label: "discovered ✨", bg: "#FFF6D9", fg: "#9C7A00", dot: "#E8C24A" },
-  { id: "lookgood", label: "look good feel good", bg: "#F7E6F4", fg: "#9A3E8C", dot: "#C86EB8" },
+  { id: "work", label: "work", bg: "#E3EDFB", fg: "#2B5FA8", dot: "#4A82D0", heat: "#70A6F2" },
+  { id: "eats", label: "notable eats", bg: "#FBEBDD", fg: "#A85B22", dot: "#D98B4A", heat: "#E78B39" },
+  { id: "health", label: "health & fitness", bg: "#E2F2E4", fg: "#2E7D3A", dot: "#55A862", heat: "#41C25D" },
+  { id: "watched", label: "watched/watching", bg: "#EEE7F9", fg: "#6C46A8", dot: "#9670D4", heat: "#B38EF2" },
+  { id: "internet", label: "internet things", bg: "#DFF2F2", fg: "#1F7A7A", dot: "#48A8A8", heat: "#41B9B9" },
+  { id: "shopping", label: "shopping", bg: "#FBE5EE", fg: "#B03A6B", dot: "#D8699A", heat: "#F471AC" },
+  { id: "relationship", label: "relationships", bg: "#FBE3E1", fg: "#B0403A", dot: "#D8706A", heat: "#F37C75" },
+  { id: "home", label: "home", bg: "#F2ECDF", fg: "#8A6D2F", dot: "#B39554", heat: "#C89E3A" },
+  { id: "listening", label: "listening to", bg: "#E5E7FB", fg: "#4A50A8", dot: "#7B80D4", heat: "#959BF2" },
+  { id: "discovered", label: "discovered ✨", bg: "#FFF6D9", fg: "#9C7A00", dot: "#E8C24A", heat: "#C2A13A" },
+  { id: "lookgood", label: "look good feel good", bg: "#F7E6F4", fg: "#9A3E8C", dot: "#C86EB8", heat: "#F361DD" },
 ];
+// HARMONY — how the `heat` column was derived, so it can be re-derived rather than re-guessed.
+// Each topic's `dot` was read in OKLCH, its HUE kept, and lightness + chroma replaced with one
+// shared rule: L = 0.72 for every topic, and chroma at 85% of that hue's own maximum in sRGB.
+//   Same L is what makes eleven colours read as one family instead of eleven decisions.
+//   Same %-of-max chroma (not same absolute chroma) is what makes them equally VIVID: the
+//   sRGB ceiling is 0.265 at magenta and 0.123 at teal, so one flat number would have left
+//   the teal muted and clipped the magenta.
+// The source dots were all over the place — L 0.605 (work) to 0.826 (discovered) — which is
+// why "just saturate the dots" would have produced a bloom with holes in it.
+// Two notes for anyone changing this: `discovered` and `home` land 5° apart in hue and are
+// indistinguishable once blurred (harmless — they blend), and the fields paint with
+// mix-blend-mode: multiply, so overlaps deepen like ink rather than washing out to grey.
 const MODES = [
   { id: "remember", label: "i want to remember" },
   { id: "rundown", label: "weekly rundown" },
@@ -3152,9 +3256,11 @@ function render() {
   renderRails(all);
 
   // desktop only: the right rail's search takes over the centre pane entirely
-  if (deskQuery) { renderDeskSearch(); return; }
+  if (deskQuery) { syncWrappedCue(null); renderDeskSearch(); return; }
 
   const list = deskTopic ? all.filter(e => e.tags.includes(deskTopic)) : all;
+  // the wrapped is about the whole period, so a topic-filtered slice has no door to it
+  syncWrappedCue(deskTopic ? null : list);
   if (list.length === 0) {
     const empty = el("div", { class: "empty" });
     empty.innerHTML = deskTopic
@@ -4345,7 +4451,6 @@ navMonth.addEventListener("click", () => periodTap("month"));
 // ---------- weekly summary block ----------
 const EYE_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg>';
-const WAND_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg>';
 
 // which bucket the current summary falls in: MINE (hand-written), or V1/V2… (AI takes).
 // legacy records predate origin/version — treat them as the first AI take.
@@ -4377,24 +4482,11 @@ function weekSummaryBlock(list) {
       wrap.appendChild(el("p", { class: "wsum-text pending" }, "Summarizing the week…"));
       return wrap;
     }
-    // 3+ days filled and a key set → the magic wand appears where the collapsed eye
-    // usually sits. tapping it asks first; nothing generates on its own anymore.
-    if (filledDays >= 3 && apiKey) {
-      const wrap = el("div", { class: "wsum collapsed" });
-      const wand = el("button", { class: "wsum-eye wsum-wand", "aria-label": "Summarize this week" });
-      wand.innerHTML = WAND_ICON;
-      wand.addEventListener("click", () => {
-        confirmAction("Create a summary of this week?", "Summarize", () => {
-          showWeekSummary = true; // she asked for it — make sure it isn't hidden when it lands
-          try { localStorage.setItem(SHOW_WSUM_KEY, "1"); } catch (e) {}
-          generateWeekSummary(wk.year, wk.week, list);
-          render(); // shows the pending line while the summary is written
-        });
-      });
-      wrap.appendChild(wand);
-      return wrap;
-    }
-    // no wand (no key / fewer than 3 days) → offer to hand-write one (saves as MINE),
+    // 3+ days filled and a key set → this week can be read back, and the chevron under the
+    // period is the door to it (see syncWrappedCue). The wand that used to sit here is gone:
+    // it hung over the first card's top-right corner and read as a smudge on the entry.
+    if (filledDays >= 3 && apiKey) return null;
+    // no reading available (no key / fewer than 3 days) → offer to hand-write one (saves as MINE),
     // but only once the week has reached its sunday 10am. before that the whole surface
     // stays dormant (no invite, no eye). suppressed when hidden too.
     if (!showWeekSummary || !weekSummaryUnlocked(wk.year, wk.week)) return null;
@@ -4417,12 +4509,8 @@ function weekSummaryBlock(list) {
   wrap.appendChild(eye);
 
   if (showWeekSummary) {
-    // a quiet wand to summon the reveal again — the reading, not just the line
-    const replay = el("button", { class: "wsum-replay", "aria-label": "Replay this week's reveal",
-      onclick: () => openWeekReveal(wk.year, wk.week, list) });
-    replay.innerHTML = WAND_ICON;
-    wrap.appendChild(replay);
-
+    // the replay wand that lived here is gone too — the chevron under the period replays
+    // the reveal now, so there is one door instead of two in different corners.
     const open = () => openWeekSummaryEditor(wk.year, wk.week, list);
     // every take the week has: V1…Vn then MINE. active pill opens the editor,
     // any other pill switches the week to that take (and the choice persists/syncs).
@@ -4693,11 +4781,10 @@ async function startMonthRecap(year, month) {
   }
 }
 
-// the wand row in month view — same collapsed-eye spot as the week wand.
-// no recap yet: tap → confirm → generate. recap saved: tap → straight back in.
+// month view: nothing but the "still reading…" line while one is being written. The control
+// itself moved out to the chevron under the period — see syncWrappedCue.
 function monthRecapBlock(list) {
   const k = monthKey(mo.year, mo.month);
-  const monthName = monthNameOf(mo.year, mo.month);
   if (recapInFlight.has(k)) {
     // claude-code style: a random loading verb, swapped every couple of seconds
     const wrap = el("div", { class: "wsum" });
@@ -4708,18 +4795,9 @@ function monthRecapBlock(list) {
     wrap.appendChild(p);
     return wrap;
   }
-  const rec = currentRecapTake(monthRecaps[k]) ? monthRecaps[k] : null;
-  if (!rec && !(apiKey && list.length >= RECAP_MIN_ENTRIES)) return null;
-  const wrap = el("div", { class: "wsum collapsed" });
-  const wand = el("button", { class: "wsum-eye wsum-wand", "aria-label": rec ? "Replay this month's reading" : "Read this month back" });
-  wand.innerHTML = WAND_ICON;
-  wand.addEventListener("click", () => {
-    if (currentRecapTake(monthRecaps[k])) { openRecap(mo.year, mo.month); return; }
-    confirmAction("Read " + monthName + " back? A few observations, one at a time.", "Read it",
-      () => startMonthRecap(mo.year, mo.month));
-  });
-  wrap.appendChild(wand);
-  return wrap;
+  // the month's wand lived here; the chevron under the period is the door now. Nothing
+  // else in this block was ever visible, so in the settled case it renders nothing at all.
+  return null;
 }
 
 // ---------- the story deck ----------
@@ -5590,6 +5668,256 @@ fab.addEventListener("click", () => {
   else doExport();
 });
 
+// ============================================================================
+// THE WRAPPED CUE — one chevron under the period, and the heat bloom it opens
+// ----------------------------------------------------------------------------
+// It replaced two magic wands (one in weekSummaryBlock, one in monthRecapBlock) that were
+// absolutely positioned over the first entry card's top-right corner. There is one door now,
+// it sits under the thing it's about, and it is the same control in both views.
+//
+// The gesture is a scrub, not a button: drag down and the bloom follows the finger, so the
+// wrapped can be peeked at and backed out of. Past PULL_COMMIT it finishes on its own.
+// ============================================================================
+const cueEl = document.getElementById("wrappedCue");
+const chevEl = document.getElementById("wcChev");
+const heatEl = document.getElementById("heat");
+const wrapEl = document.querySelector(".wrap");
+
+const PULL_FULL = 150;    // px of drag that equals a fully bloomed screen
+const PULL_COMMIT = 0.58; // …and the fraction of it that counts as "yes, open it"
+
+// what the cue would do right now: null = don't show it at all.
+//   { kind: "open", run }      a reading exists — go straight in
+//   { kind: "make", run, ask } nothing yet — the bloom lands on the offer to write one
+let cueAction = null;
+
+function syncWrappedCue(list) {
+  cueAction = list && list.length ? wrappedActionFor(list) : null;
+  cueEl.hidden = !cueAction;
+  wrapEl.classList.toggle("has-cue", !!cueAction);
+  // catch up with wherever the page already is: a reload restores the scroll position,
+  // and without this the cue would come back at full strength sitting under the header
+  syncCueFade(wrapEl.scrollTop || window.scrollY);
+  chevEl.setAttribute("aria-label",
+    !cueAction ? "Open the wrapped"
+      : cueAction.kind === "open"
+        ? (view === "week" ? "Open this week's wrapped" : "Open this month's wrapped")
+        : (view === "week" ? "Read this week back" : "Read this month back"));
+}
+
+function wrappedActionFor(list) {
+  if (view === "week") {
+    const k = weekKey(wk.year, wk.week);
+    if (weekSumInFlight.has(k)) return null;         // already being written
+    const rec = weekSummaries[k];
+    if (rec) return { kind: "open", run: () => openWeekReveal(wk.year, wk.week, list) };
+    const filledDays = new Set(list.map(entryDay).filter(d => d != null)).size;
+    if (filledDays >= 3 && apiKey) return {
+      kind: "make",
+      ask: "Create a summary of this week?", ok: "Summarize",
+      run: () => {
+        showWeekSummary = true; // she asked for it — don't let it land hidden
+        try { localStorage.setItem(SHOW_WSUM_KEY, "1"); } catch (e) {}
+        generateWeekSummary(wk.year, wk.week, list);
+        render();
+      }
+    };
+    return null;
+  }
+  const k = monthKey(mo.year, mo.month);
+  if (recapInFlight.has(k)) return null;
+  if (currentRecapTake(monthRecaps[k])) return { kind: "open", run: () => openRecap(mo.year, mo.month) };
+  if (apiKey && list.length >= RECAP_MIN_ENTRIES) return {
+    kind: "make",
+    ask: "Read " + monthNameOf(mo.year, mo.month) + " back? A few observations, one at a time.",
+    ok: "Read it",
+    run: () => startMonthRecap(mo.year, mo.month)
+  };
+  return null;
+}
+
+// ---- the bloom ----------------------------------------------------------
+// Fields are rebuilt per open because they're made of THIS period's topics: which ones,
+// and how much of each. A month of nothing but work is one big blue field; a scattered
+// month is six small ones. That's the "heat" — it's her data, not decoration.
+function buildHeatFields(list) {
+  heatEl.querySelectorAll(".heat-field").forEach(n => n.remove());
+  const tally = {};
+  list.forEach(e => (e.tags || []).forEach(t => { if (topicById[t]) tally[t] = (tally[t] || 0) + 1; }));
+  let ranked = Object.entries(tally).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  // a period with no topics at all still deserves a transition, so fall back to the
+  // deck's own three neutrals rather than opening onto a blank white screen
+  if (!ranked.length) ranked = [["_a", 1], ["_b", 1], ["_c", 1]];
+  const NEUTRAL = { _a: "#EDE4D8", _b: "#DFE7EA", _c: "#EAE0EA" };
+  const top = ranked[0][1];
+
+  // where the bloom is born: the chevron's own centre, in viewport units
+  const r = chevEl.getBoundingClientRect();
+  const ox = (r.left + r.width / 2) + "px";
+  const oy = (r.top + r.height / 2) + "px";
+
+  ranked.forEach(([id, n], i) => {
+    // fan them around the origin rather than scattering randomly — a fixed golden-angle
+    // spiral means the same period always blooms the same way, which matters the second
+    // time she opens it. Random placement made a familiar month look like a new one.
+    const ang = i * 2.399963 - 1.2;              // ~137.5°, the golden angle
+    // pushed well off centre and sized under the viewport: fields that all cover the whole
+    // screen are just one colour, and the point is to SEE that this month was mostly work
+    const reach = 0.28 + 0.055 * i;
+    const share = n / top;                        // 1 for her biggest topic
+    const f = el("div", { class: "heat-field" });
+    f.style.setProperty("--c", NEUTRAL[id] || topicById[id].heat);
+    f.style.setProperty("--ox", ox);
+    f.style.setProperty("--oy", oy);
+    f.style.setProperty("--x", `calc(50vw + ${(Math.cos(ang) * reach * 100).toFixed(1)}vw)`);
+    f.style.setProperty("--y", `calc(50vh + ${(Math.sin(ang) * reach * 100).toFixed(1)}vh)`);
+    f.style.setProperty("--d", (62 + share * 38).toFixed(0) + "vmax");
+    f.style.setProperty("--blur", (22 + i * 4) + "px");
+    // her biggest topic is the most present; the tail is a tint
+    f.style.setProperty("--w", (0.38 + share * 0.50).toFixed(2));
+    heatEl.appendChild(f);
+  });
+}
+
+let heatP = 0, heatRaf = 0, heatFallback = 0;
+function setHeatP(p) {
+  heatP = p;
+  heatEl.style.setProperty("--p", p.toFixed(4));
+}
+// animate --p to a target and call done() on arrival. rAF rather than a CSS transition:
+// a custom property can't interpolate without @property, and more to the point the scrub
+// has to be able to reverse mid-flight, which a running transition would fight.
+//
+// A TIMER RACES THE rAF — same lesson the composer's unfold already learned. A hidden tab
+// gets zero rAF callbacks, so if she pulls the chevron halfway and the phone locks (or she
+// switches apps), the retreat animation never runs and she comes back to a half-bloomed
+// screen stranded over her list with no way out. Timers still fire when hidden; whichever
+// lands first settles it, and `settled` means done() runs exactly once either way.
+function heatTo(target, ms, done) {
+  cancelAnimationFrame(heatRaf);
+  clearTimeout(heatFallback);
+  const from = heatP, t0 = performance.now();
+  const ease = x => 1 - Math.pow(1 - x, 3); // ease-out cubic, same family as the app's easing
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    cancelAnimationFrame(heatRaf);
+    clearTimeout(heatFallback);
+    setHeatP(target);
+    if (done) done();
+  };
+  const step = now => {
+    const k = Math.min(1, (now - t0) / ms);
+    if (k >= 1) { finish(); return; }
+    setHeatP(from + (target - from) * ease(k));
+    heatRaf = requestAnimationFrame(step);
+  };
+  heatRaf = requestAnimationFrame(step);
+  heatFallback = setTimeout(finish, ms + 120);
+}
+function heatOpen(list) {
+  buildHeatFields(list);
+  heatEl.classList.add("live");
+  setHeatP(0);
+}
+function heatClose() {
+  cancelAnimationFrame(heatRaf);
+  clearTimeout(heatFallback);
+  heatEl.classList.remove("live");
+  setHeatP(0);
+}
+
+// once a node leaves the document, do something. Used for both handoffs below, so neither
+// has to poll: the deck and the confirm box both just remove themselves when they're done.
+function onGone(node, then) {
+  const parent = node.parentNode;
+  if (!parent) { then(); return; }
+  const obs = new MutationObserver(() => {
+    if (node.isConnected) return;
+    obs.disconnect();
+    then();
+  });
+  obs.observe(parent, { childList: true });
+}
+
+// commit: finish the bloom, then hand it to the deck.
+// The bloom is NOT torn down when the deck opens — it BECOMES the deck's background and
+// stays for its whole life. .recap is opaque `var(--canvas)`, so tearing the bloom down
+// meant cutting from a screen full of her colours to a flat near-white one in a single
+// frame. Now the thing the drag built is the sky she reads it under, and it only leaves
+// when she does. (A deck opened any other way — the auto-reveal when a summary lands —
+// never gets .on-heat, so it keeps its own stock blobs. No regression there.)
+function heatCommit(action) {
+  heatTo(1, Math.max(160, (1 - heatP) * 420), () => {
+    if (action.kind === "open") { action.run(); heatHandOff(); return; }
+    // nothing written yet: the offer arrives ON the bloom, and backing out takes it away
+    confirmAction(action.ask, action.ok, () => { action.run(); heatHandOff(); });
+    const box = document.querySelector(".confirm-overlay");
+    // the confirm mounts on document.body as .confirm-overlay — NOT in sheetRoot, and not
+    // with the .overlay class the sheets use. Watch the real node, not a guess at it.
+    if (box) onGone(box, () => {
+      if (!document.querySelector(".recap") && heatP > 0) heatTo(0, 340, heatClose);
+    });
+  });
+}
+function heatHandOff() {
+  const deck = document.querySelector(".recap");
+  if (!deck) { heatTo(0, 340, heatClose); return; } // nothing opened (a generation started) — don't strand it
+  deck.classList.add("on-heat");
+  onGone(deck, () => heatTo(0, 520, heatClose));
+}
+
+// ---- the scrub ----------------------------------------------------------
+let pull = null;
+chevEl.addEventListener("pointerdown", ev => {
+  if (!cueAction) return;
+  ev.preventDefault();
+  pull = { y0: ev.clientY, moved: 0, list: activeEntries(), action: cueAction };
+  chevEl.classList.add("pulling");
+  try { chevEl.setPointerCapture(ev.pointerId); } catch (e) {}
+  heatOpen(pull.list);
+});
+chevEl.addEventListener("pointermove", ev => {
+  if (!pull) return;
+  const dy = ev.clientY - pull.y0;
+  pull.moved = Math.max(pull.moved, Math.abs(dy));
+  const p = Math.max(0, Math.min(1, dy / PULL_FULL));
+  setHeatP(p);
+  // the chevron IS the progress readout: it sinks with the pull and darkens as it commits
+  chevEl.style.transform = "translateY(" + (p * 16).toFixed(1) + "px)";
+  chevEl.style.color = p >= PULL_COMMIT ? "#6E6E73" : "#C4C4C9";
+});
+function endPull(ev, mayCommit) {
+  if (!pull) return;
+  const { action, moved } = pull;
+  pull = null;
+  chevEl.classList.remove("pulling");
+  chevEl.style.transform = "";
+  chevEl.style.color = "";
+  try { chevEl.releasePointerCapture(ev.pointerId); } catch (e) {}
+  if (!mayCommit) { heatTo(0, 260, heatClose); return; }
+  // a tap is a drag that never went anywhere — it plays the whole thing rather than
+  // doing nothing, so the control still works for anyone who doesn't discover the drag
+  if (moved < 6) { heatCommit(action); return; }
+  if (heatP >= PULL_COMMIT) heatCommit(action);
+  else heatTo(0, 260, heatClose);
+}
+chevEl.addEventListener("pointerup", ev => endPull(ev, true));
+// pointercancel is NOT a quiet pointerup and must never commit. It fires when the system
+// takes the gesture away — an edge-swipe back, a notification, the browser deciding this
+// was a scroll after all — and she never let go of anything. Sharing the release path meant
+// a stolen gesture past the threshold opened the wrapped on its own. It always retreats,
+// which also guarantees no half-bloomed screen is left stranded over the list.
+chevEl.addEventListener("pointercancel", ev => endPull(ev, false));
+
+// ---- fade the cue out as the list scrolls under the header ----
+// continuous, not a class toggle: it should melt as she scrolls, not blink off at a line.
+function syncCueFade(y) {
+  cueEl.style.setProperty("--cue-o", String(Math.max(0, 1 - y / 64)));
+  cueEl.style.pointerEvents = y > 56 ? "none" : "";
+}
+
 // ---------- header hides on scroll down, returns on scroll up ----------
 const headerEl = document.querySelector(".header");
 let headerLastY = window.scrollY, headerHidden = false;
@@ -5598,8 +5926,12 @@ function setHeaderHidden(h) {
   headerHidden = h;
   headerEl.classList.toggle("hidden", h);
 }
+// on desktop the page doesn't scroll — .wrap does — so the cue's fade has to listen there
+// too, or it stays at full opacity forever in the one layout where it never scrolls off.
+wrapEl.addEventListener("scroll", () => syncCueFade(wrapEl.scrollTop), { passive: true });
 window.addEventListener("scroll", () => {
   const y = window.scrollY;
+  syncCueFade(y);
   const dy = y - headerLastY;
   headerLastY = y;
   if (document.body.style.position === "fixed") return; // sheet open: the jump to 0 isn't a real scroll
