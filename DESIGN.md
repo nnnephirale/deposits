@@ -145,9 +145,17 @@ something too opaque to see through.
 distinct); spread it back to a row. State is keyed by the run's markers so it survives the
 re-render that follows an unrelated edit.
 
-**Shimmering placeholder.** `background-clip: text` sweep, 3.6s. Note it needs
-`color: transparent`, which erases any SVG in the same element — the class is added/removed
-with the bar's state so the export/copied icons survive.
+**Shimmering placeholder.** `background-clip: text` sweep, 3.6s, on both the compose bar's
+hint and the composer's own. Three things it needs:
+- `color: transparent`, which erases any SVG in the same element — so the class is
+  added/removed with the bar's state, and the export/copied icons survive.
+- The composer's hint is a real overlaid element (`.ta-ghost`), not a native placeholder:
+  `::placeholder` can't carry a background-clip sweep. It mirrors the textarea's font and top
+  padding so it's indistinguishable from typed text, and `aria-label` replaces the placeholder
+  the field no longer has.
+- It **pauses while anything scrolls** (`pauseShimmerOnScroll`, 220ms idle) — an animated
+  gradient competing with moving content is noise. `animation-play-state: paused`, not
+  `animation: none`, so it resumes where it left off instead of visibly restarting.
 
 ---
 

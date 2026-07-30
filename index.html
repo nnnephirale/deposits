@@ -621,7 +621,7 @@
   /* a slow light sweeps across the placeholder — the bar reads as waiting for her rather
      than as a dead label. only on the plain hint: the export/copied states put an svg in
      here, and background-clip:text needs color:transparent, which would erase it. */
-  .compose-hint.shimmer {
+  .shimmer {
     background: linear-gradient(100deg, #A6A6AB 34%, #E4E4E8 50%, #A6A6AB 66%);
     background-size: 300% 100%;
     -webkit-background-clip: text; background-clip: text;
@@ -629,9 +629,22 @@
     animation: hintShimmer 3.6s linear infinite;
   }
   @keyframes hintShimmer { from { background-position: 150% 0; } to { background-position: -150% 0; } }
+  /* held still while anything is scrolling: an animated gradient competing with moving content
+     is noise, and paused (not cancelled) means it resumes from where it was, never restarts. */
+  .shimmer.paused { animation-play-state: paused; }
   @media (prefers-reduced-motion: reduce) {
-    .compose-hint.shimmer { animation: none; background: none; color: #9A9A9F; }
+    .shimmer { animation: none; background: none; color: #9A9A9F; }
   }
+
+  /* the composer's own hint, laid over the empty field. font and offset track the textarea's
+     so the two are indistinguishable until she types. */
+  .ta-wrap { position: relative; }
+  .ta-ghost {
+    position: absolute; left: 0; top: 8px; pointer-events: none;
+    font-family: var(--font); font-size: 17px; line-height: 1.55;
+    transition: opacity 0.15s ease;
+  }
+  .ta-ghost.gone { opacity: 0; animation-play-state: paused; } /* don't animate what isn't visible */
   /* the bar's trailing controls: + to write, and a lozenge of three dots for the menu
      (which is where search and day view now live). each its own tap target, so neither
      opens the composer by accident. */
@@ -646,14 +659,16 @@
   }
   .compose-icon svg { width: 19px; height: 19px; }
   .compose-icon:active { background: rgba(0,0,0,0.06); color: var(--ink); }
-  /* three bare dots — no container, so nothing about it suggests a typing affordance */
+  /* three bare dots — no container, so nothing about it suggests a typing affordance.
+     the stack measures 19px (4px dots + two 3.5px gaps), the same as the + glyph beside it,
+     and the button box matches too, so the pair reads as one row of controls. */
   .compose-lozenge {
-    flex: none; width: 32px; height: 32px; border-radius: 999px;
+    flex: none; width: 34px; height: 34px; border-radius: 999px;
     background: none; border: none;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3.5px;
     transition: background 0.15s ease;
   }
-  .compose-lozenge span { width: 3.5px; height: 3.5px; border-radius: 50%; background: #8A8A90; }
+  .compose-lozenge span { width: 4px; height: 4px; border-radius: 50%; background: #8A8A90; }
   .compose-lozenge:active { background: rgba(0,0,0,0.07); }
   .compose-bar.copied .compose-actions { display: none; }
   /* a translucent overlay would show the bar as a smudge underneath — take it out of frame,
@@ -1505,6 +1520,18 @@ function renderRichBlocks(text, images, onResize, onCheck) {
     frag.appendChild(row);
   }
   return frag;
+}
+
+// a shimmering gradient fighting with moving content just reads as noise, so the sweep holds
+// still while anything is scrolling and picks up where it left off ~220ms after it settles.
+// paused rather than cancelled, so it never visibly restarts.
+function pauseShimmerOnScroll(target, scroller) {
+  let idle = null;
+  (scroller || window).addEventListener("scroll", () => {
+    target.classList.add("paused");
+    clearTimeout(idle);
+    idle = setTimeout(() => target.classList.remove("paused"), 220);
+  }, { passive: true });
 }
 
 // pinch a run of photos closed and they collapse into a fanned deck; spread it and they lay
@@ -2719,8 +2746,12 @@ function openComposer(existing) {
     if (segState && segState.ranges) { buildSegPreview(); return; }
 
     // ---- text ----
-    const ta = el("textarea", { rows: "4", class: "ta-entry", placeholder: "Start typing\u2026" });
+    // no native placeholder: ::placeholder can't carry a background-clip:text sweep, so the
+    // hint is a real element laid over the empty field, matching its font and top padding.
+    const ta = el("textarea", { rows: "4", class: "ta-entry", "aria-label": "Entry text" });
     ta.value = text;
+    const taGhost = el("div", { class: "ta-ghost shimmer" }, "Start typing\u2026");
+    const syncGhost = () => taGhost.classList.toggle("gone", !!ta.value);
     // grows with content up to the CSS max-height, then scrolls internally \u2014 so
     // "topic" stays peeking below rather than getting pushed off-screen entirely.
     // once the notch has been dragged, that height wins and content just scrolls within it.
@@ -2729,8 +2760,12 @@ function openComposer(existing) {
     function autoGrow() {
       ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px";
     }
-    ta.addEventListener("input", () => { text = ta.value; saveBtn.disabled = !text.trim(); autoGrow(); });
-    sheet.appendChild(ta);
+    ta.addEventListener("input", () => {
+      text = ta.value; saveBtn.disabled = !text.trim(); autoGrow(); syncGhost();
+    });
+    syncGhost();
+    sheet.appendChild(el("div", { class: "ta-wrap" }, ta, taGhost));
+    pauseShimmerOnScroll(taGhost, sheet); // the sweep holds still while the sheet moves
     requestAnimationFrame(autoGrow); // ta isn't attached to the document until after build() returns
 
     // ---- notch = resize handle: drag it up to grow the sheet, down to shrink ----
@@ -4662,6 +4697,7 @@ periodNav.addEventListener("contextmenu", e => e.preventDefault());
 // ---------- fab: tap = new entry, long-press = swap to export ----------
 const fab = document.getElementById("fab");
 const composeHint = document.querySelector(".compose-hint");
+pauseShimmerOnScroll(composeHint); // window scroll — the bar is fixed, so the sweep would ride over moving cards
 const EXPORT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3.5"/><path d="M7.5 7.5 12 3l4.5 4.5"/><path d="M5 13v5.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V13"/></svg>';
 const PLUS_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 const TICK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 17.5 19.5 7"/></svg>';
