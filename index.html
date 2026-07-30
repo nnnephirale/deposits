@@ -52,7 +52,7 @@
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
     /* the extra bottom padding is the breathing room between W31 and the first card */
-    padding: calc(env(safe-area-inset-top) + 16px) 0 40px;
+    padding: calc(env(safe-area-inset-top) + 28px) 0 52px;
     transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   }
   /* scrolling down tucks the header away; any scroll up brings it back */
@@ -269,15 +269,31 @@
     -webkit-overflow-scrolling: touch; scrollbar-width: none;
   }
   .rt-gallery::-webkit-scrollbar { display: none; }
-  /* a vertical strip on the right edge, fading to the card's own white — the cue that the
-     row keeps going. absolutely positioned against the CONTAINER's own edge, so unlike the
-     images it never scrolls with the content; toggled off once she's scrolled to the end. */
-  .rt-gallery.scrollable::after {
-    content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 40px;
-    background: linear-gradient(to right, rgba(255,255,255,0), var(--card));
-    pointer-events: none; opacity: 1; transition: opacity 0.2s ease;
+  /* the fades live on a WRAPPER, not on the scroller. an absolutely positioned pseudo-element
+     inside an overflow container joins that container's scrollable content, so it drifts with
+     the images instead of staying pinned to the visible edge — which is why the right-hand
+     one only sometimes appeared to be in the right place. the wrapper doesn't scroll, so
+     these stay put. mask-image is what makes the BLUR fall off too; without it the
+     backdrop-filter would end on a hard vertical seam. */
+  .rt-gal-wrap { position: relative; }
+  .rt-gal-wrap::before, .rt-gal-wrap::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 38px; z-index: 2;
+    pointer-events: none; opacity: 0; transition: opacity 0.22s ease;
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   }
-  .rt-gallery.scrollable.at-end::after { opacity: 0; }
+  .rt-gal-wrap::before {
+    left: 0;
+    background: linear-gradient(to left, rgba(255,255,255,0), var(--card));
+    -webkit-mask-image: linear-gradient(to left, transparent, black);
+    mask-image: linear-gradient(to left, transparent, black);
+  }
+  .rt-gal-wrap::after {
+    right: 0;
+    background: linear-gradient(to right, rgba(255,255,255,0), var(--card));
+    -webkit-mask-image: linear-gradient(to right, transparent, black);
+    mask-image: linear-gradient(to right, transparent, black);
+  }
+  .rt-gal-wrap.show-left::before, .rt-gal-wrap.show-right::after { opacity: 1; }
   .rt-gallery .rt-img {
     flex: none; width: 62%; max-width: 220px; aspect-ratio: 4 / 5;
     object-fit: cover; margin: 0; border-radius: 14px; scroll-snap-align: start;
@@ -568,8 +584,12 @@
   /* a white fade the list scrolls up into, so the compose bar always sits on clean ground */
   .bottom-frost {
     position: fixed; left: 0; right: 0; bottom: 0;
-    height: calc(env(safe-area-inset-bottom) + 150px);
+    height: calc(env(safe-area-inset-bottom) + 162px);
     background: linear-gradient(to top, #fff 34%, rgba(255,255,255,0.86) 62%, rgba(255,255,255,0));
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    /* the mask fades the BLUR out with the white; without it the blur stops on a hard line */
+    -webkit-mask-image: linear-gradient(to top, black 55%, transparent);
+    mask-image: linear-gradient(to top, black 55%, transparent);
     pointer-events: none; z-index: 30;
   }
 
@@ -1419,13 +1439,13 @@ function renderRichBlocks(text, images, onResize, onCheck) {
         // keyed by the run's own markers, so a pinch survives the re-render that follows
         // ticking a checkbox elsewhere in the entry
         const key = run.join("|");
-        const scrollable = run.length > 2; // exactly 2 fill the width edge-to-edge — nothing to scroll to
-        const gal = el("div", { class: "rt-gallery"
-          + (scrollable ? " scrollable" : "") + (stackedRuns.has(key) ? " stacked" : "") });
+        const gal = el("div", { class: "rt-gallery" + (stackedRuns.has(key) ? " stacked" : "") });
         for (const r of run) gal.appendChild(renderRich(r, images, onResize));
         attachGalleryPinch(gal, key);
-        if (scrollable) attachGalleryFade(gal);
-        frag.appendChild(gal);
+        // the fades hang off a wrapper so they don't scroll away with the images
+        const galWrap = el("div", { class: "rt-gal-wrap" }, gal);
+        attachGalleryFade(galWrap, gal);
+        frag.appendChild(galWrap);
         continue;
       }
       frag.appendChild(el("div", { class: "rt-line" }, renderRich(run[0], images, onResize)));
@@ -1485,27 +1505,49 @@ function attachGalleryPinch(gal, key) {
     const ratio = dist(ev.touches) / start;
     if (ratio < 0.82) { gal.classList.add("stacked"); stackedRuns.add(key); start = null; }
     else if (ratio > 1.22) { gal.classList.remove("stacked"); stackedRuns.delete(key); start = null; }
+    if (start === null) gal.dispatchEvent(new Event("galchange")); // let the edge fades re-measure
   }, { passive: false });
   gal.addEventListener("touchend", () => { start = null; }, { passive: true });
 }
 
-// the right-edge fade (CSS, .scrollable::after) hides once she's scrolled to the end, so it
-// never implies more photos than there are. also flags the gallery as "mid-drag" for a beat
-// so a fast flick's tail can't register as the tap that opens the size rail — belt-and-braces
-// alongside the browser's own native click-cancel-on-scroll behaviour.
-function attachGalleryFade(gal) {
-  const updateEnd = () => {
-    const atEnd = gal.scrollLeft + gal.clientWidth >= gal.scrollWidth - 2;
-    gal.classList.toggle("at-end", atEnd);
+// each end gets a fade, shown only when there's actually content hidden that way — so they
+// answer "is there more?" honestly at both edges. overflow is measured, not inferred from the
+// photo count: two images normally fill the row exactly, but not once one of them is portrait
+// enough to widen it, and a stale one-shot measurement was why the cue came and went.
+// also flags the gallery as "mid-drag" for a beat so a fast flick's tail can't register as
+// the tap that opens the size rail — belt-and-braces alongside the browser's own
+// click-cancel-on-scroll behaviour.
+function attachGalleryFade(wrap, gal) {
+  const sync = () => {
+    if (gal.classList.contains("stacked")) { // a fanned deck doesn't scroll — no edges to hint at
+      wrap.classList.remove("show-left", "show-right");
+      return;
+    }
+    const max = gal.scrollWidth - gal.clientWidth;
+    wrap.classList.toggle("show-left", gal.scrollLeft > 2);
+    wrap.classList.toggle("show-right", max > 2 && gal.scrollLeft < max - 2);
   };
   let dragTimer = null;
   gal.addEventListener("scroll", () => {
-    updateEnd();
+    sync();
     gal.dataset.scrolling = "1";
     clearTimeout(dragTimer);
     dragTimer = setTimeout(() => { delete gal.dataset.scrolling; }, 150);
   }, { passive: true });
-  requestAnimationFrame(updateEnd); // images size via aspect-ratio before they decode, so this is already accurate
+  // images settle their width after decode, and pinching re-lays the whole row out — one
+  // measurement at render time is not enough to stay correct through either.
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(sync);
+    ro.observe(gal);
+    for (const img of gal.querySelectorAll("img")) ro.observe(img);
+  }
+  for (const img of gal.querySelectorAll("img")) {
+    if (!img.complete) img.addEventListener("load", sync, { once: true });
+  }
+  gal.addEventListener("transitionend", sync); // the pinch/spread relayout
+  gal.addEventListener("galchange", sync);     // ...and the moment the pinch commits
+  sync();
+  requestAnimationFrame(sync);
 }
 
 // tap a rendered image to open the full-screen preview (and its size rail). this was a
