@@ -587,8 +587,10 @@
   .bottom-frost {
     position: fixed; left: 0; right: 0; bottom: 0;
     height: calc(env(safe-area-inset-bottom) + 162px);
-    background: linear-gradient(to top, rgba(255,255,255,0.82) 26%, rgba(255,255,255,0.42) 62%, rgba(255,255,255,0));
-    -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%);
+    /* less blur, more white: at a 22px radius text behind it went hazy enough to look broken.
+       the white is what should do the hiding; the blur just softens the edge of it. */
+    background: linear-gradient(to top, rgba(255,255,255,0.94) 26%, rgba(255,255,255,0.6) 62%, rgba(255,255,255,0));
+    -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%);
     /* the mask fades the BLUR out with the white; without it the blur stops on a hard line */
     -webkit-mask-image: linear-gradient(to top, black 55%, transparent);
     mask-image: linear-gradient(to top, black 55%, transparent);
