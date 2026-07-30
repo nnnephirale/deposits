@@ -68,6 +68,17 @@ otherwise the settings list (Day view toggle, Export markdown, Settings).
 **Layouts:** only two. The default topic grouping, and a "Day view" toggle. `mix` and
 `dense` were experiments and are gone; "nothing selected" is a real, reachable state.
 
+**Reading order** (`oldestFirst`, persisted, default false = newest first). Topic groups have
+always floated the latest-touched to the top; from 30 Jul the entries *inside* them read the
+same way. Flipping to oldest-first replays the week as it ran. The control lives in the `⋮`
+menu on mobile and directly above Day view in the desktop icon rail.
+
+Two sentinel traps when reversing, both of which float "anytime" to the top if missed:
+`dayAsc` returns **99** for a day-less entry so it sorts last ascending, while `daySortKey`
+returns **−1** so it sorts last *descending* — each direction needs its own comparator, not a
+negated one. Same for weeks: descending uses `weekSortKey` (−1), ascending needs `weekAsc`
+(999), or month-scoped entries jump to the top of month view.
+
 ### The day says itself once (30 Jul 2026)
 
 A run of entries on the same day used to stamp the same badge on every one of them. Now the
@@ -238,14 +249,11 @@ it: widening in the grid would re-wrap every line of every entry as the pointer 
 Each row is sized to the *expanded* width and clipped, so the label never re-wraps mid
 transition. `:focus-visible` opens it too, so tabbing works.
 
-**Haptics** (`haptic(kind)`) use the `web-haptics` vocabulary — selection / light / medium /
-heavy / success / warning / error — inlined rather than installed, since this app has no
-build step. They supplement and never replace: every call site already has its own visual
-change. Reserved for meaningful moments (save, day/date pick, format press, tag toggle,
-checklist, gallery deck commit, destructive confirm), never on every tap. `navigator.vibrate`
-is Android-only; on iOS the fallback clicks a hidden `<input type="checkbox" switch>`, which
-fires the system switch haptic on 17.4+ — one fixed tap, so the vocabulary collapses to
-"something happened", and it's an unpromised side effect that could stop working.
+**Haptics were tried and removed** (30 Jul 2026). The `web-haptics` vocabulary was inlined
+against `navigator.vibrate`, with a hidden `<input type="checkbox" switch>` fallback for
+iOS. It didn't land on her phone, so all of it is gone — don't re-add it without a device
+that can actually be felt to test on. `navigator.vibrate` is Android-only; the switch trick
+needs iOS 17.4+ and only ever produces one fixed tap.
 
 **Week and Month share one frame box** (`x3 y4.5 18×16 r3`) — week draws the columns, month
 adds the rows. Drawing them at different heights made one look like the lesser control.

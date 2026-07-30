@@ -1515,63 +1515,6 @@
 <script>
 "use strict";
 
-// ---------- haptics ----------
-// The web-haptics package's vocabulary, inlined — this app is one file with no build step,
-// so an npm dependency isn't available to it. Same trigger names, same Vibration API
-// underneath, so swapping in the real package later is a find-and-replace.
-//
-// PLATFORM: navigator.vibrate is Android-only. iOS Safari has never shipped it, so on an
-// iPhone (including the home-screen app) every one of these is a silent no-op. That's the
-// documented behaviour of the library too, and it's why rule 1 below is not optional.
-//
-// Apple HIG rules this follows: haptics SUPPLEMENT, never replace — every call site here
-// already has its own visual change, and the UI is complete without any of them. Intensity
-// matches significance, and they're reserved for moments that mean something rather than
-// fired on every tap.
-const HAPTICS = {
-  selection: [8],                      // discrete tick: a picker cell, a day, a date
-  light:     [11],                     // a small toggle
-  medium:    [20],                     // a press that commits, something landing
-  heavy:     [34],
-  success:   [16, 55, 26],             // two beats, rising
-  warning:   [26, 70, 26],
-  error:     [30, 55, 30, 55, 30]      // three, insistent
-};
-let hapticsOK = null;
-
-// iOS fallback. Safari has no Vibration API, but since iOS 17.4 a <input type="checkbox"
-// switch> fires the system's own switch haptic when toggled — so clicking a hidden one
-// inside a user gesture buys a real tap on a phone that has nothing else. Two limits worth
-// knowing: it is ONE fixed tap, so the whole vocabulary collapses to "something happened",
-// and it is a side effect Apple never promised, so it can stop working. It's a floor.
-let hapticSwitch = null;
-function iosHapticTap() {
-  if (!hapticSwitch) {
-    const input = el("input", { type: "checkbox", id: "haptic-switch", tabindex: "-1", "aria-hidden": "true" });
-    input.setAttribute("switch", "");           // the attribute is what makes it a switch
-    const label = el("label", { for: "haptic-switch", "aria-hidden": "true" });
-    // clipped, not display:none — a switch that isn't rendered doesn't fire anything
-    const wrap = el("div", { "aria-hidden": "true", style: {
-      position: "fixed", bottom: "0", left: "0", width: "1px", height: "1px",
-      overflow: "hidden", opacity: "0", pointerEvents: "none", zIndex: "-1"
-    } }, input, label);
-    document.body.appendChild(wrap);
-    hapticSwitch = label;
-  }
-  hapticSwitch.click();
-}
-
-function haptic(kind) {
-  if (hapticsOK === null) hapticsOK = typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
-  // a pattern queued as the page goes away outlives the visual it belonged to — a stray buzz
-  if (document.hidden) return;
-  if (hapticsOK) {
-    try { navigator.vibrate(HAPTICS[kind] || HAPTICS.medium); return; } catch (e) { hapticsOK = false; }
-  }
-  // only worth building the switch on a touch device; on desktop there's nothing to feel
-  if (navigator.maxTouchPoints > 0) { try { iosHapticTap(); } catch (e) {} }
-}
-
 // ---------- taxonomy ----------
 const TOPICS = [
   { id: "work", label: "work", bg: "#E3EDFB", fg: "#2B5FA8", dot: "#4A82D0" },
@@ -1954,7 +1897,7 @@ function renderRichBlocks(text, images, onResize, onCheck) {
       if (onCheck) {
         const idx = li; // captured per row so the right line toggles
         box.classList.add("live");
-        box.addEventListener("click", ev => { ev.stopPropagation(); haptic("light"); onCheck(idx, !on); });
+        box.addEventListener("click", ev => { ev.stopPropagation(); onCheck(idx, !on); });
       }
       row.appendChild(box);
       const body = el("span", { class: "rt-body" });
@@ -2002,9 +1945,8 @@ function attachGalleryPinch(gal, key) {
     ev.stopPropagation();
     ev.preventDefault(); // no page zoom while shaping the deck
     const ratio = dist(ev.touches) / start;
-    // the deck snapping shut / fanning open is a physical landing — medium, once per commit
-    if (ratio < 0.82) { gal.classList.add("stacked"); stackedRuns.add(key); start = null; haptic("medium"); }
-    else if (ratio > 1.22) { gal.classList.remove("stacked"); stackedRuns.delete(key); start = null; haptic("medium"); }
+    if (ratio < 0.82) { gal.classList.add("stacked"); stackedRuns.add(key); start = null; }
+    else if (ratio > 1.22) { gal.classList.remove("stacked"); stackedRuns.delete(key); start = null; }
     if (start === null) gal.dispatchEvent(new Event("galchange")); // let the edge fades re-measure
   }, { passive: false });
   gal.addEventListener("touchend", () => { start = null; }, { passive: true });
@@ -2555,12 +2497,13 @@ async function segmentRamble(text) {
 // ---------- grouping + markdown ----------
 function activeEntries() {
   if (view === "week") {
-    return entries
-      .filter(e => !e.segmented && e.year === wk.year && e.week === wk.week)
-      // chronological through the week (Mon at the top), so the day badges thread downward
-      // the way the week actually ran. dayAsc sends no-day entries to the end instead of the
-      // front — daySortKey's -1 sentinel only sorts last when the order is descending.
-      .sort((a, b) => (dayAsc(a) - dayAsc(b)) || a.createdAt.localeCompare(b.createdAt));
+    const list = entries.filter(e => !e.segmented && e.year === wk.year && e.week === wk.week);
+    // NOTE the two different day comparators. Ascending uses dayAsc, whose 99 sentinel sends
+    // no-day entries to the END; descending uses daySortKey, whose -1 sentinel does the same
+    // once the order is flipped. Swapping one for the other floats "anytime" to the top.
+    return oldestFirst
+      ? list.sort((a, b) => (dayAsc(a) - dayAsc(b)) || a.createdAt.localeCompare(b.createdAt))
+      : list.sort((a, b) => (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
   }
   return entriesForMonth(mo.year, mo.month);
 }
@@ -2574,8 +2517,13 @@ function entriesForMonth(year, month) {
       thu.setUTCDate(mon.getUTCDate() + 3); // week belongs to the month its Thursday is in
       return thu.getUTCFullYear() === year && thu.getUTCMonth() === month;
     })
-    .sort((a, b) => (weekSortKey(b) - weekSortKey(a)) || (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
+    .sort(oldestFirst
+      ? (a, b) => (weekAsc(a) - weekAsc(b)) || (dayAsc(a) - dayAsc(b)) || a.createdAt.localeCompare(b.createdAt)
+      : (a, b) => (weekSortKey(b) - weekSortKey(a)) || (daySortKey(b) - daySortKey(a)) || b.createdAt.localeCompare(a.createdAt));
 }
+// week-less (month-scoped) entries belong at the END in either direction, so ascending needs
+// a HIGH sentinel where descending's weekSortKey uses -1. Reusing -1 here floats them to the top.
+function weekAsc(e) { return e.week == null ? 999 : e.week; }
 function weekSortKey(e) { return e.week == null ? -1 : e.week; } // month-scoped entries land last, like no-day ones
 function groupByTopic(list) {
   const groups = {};
@@ -2638,6 +2586,18 @@ function el(tag, attrs, ...children) {
 const LAYOUT_OPTIONS = ["day"];
 let layout = "topic";
 
+// Reading order WITHIN a group. Default newest first — the thing you just wrote is the thing
+// you want to see, and it matches the way the topic groups themselves are ordered
+// (latest-touched at the top). Flipping to oldest-first replays the week as it actually ran.
+const ORDER_KEY = "weekly-deposits-oldest-first";
+let oldestFirst = false;
+try { oldestFirst = localStorage.getItem(ORDER_KEY) === "1"; } catch (e) {}
+function setOldestFirst(v) {
+  oldestFirst = !!v;
+  try { localStorage.setItem(ORDER_KEY, oldestFirst ? "1" : "0"); } catch (e) {}
+  render();
+}
+
 // topic group display order: latest-updated first
 function orderGroupsForDisplay(groups) {
   const stamp = g => Math.max(...g.entries.map(entryStamp));
@@ -2646,7 +2606,6 @@ function orderGroupsForDisplay(groups) {
 
 // ---------- confirm dialog ----------
 function confirmAction(message, okLabel, onConfirm) {
-  haptic("warning"); // something irreversible is being proposed — cautionary, not an error
   const ov = el("div", { class: "confirm-overlay", onclick: () => ov.remove() });
   ov.appendChild(el("div", { class: "confirm-box", onclick: e => e.stopPropagation() },
     el("p", null, message),
@@ -2843,7 +2802,10 @@ function renderTopicGroups(list, dense) {
 function renderDayGroups(list) {
   const buckets = [];
   if (view === "week") {
-    for (let d = DAY_TOKENS.length - 1; d >= 0; d--) {
+    // the buckets follow the same direction as the entries inside them
+    const days = DAY_TOKENS.map((_, i) => i);
+    if (!oldestFirst) days.reverse();
+    for (const d of days) {
       buckets.push({ label: DAY_TOKENS[d], entries: list.filter(e => entryDay(e) === d), opts: { showDay: false, sidePill: true } });
     }
     buckets.push({ label: "anytime", entries: list.filter(e => entryDay(e) == null), opts: { showDay: false, sidePill: true } });
@@ -2930,6 +2892,10 @@ function railRow(cls, onPick, ...kids) {
 const ICO_WEEK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M9 4.5v16M15 4.5v16"/></svg>';
 const ICO_MONTH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.6h18M9 9.6v10.9M15 9.6v10.9M3 15h18"/></svg>';
 const ICO_DAY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 6.5h2.6M4 12h2.6M4 17.5h2.6"/><path d="M10.5 6.5h9.5M10.5 12h6.5M10.5 17.5h9.5"/></svg>';
+// bars shortening downward with an arrow to match: the list runs newest → oldest, and the
+// mirrored pair runs the other way. Same frame, so the two read as one control flipping.
+const ICO_NEWEST = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h9M4 12h6.5M4 17.5h4"/><path d="M18 5.5v13"/><path d="M15.2 15.6 18 18.5l2.8-2.9"/></svg>';
+const ICO_OLDEST = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h4M4 12h6.5M4 17.5h9"/><path d="M18 18.5v-13"/><path d="M15.2 8.4 18 5.5l2.8 2.9"/></svg>';
 const ICO_EXPORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5V4"/><path d="M7.8 8.2 12 4l4.2 4.2"/><path d="M5 14v4.6A1.4 1.4 0 0 0 6.4 20h11.2a1.4 1.4 0 0 0 1.4-1.4V14"/></svg>';
 const ICO_SETTINGS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 7.5h8.2M17.2 7.5H20M4 16.5h2.8M11.8 16.5H20"/><circle cx="14.7" cy="7.5" r="2.4"/><circle cx="9.3" cy="16.5" r="2.4"/></svg>';
 
@@ -2959,6 +2925,10 @@ function renderIconRail() {
 
   bar.appendChild(el("div", { class: "ico-div" }));
 
+  // the arrow points the way the list reads: down = newest at the top, up = oldest at the top
+  bar.appendChild(icoRow(oldestFirst ? "Oldest first" : "Newest first",
+    oldestFirst ? ICO_OLDEST : ICO_NEWEST, oldestFirst,
+    () => setOldestFirst(!oldestFirst)));
   bar.appendChild(icoRow("Day view", ICO_DAY, layout === "day",
     () => { layout = layout === "day" ? "topic" : "day"; render(); }));
   bar.appendChild(icoRow("Export markdown", ICO_EXPORT, false, () => doExport()));
@@ -3308,7 +3278,6 @@ function openComposer(existing) {
         s.addEventListener("pointerdown", ev => {
           ev.preventDefault();
           ev.stopPropagation();
-          haptic("selection"); // a discrete tick, like a picker detent
           commitDay(i);
         });
         s.addEventListener("click", ev => ev.stopPropagation()); // late click on a replaced sheet must not bubble anywhere
@@ -3420,7 +3389,7 @@ function openComposer(existing) {
         const current = iso.year === cw.year && iso.week === cw.week;
         const row = el("div", { class: "cal-row wk-row" + (current ? " current" : "") });
         const wkCell = el("span", { class: "cal-wk" }, "W" + pad2(iso.week));
-        wkCell.addEventListener("pointerdown", () => { haptic("selection"); pickWeek(iso, null); }); // week only — day stays
+        wkCell.addEventListener("pointerdown", () => pickWeek(iso, null)); // week only — day stays
         row.appendChild(wkCell);
         days.forEach((d, i) => {
           const cls = [
@@ -3429,7 +3398,7 @@ function openComposer(existing) {
             current && i === day ? "cal-sel" : ""
           ].filter(Boolean).join(" ");
           const cell = el("span", cls ? { class: cls } : null, String(d.getUTCDate()));
-          cell.addEventListener("pointerdown", () => { haptic("selection"); pickWeek(iso, i); }); // a date sets week + day together
+          cell.addEventListener("pointerdown", () => pickWeek(iso, i)); // a date sets week + day together
           row.appendChild(cell);
         });
         calPop.appendChild(row);
@@ -3507,9 +3476,7 @@ function openComposer(existing) {
       class: "save",
       onclick: () => {
         if (!text.trim()) return;
-        const run = (segState && segState.ranges) ? doSaveSegments : doSave;
-        // fires as the sheet closes, not on the tap — and after the confirm, if there is one
-        const save = () => { haptic("success"); run(); };
+        const save = (segState && segState.ranges) ? doSaveSegments : doSave;
         // moving an existing entry to a different week is easy to do by accident — confirm it
         if (existing && (cw.year !== existing.year || cw.week !== existing.week)) {
           const from = "W" + pad2(existing.week) + (existing.year !== cw.year ? " " + existing.year : "");
@@ -3791,7 +3758,6 @@ function openComposer(existing) {
       b.addEventListener("pointerdown", ev => {
         if (ev.button !== 0) return; // left/primary press only — a right-click isn't a format op
         ev.preventDefault();
-        haptic("light"); // fires with the button's own press-invert, not before it
         run();
       });
       return b;
@@ -4127,7 +4093,6 @@ function openComposer(existing) {
   }
 
   function toggleTag(id) {
-    haptic("light"); // a small toggle
     tags = tags.includes(id) ? tags.filter(t => t !== id) : [...tags, id];
   }
 
@@ -5262,6 +5227,10 @@ function openMenu() {
     body.appendChild(row("Day view", layout === "day" ? "on" : "off", () => {
       layout = layout === "day" ? "topic" : "day";
       render();
+      renderSettings();
+    }));
+    body.appendChild(row("Oldest first", oldestFirst ? "on" : "off", () => {
+      setOldestFirst(!oldestFirst);
       renderSettings();
     }));
     body.appendChild(row("Export markdown", null, () => { close(); doExport(); }));
