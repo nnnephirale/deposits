@@ -4,8 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
+<!-- NOT black-translucent, deliberately. That is the only value that lets the page paint
+     under the status bar, but it also forces the clock and battery to WHITE — invisible on
+     a near-white list. `default` keeps them dark and gives iOS a strip it fills with
+     theme-color, so the way to lose the grey band is to keep theme-color matching whatever
+     is actually on screen. setThemeColor() does that, and the wrapped drives it. -->
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta name="theme-color" content="#F2F2F7" />
+<meta name="theme-color" content="#F0F0F1" />
 <title>deposits</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1118,13 +1123,35 @@
   .recap-dashes span.on { background: rgba(28,28,30,0.5); }
   .recap-x { background: none; border: none; padding: 0 6px; font-size: 22px; font-weight: 300; line-height: 1; color: var(--subtle); }
 
+  /* The stage scrolls when a card is taller than the screen. A long AI summary used to
+     overflow both edges with no way to reach either end — the reading was simply cut off.
+
+     Vertical centring is done with `margin: auto` on the CARD, not `align-items: center` on
+     the stage. That is the whole trick: in a scrolling flex container, `align-items: center`
+     centres an oversized item too, which pushes its top out through the container's start
+     edge where scrolling can never reach it. Auto margins resolve to 0 once the item is
+     bigger than the box, so a short card sits centred and a long one starts at the top and
+     scrolls — which is exactly the behaviour wanted, from one declaration. */
   .recap-stage {
     position: absolute; inset: 0; z-index: 1;
-    display: flex; align-items: center; justify-content: center;
+    display: flex; justify-content: center;
+    overflow-y: auto; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     padding: 84px 30px calc(env(safe-area-inset-bottom) + 84px);
     cursor: pointer;
   }
-  .recap-card { max-width: 460px; width: 100%; }
+  .recap-stage { scrollbar-width: none; }
+  .recap-stage::-webkit-scrollbar { width: 0; height: 0; }
+  .recap-card { max-width: 460px; width: 100%; margin: auto 0; }
+  /* text that scrolls up has to pass UNDER the label/dashes/×, not through them */
+  .recap-top::after {
+    content: ""; position: absolute; inset: 0 0 auto; height: calc(env(safe-area-inset-top) + 54px);
+    background: linear-gradient(to bottom, var(--canvas-a), var(--canvas-0));
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent);
+    mask-image: linear-gradient(to bottom, black 55%, transparent);
+    pointer-events: none; z-index: -1;
+  }
   .recap-head {
     font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
     font-size: 32px; line-height: 1.22; color: var(--ink); margin: 0;
@@ -4800,6 +4827,22 @@ function monthRecapBlock(list) {
   return null;
 }
 
+// A reveal's body type steps down with its length, so a rambling summary still lands on one
+// screen instead of running off both edges. Keyed off the available height as well as the
+// character count — the same 900-character summary is a wall on a phone and comfortable in a
+// desktop window. Bounded at both ends: never bigger than the 27px the short ones were tuned
+// at, never below 15px, where the serif stops being a voice and starts being fine print.
+function revealTextSize(text) {
+  const chars = (text || "").length;
+  if (!chars) return "27px";
+  const w = Math.min(460, window.innerWidth - 60);      // .recap-card's real measure
+  const room = Math.max(360, window.innerHeight - 190); // the stage minus its own padding
+  // this serif averages ~0.5em a character and .recap-head sets 1.22 line-height, so
+  //   height ≈ (chars · 0.5f / w) · 1.22f   →   f = √(w · room / (0.61 · chars))
+  const fit = Math.sqrt((w * room) / (0.61 * chars));
+  return Math.round(Math.max(15, Math.min(27, fit))) + "px";
+}
+
 // ---------- the story deck ----------
 // the chrome both reveals share: blobs/veil/grain, the dash progress row with its label and
 // close ×, the stage, and the stories tap grammar (left 22% steps back, anywhere else
@@ -4843,7 +4886,15 @@ function storyDeck(opts) {
     stage.appendChild(card);
   }
 
+  // now that the stage scrolls, a swipe to read a long card must not also turn the page.
+  // Same 4px rule the photo row already uses: past that it was a drag, not a tap.
+  let tapX = 0, tapY = 0, tapDrag = false;
+  stage.addEventListener("pointerdown", ev => { tapX = ev.clientX; tapY = ev.clientY; tapDrag = false; });
+  stage.addEventListener("pointermove", ev => {
+    if (Math.abs(ev.clientY - tapY) > 4 || Math.abs(ev.clientX - tapX) > 4) tapDrag = true;
+  });
   stage.addEventListener("click", ev => {
+    if (tapDrag) { tapDrag = false; return; }
     if (opts.tapGuard && opts.tapGuard()) return;
     const r = stage.getBoundingClientRect();
     if (ev.clientX - r.left < r.width * 0.22) { if (idx > 0) show(idx - 1); }
@@ -5166,7 +5217,12 @@ function openWeekReveal(year, week, list, take) {
       c.appendChild(chips);
 
     } else if (kind === "summary") {
-      c.appendChild(el("p", { class: "recap-head", style: { fontSize: "27px" } }, sentenceCase(rec.text)));
+      // 27px was tuned against a 2-3 sentence summary. A long one at that size overflowed
+      // the screen in both directions; the stage scrolls now, but a reading you have to
+      // scroll through isn't a reading. Step the size down so most summaries still land
+      // whole, and let scrolling be the safety net rather than the reading experience.
+      c.appendChild(el("p", { class: "recap-head", style: { fontSize: revealTextSize(rec.text) } },
+        sentenceCase(rec.text)));
       // the one and only crescendo — a beat after the words settle, the world brightens
       timer = setTimeout(() => {
         if (!c.isConnected) return;
@@ -5736,12 +5792,37 @@ function wrappedActionFor(list) {
   return null;
 }
 
+// ---- the status bar ------------------------------------------------------
+// Installed to the home screen, iOS paints the strip above the page with theme-color. Left
+// at the app's grey it reads as a foreign band across the top of a screen full of colour.
+// It can't be made transparent without also turning the clock white (see the meta comment),
+// so instead it is kept matching: set on arrival, restored on the way out.
+const THEME_BASE = "#F0F0F1";
+const themeMeta = document.querySelector('meta[name="theme-color"]');
+function setThemeColor(hex) { if (themeMeta) themeMeta.setAttribute("content", hex); }
+// what the top of the bloom actually resolves to: the field nearest the top of the screen,
+// alpha-composited over the wash the same way the CSS does it. Approximated rather than
+// sampled — reading a real pixel would mean a canvas snapshot of a blurred, animating layer.
+function heatTopColor() {
+  if (!heatFields.length) return THEME_BASE;
+  // whichever field ended up highest on screen is the one under the status bar
+  const hex = heatFields.reduce((a, b) => (b.y < a.y ? b : a)).c;
+  const n = parseInt(hex.slice(1), 16);
+  const mix = (c, i) => Math.round(c * i + 252 * (1 - i)); // 252 = the #FCFCFB wash
+  // the top of the screen catches a field's outer falloff, not its core, so it lands light
+  const a = 0.34;
+  return "#" + [mix((n >> 16) & 255, a), mix((n >> 8) & 255, a), mix(n & 255, a)]
+    .map(v => v.toString(16).padStart(2, "0")).join("");
+}
+
 // ---- the bloom ----------------------------------------------------------
 // Fields are rebuilt per open because they're made of THIS period's topics: which ones,
 // and how much of each. A month of nothing but work is one big blue field; a scattered
 // month is six small ones. That's the "heat" — it's her data, not decoration.
+let heatFields = [];   // {c, y} per field — y in vh from centre, for heatTopColor()
 function buildHeatFields(list) {
   heatEl.querySelectorAll(".heat-field").forEach(n => n.remove());
+  heatFields = [];
   const tally = {};
   list.forEach(e => (e.tags || []).forEach(t => { if (topicById[t]) tally[t] = (tally[t] || 0) + 1; }));
   let ranked = Object.entries(tally).sort((a, b) => b[1] - a[1]).slice(0, 6);
@@ -5765,8 +5846,10 @@ function buildHeatFields(list) {
     // screen are just one colour, and the point is to SEE that this month was mostly work
     const reach = 0.28 + 0.055 * i;
     const share = n / top;                        // 1 for her biggest topic
+    const colour = NEUTRAL[id] || topicById[id].heat;
+    heatFields.push({ c: colour, y: Math.sin(ang) * reach });
     const f = el("div", { class: "heat-field" });
-    f.style.setProperty("--c", NEUTRAL[id] || topicById[id].heat);
+    f.style.setProperty("--c", colour);
     f.style.setProperty("--ox", ox);
     f.style.setProperty("--oy", oy);
     f.style.setProperty("--x", `calc(50vw + ${(Math.cos(ang) * reach * 100).toFixed(1)}vw)`);
@@ -5826,6 +5909,7 @@ function heatClose() {
   clearTimeout(heatFallback);
   heatEl.classList.remove("live");
   setHeatP(0);
+  setThemeColor(THEME_BASE);
 }
 
 // once a node leaves the document, do something. Used for both handoffs below, so neither
@@ -5850,7 +5934,14 @@ function onGone(node, then) {
 // never gets .on-heat, so it keeps its own stock blobs. No regression there.)
 function heatCommit(action) {
   heatTo(1, Math.max(160, (1 - heatP) * 420), () => {
-    if (action.kind === "open") { action.run(); heatHandOff(); return; }
+    // only once it's full — theme-color is a whole-OS repaint, not something to drive per frame
+    setThemeColor(heatTopColor());
+    // an exception in run() must not leave the screen bloomed with no deck and no way back:
+    // the handoff is what retreats the bloom when nothing opens, so it has to run regardless
+    if (action.kind === "open") {
+      try { action.run(); } finally { heatHandOff(); }
+      return;
+    }
     // nothing written yet: the offer arrives ON the bloom, and backing out takes it away
     confirmAction(action.ask, action.ok, () => { action.run(); heatHandOff(); });
     const box = document.querySelector(".confirm-overlay");

@@ -166,6 +166,26 @@ the very top of the range `--sheet-h` can read 882px while the sheet renders 832
 round-trips to the same *visual* height, so the memory is stable — but the two numbers are not
 the same number.
 
+**`align-items: center` clips an oversized child out of reach in a scrolling container**
+(30 Jul 2026). A long AI summary overflowed the reveal off both edges with no way to scroll
+to either end. Adding `overflow-y: auto` alone does *not* fix it: centring is applied to the
+oversized item too, so its top is pushed out through the container's start edge, which
+scrolling can never reach — `scrollTop: 0` still shows the middle. The fix is to centre with
+`margin: auto` on the CHILD instead. Auto margins resolve to 0 once the item is bigger than
+the box, so a short card sits centred and a long one starts at the top and scrolls. One
+declaration covers both. *Verified* at 2296 characters: `scrollTop 0` puts the first line at
+y=98 (clear of the top bar) and the bottom is reachable at the other end.
+
+**A stage that scrolls can no longer treat every click as a page turn.** The story deck
+advances on tap; once it scrolled, a swipe to read also turned the page. Same 4px rule the
+photo row uses — track `pointerdown`/`pointermove` and swallow the click if it moved.
+
+**Fit the type to the text, then let scrolling be the safety net.** The reveal's 27px serif
+was tuned against a 2–3 sentence summary; the model writes 900 too. `revealTextSize()` solves
+`f = √(w · room / (0.61 · chars))` from the measure and the viewport height (0.61 = ~0.5em
+per character × the 1.22 line-height), clamped to 15–27px. An 887-character summary lands
+whole at 19px on a phone. A reading you have to scroll through isn't a reading.
+
 **`pointercancel` is not a quiet `pointerup` — never share a commit path between them**
 (30 Jul 2026). The wrapped chevron's scrub routed both through one `endPull`, so a gesture the
 *system* took away past the commit threshold opened the wrapped on its own. `pointercancel`
@@ -271,6 +291,18 @@ single frame. Now the deck opened *from the chevron* gets `.on-heat` — transpa
 its own stock blobs off — and the bloom stays for the deck's whole life, retreating only when
 she closes it. A deck opened any other way (the auto-reveal when a summary lands) never gets
 that class and keeps its stock background.
+
+**The status bar is not a Safari limitation, but it is a trap.** Installed to the home screen,
+`apple-mobile-web-app-status-bar-style` has exactly one value that lets the page paint under
+the clock — `black-translucent` — and it also forces the clock and battery to **white**, which
+is invisible on this app's near-white list. So it stays `default`, iOS keeps the glyphs dark
+and fills the strip with `theme-color`, and the way to stop that strip reading as a foreign
+grey band is to keep `theme-color` matching what's on screen. `setThemeColor()` does that and
+the wrapped drives it: set once when the bloom reaches full (a whole-OS repaint is not
+something to drive per frame), restored in `heatClose`. The colour is derived from whichever
+field ended up highest on screen, composited over the wash at ~0.34 — approximated rather than
+sampled, because reading a real pixel would mean a canvas snapshot of a blurred animating layer.
+`viewport-fit=cover` was already set, so nothing else had to move.
 
 **The composer unfold.** The sheet is `clip-path`-ed to the compose bar's *measured*
 rectangle — same grey, same 18px rounding — then released, so the box physically opens
