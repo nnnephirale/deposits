@@ -277,19 +277,21 @@
      backdrop-filter would end on a hard vertical seam. */
   .rt-gal-wrap { position: relative; }
   .rt-gal-wrap::before, .rt-gal-wrap::after {
-    content: ""; position: absolute; top: 0; bottom: 0; width: 38px; z-index: 2;
+    content: ""; position: absolute; top: 0; bottom: 0; width: 46px; z-index: 2;
     pointer-events: none; opacity: 0; transition: opacity 0.22s ease;
-    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    /* frosted rather than painted out: the photo stays legible through it, just softened.
+       saturate keeps the colour alive the way iOS materials do instead of going chalky. */
+    -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%);
   }
   .rt-gal-wrap::before {
     left: 0;
-    background: linear-gradient(to left, rgba(255,255,255,0), var(--card));
+    background: linear-gradient(to left, rgba(255,255,255,0), rgba(255,255,255,0.5));
     -webkit-mask-image: linear-gradient(to left, transparent, black);
     mask-image: linear-gradient(to left, transparent, black);
   }
   .rt-gal-wrap::after {
     right: 0;
-    background: linear-gradient(to right, rgba(255,255,255,0), var(--card));
+    background: linear-gradient(to right, rgba(255,255,255,0), rgba(255,255,255,0.5));
     -webkit-mask-image: linear-gradient(to right, transparent, black);
     mask-image: linear-gradient(to right, transparent, black);
   }
@@ -585,8 +587,8 @@
   .bottom-frost {
     position: fixed; left: 0; right: 0; bottom: 0;
     height: calc(env(safe-area-inset-bottom) + 162px);
-    background: linear-gradient(to top, #fff 34%, rgba(255,255,255,0.86) 62%, rgba(255,255,255,0));
-    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    background: linear-gradient(to top, rgba(255,255,255,0.82) 26%, rgba(255,255,255,0.42) 62%, rgba(255,255,255,0));
+    -webkit-backdrop-filter: blur(22px) saturate(180%); backdrop-filter: blur(22px) saturate(180%);
     /* the mask fades the BLUR out with the white; without it the blur stops on a hard line */
     -webkit-mask-image: linear-gradient(to top, black 55%, transparent);
     mask-image: linear-gradient(to top, black 55%, transparent);
@@ -614,6 +616,20 @@
   .compose-bar.copied { background: #2E7D3A; color: #fff; }
   .compose-hint { display: flex; align-items: center; min-width: 0; }
   .compose-hint svg { width: 18px; height: 18px; }
+  /* a slow light sweeps across the placeholder — the bar reads as waiting for her rather
+     than as a dead label. only on the plain hint: the export/copied states put an svg in
+     here, and background-clip:text needs color:transparent, which would erase it. */
+  .compose-hint.shimmer {
+    background: linear-gradient(100deg, #A6A6AB 34%, #E4E4E8 50%, #A6A6AB 66%);
+    background-size: 300% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    animation: hintShimmer 3.6s linear infinite;
+  }
+  @keyframes hintShimmer { from { background-position: 150% 0; } to { background-position: -150% 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .compose-hint.shimmer { animation: none; background: none; color: #9A9A9F; }
+  }
   /* the bar's trailing controls: + to write, and a lozenge of three dots for the menu
      (which is where search and day view now live). each its own tap target, so neither
      opens the composer by accident. */
@@ -741,16 +757,19 @@
   }
   .save:disabled { color: #C7C7CC; cursor: default; }
 
-  /* day + week pills side by side in the sheet head */
-  .head-pills { display: flex; gap: 8px; align-items: center; }
-
-  /* day pill + scrubber */
+  /* day and week read as ONE pill split by a hairline, each half the same width so the two
+     tokens sit centred in their own half rather than drifting with their label length */
+  .head-pills {
+    display: inline-flex; align-items: center;
+    background: var(--field); border-radius: 999px;
+  }
   .day-pill {
     font-family: var(--mono); font-size: 13px; font-weight: 600;
-    background: var(--field); border: none; border-radius: 999px;
-    padding: 8px 14px; color: var(--ink);
+    background: none; border: none; border-radius: 999px;
+    padding: 8px 0; min-width: 58px; text-align: center; color: var(--ink);
     touch-action: none; user-select: none; -webkit-user-select: none;
   }
+  .scope-div { flex: none; width: 1px; height: 15px; background: rgba(0,0,0,0.13); }
   .day-strip {
     position: absolute; left: 0; right: 0; top: calc(100% + 10px);
     display: flex; background: var(--field); border-radius: 14px; padding: 4px;
@@ -1073,7 +1092,7 @@
 <div class="bottom-frost"></div>
 <div class="compose-dock" id="dock">
   <div class="compose-bar" id="fab" role="button" tabindex="0" aria-label="New entry">
-    <span class="compose-hint">Start typing&#8230;</span>
+    <span class="compose-hint shimmer">Start typing&#8230;</span>
     <span class="compose-actions">
       <button class="compose-icon" id="composeAdd" aria-label="New entry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5.5v13M5.5 12h13"/></svg></button>
       <span class="compose-divider"></span>
@@ -2436,10 +2455,20 @@ function openComposer(existing) {
     const dayPill = el("button", { class: "day-pill" }, day == null ? "–" : DAY_TOKENS[day]);
     let strip = null, dragging = false, moved = false, hot = (day == null ? NO_DAY : day), startX = 0;
 
+    // day/week changes only alter the two pill labels — rebuilding the whole sheet for them
+    // tore down and re-created the field, the styling row and every chip, which is the flash.
+    // (weekPill is declared further down; this only runs after build() has finished.)
+    function refreshScopePills() {
+      dayPill.textContent = day == null ? "\u2013" : DAY_TOKENS[day];
+      hot = (day == null ? NO_DAY : day);
+      weekPill.textContent = "W" + pad2(cw.week)
+        + (cw.year !== nowWk.year ? "\u00B7" + String(cw.year).slice(2) : "");
+    }
+
     function commitDay(i) {
       day = (i === NO_DAY) ? null : i;
       closeStrip();
-      build();
+      refreshScopePills();
     }
     function openStrip() {
       if (strip) return;
@@ -2536,7 +2565,7 @@ function openComposer(existing) {
       closeCalPop(() => {
         cw = { year: iso.year, week: iso.week };
         if (dayIdx != null) day = dayIdx;
-        build();
+        refreshScopePills();
       });
     }
     function renderCalPop() {
@@ -2674,7 +2703,8 @@ function openComposer(existing) {
       monthPill.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused
       head.appendChild(el("div", { class: "head-pills" }, monthPill));
     } else {
-      head.appendChild(el("div", { class: "head-pills" }, dayPill, weekPill));
+      head.appendChild(el("div", { class: "head-pills" },
+        dayPill, el("span", { class: "scope-div" }), weekPill));
     }
     // no "New entry" label: an empty field that says "Start typing…" is already the message.
     if (segState && segState.ranges) {
@@ -4643,11 +4673,13 @@ function setFabMode(mode) {
   clearTimeout(fabRevertTimer);
   fab.classList.remove("copied");
   if (mode === "export") {
+    composeHint.classList.remove("shimmer"); // its svg would vanish under background-clip:text
     composeHint.innerHTML = EXPORT_ICON + "<span style=\"margin-left:8px\">export markdown</span>";
     fab.setAttribute("aria-label", "Export markdown");
     fabRevertTimer = setTimeout(() => setFabMode("add"), 5000); // untouched: fall back to +
   } else {
     composeHint.textContent = "Start typing\u2026";
+    composeHint.classList.add("shimmer");
     fab.setAttribute("aria-label", "New entry");
   }
 }
@@ -4658,6 +4690,7 @@ async function doExport() {
   try {
     await navigator.clipboard.writeText(md);
     fab.classList.add("copied");
+    composeHint.classList.remove("shimmer");
     composeHint.innerHTML = TICK_ICON + "<span style=\"margin-left:8px\">copied</span>";
     setTimeout(() => setFabMode("add"), 1200);
   } catch (e) {
