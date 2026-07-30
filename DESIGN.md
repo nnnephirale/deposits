@@ -66,6 +66,18 @@ week/month segmented control — the title was spending the best real estate on 
 already knows. Tap the *other* token to switch view; tap the one you're already in to open
 the picker. That puts all period navigation on plain taps.
 
+**A green dot marks the live week** (31 Jul 2026), on the date range under the stepper and
+nowhere else — `W31` reads identically whichever week you've stepped to, so the dates are the
+only thing on screen that can say "you're in this one". Green `#55A862` with a 2px white ring,
+the same mark as the rail's sync dot. It rides like a **degree point**, not on the baseline,
+and that placement is *measured*: a real `°` in this face at 13px has its ink 4.70→8.94px above
+the baseline (centre 6.82px, all but exactly the x-height), and a 5.1px dot hung from the top of
+the 15px line box lands its centre at 6.61px — 0.21px off, so no nudge is carried. Two things
+that don't work here: `vertical-align: middle` sits 1.6px low, and `align-self: baseline` on an
+empty flex item pushes it *below* the text and stretches the row to 16.8px, because an empty
+flex item has no baseline of its own and the synthesised one is its bottom edge. Use
+`align-self: flex-start`. Re-measure if `.wk-range` ever leaves 13px.
+
 **The compose bar is not a dock.** It's a resting text field. Tapping it unfolds the
 composer *out of that same rectangle* (see §4). `+` opens the composer too; `⋮` opens the
 menu, fenced off by a hairline so it doesn't read as part of the typing affordance.
@@ -232,7 +244,14 @@ so verify with sampled intermediate values, not a single `getComputedStyle`.
 **Ease with a toe for "watch it happen".** `cubic-bezier(0.16, 1, 0.3, 1)` (ease-out-expo)
 spends half its travel in the first 60ms — it reads as a pop. For anything meant to be
 *observed* growing, use an S-curve with a low first control point:
-`cubic-bezier(0.62, 0.01, 0.13, 1)`.
+`cubic-bezier(0.77, 0.006, 0.078, 1)`.
+
+**"Make the ease stronger" means moving x1 toward 1 and x2 toward 0** — not pushing y1
+negative. The composer curve was strengthened 40% on 31 Jul (`0.62, 0.01, 0.13, 1` →
+`0.77, 0.006, 0.078, 1`, each control point moved 40% of its remaining distance toward the
+extreme that deepens the S). The other reading — driving y1 below 0 — adds *anticipation*, and
+a `clip-path` box that shrinks slightly before it grows reads as a glitch rather than as ease.
+Everything in one gesture shares the curve; see §4.
 
 **`backdrop-filter` needs `mask-image`** or the blur ends on a hard vertical/horizontal seam
 that looks like a rendering bug. Mask it in the same direction as the tint gradient.
@@ -343,14 +362,60 @@ status bar would sit — then check nothing lands under it.
 **The composer unfold.** The sheet is `clip-path`-ed to the compose bar's *measured*
 rectangle — same grey, same 18px rounding — then released, so the box physically opens
 outward while the grey turns white and the content fades in behind it. 0.62s on
-`cubic-bezier(0.62, 0.01, 0.13, 1)` — the curve was right at 0.78s, the run 20% too slow, so
-every duration in the open *and* close move was scaled by 0.8 together (clip 0.62, background
-0.53, content 0.27 after 0.16, and the JS focus delay 520 → 420ms). They only read as one
-gesture while they stay in that ratio; re-time one and re-time all of them.
+`cubic-bezier(0.77, 0.006, 0.078, 1)` — the run was 20% too slow at 0.78s, so every duration in
+the open *and* close move was scaled by 0.8 together (clip 0.62, background 0.53, content 0.27
+after 0.16, and the JS focus delay 520 → 420ms), then the curve itself was deepened 40% from
+`0.62, 0.01, 0.13, 1`. **Four transitions share that curve** — the list recede, the clip, the
+grey→white, and the desktop deck — and they only read as one gesture while they stay in that
+ratio. Re-time or re-curve one and do all four.
 The list behind it recedes in the same gesture:
 `scale(0.93)` + `0.4` opacity from a top origin. That recede required *lightening* the
 backdrop to `rgba(0,0,0,.18)` / `blur(2px)` — at 0.4 opacity it was happening behind
 something too opaque to see through.
+
+**Composer speed is a setting** (31 Jul 2026): five levels in one shared Settings sheet (the
+desktop rail's Settings glyph and the mobile `⋮` → Settings both land in `openSettings`, so the
+control is built once). Implemented as ONE multiplier, `--unfold-k`, over every duration in the
+gesture — `UNFOLD_STEPS = [1.96, 1.4, 1, 0.71, 0]`, geometric at ×1.4 a notch, index 2 the
+tuned default and the middle of the scale. Multiplying rather than replacing is the point: the
+ratios between the four transitions survive any setting, which is what keeps them one move.
+Level 5 is `0` — every duration collapses to `0s` *and* `unfoldStill()` sends the JS down the
+same path `prefers-reduced-motion` takes, so the sheet doesn't run a zero-length clip dance, it
+just appears. The focus delay scales with it (`420 * unfoldK()`), or a slow unfold gets the
+keyboard over the top of it. A segmented control, not a slider — five notches isn't a value
+worth scrubbing, and the active cell is the state. Cells read `1 2 3 4 🐇`.
+
+**The keyboard must not move the composer** (31 Jul 2026). Reported as *"when I tap and the
+keyboard comes in, it pushes the composer all the way up and I can't even see what I type."*
+Three facts stack up to cause it:
+1. **iOS does not shrink the layout viewport for the keyboard.** `100dvh` reads exactly the
+   same with it open, so a `98dvh` sheet is taller than the room left above it.
+2. Safari's answer is to **scroll the visual viewport** until the caret is visible.
+3. A `position: fixed` overlay is placed against the **layout** viewport — which has just been
+   scrolled out from under it. So the whole composer travels off the top of the screen.
+
+The fix is to stop trusting `dvh` for anything a keyboard can cover. `syncViewportVars()`
+publishes `--vvh` (`visualViewport.height`) and `--vvt` (`visualViewport.offsetTop`); every
+full-screen overlay — `.overlay`, `.read-back` (which is also the `⋮` menu, and it holds a
+search field), `.img-preview-back` — becomes `top: var(--vvt); height: var(--vvh)` instead of
+`inset: 0`, and `.sheet.expanse` caps at `--vvh` rather than `100dvh`. Capped to what's visible
+there is nothing left for Safari to scroll, so the field stays where it opened.
+
+Two things that are easy to miss here:
+- **`--sheet-h` is deliberately left alone.** The notch's remembered height keeps its meaning
+  and comes straight back when the keyboard goes away; only the *rendered* ceiling moves. Had
+  `SHEET_MAX()` been switched to the visual viewport instead, `saveSheetFrac` would have
+  persisted the keyboard-shrunk height and her composer would have got shorter every session.
+- **`autoGrow` pins an explicit pixel height on the textarea**, so the field keeps its old size
+  when the sheet shrinks under it and puts the caret straight back out of view — `min-height`
+  can't fix that, only re-measuring can. Hence `sheetViewportSync`, registered by `build()` and
+  dropped in `close()` (same one-at-a-time rule as `fmtSelSync`), called on visualViewport
+  **resize** but *not* **scroll** — resize is the keyboard arriving; scroll is Safari chasing
+  the caret dozens of times a keystroke.
+
+Verified by shadowing `visualViewport.height`/`offsetTop` with `Object.defineProperty` and
+firing the real `resize`/`scroll` events — setting the CSS vars by hand does *not* test it,
+because the handler immediately overwrites them with the true values.
 
 **Pinch a photo run** closed and it fans into a deck (white ring per card so they stay
 distinct); spread it back to a row. State is keyed by the run's markers so it survives the
@@ -428,6 +493,12 @@ needs iOS 17.4+ and only ever produces one fixed tap.
 
 **Week and Month share one frame box** (`x3 y4.5 18×16 r3`) — week draws the columns, month
 adds the rows. Drawing them at different heights made one look like the lesser control.
+
+**The rail's toggles name their own state** (31 Jul 2026): `Oldest view: On/Off`,
+`Day view: On/Off` — the same shape the mobile menu's rows use, and the mobile row was renamed
+from "Oldest first" to match. The bare `Newest first` it replaced was *already* the current
+order, but sitting in a column with Week / Month / Export / Settings it read as the thing a
+click would *do*. A status label among command labels needs to say it's a status.
 
 **The `⋮` menu is gone on desktop.** All four of its items have a visible home now, so the
 button was a second route to nothing. It stays on mobile, where it's the only route. Sizing

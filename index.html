@@ -44,6 +44,19 @@
        stays one edit away from a face of its own again. */
     --mono: var(--font);
     --day: 'Lexend Exa', var(--mono);
+    /* Composer-unfold speed, as ONE multiplier over every duration in the gesture, set from
+       Settings (see UNFOLD_STEPS). 1 is the tuned default; 0 collapses every duration to 0s,
+       which is the "no animation" end of the scale. Because it multiplies rather than
+       replaces, the ratios between the four transitions survive any setting — which is the
+       whole reason they read as one move. */
+    --unfold-k: 1;
+    /* The VISUAL viewport — what she can actually see — published from JS (syncViewportVars).
+       iOS does not shrink the layout viewport for the keyboard: 100dvh stays exactly as it was,
+       and Safari instead scrolls the visual viewport up to chase the caret, dragging every
+       position:fixed overlay with it. These two are the only honest numbers while a keyboard is
+       open. The fallbacks are what desktop and any browser without visualViewport get. */
+    --vvh: 100dvh;
+    --vvt: 0px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; }
@@ -239,7 +252,28 @@
     text-align: center;
     user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
   }
-  .wk-range { font-size: 13px; color: #A8A8AC; }
+  /* a flex row, not centred text, so the live dot below can opt out of the row's alignment
+     (`align-self`) and hang from the top of the line box. The dates keep normal baseline
+     alignment, and the row still centres as one unit under the stepper. */
+  .wk-range {
+    font-size: 13px; color: #A8A8AC;
+    display: flex; align-items: baseline; justify-content: center;
+  }
+  /* the live-week mark: the dates are the only thing on screen that can say "you're in this
+     one", since W31 looks the same whichever week you've stepped to. Same green and same
+     white ring as the sync dot in the rail — one meaning, one mark.
+     It rides like a DEGREE POINT, not on the baseline, and that position is measured rather
+     than eyeballed: a real "°" in this face at 13px has its ink from 4.70px to 8.94px above
+     the baseline, centred at 6.82px. Hung from the top of the 15px line box (whose baseline
+     sits 9.16px down) a 5.1px dot centres at 6.61px above the baseline — 0.21px off the real
+     glyph, so no nudge is worth carrying. `align-self` is flex-start, NOT baseline: an empty
+     flex item has no baseline of its own and the synthesised one put the dot BELOW the text
+     and stretched the row to 16.8px. If the label ever leaves 13px, re-measure. */
+  .wk-now {
+    flex: none; align-self: flex-start; margin-left: 7px;
+    width: 5.1px; height: 5.1px; border-radius: 50%;  /* 15% under the 6px sync dot */
+    background: #55A862; box-shadow: 0 0 0 2px var(--card);
+  }
 
   /* groups — the topic label lives INSIDE the white block now, as its heading */
   .group { margin-bottom: 18px; }
@@ -482,9 +516,12 @@
     margin: 0 3px; vertical-align: -0.28em; border-radius: 5px;
   }
 
-  /* read-more reading modal — a centred float: dark blurred backdrop, white card */
+  /* read-more reading modal — a centred float: dark blurred backdrop, white card.
+     Also the ⋮ menu's backdrop, which holds a search field — so it needs the visual-viewport
+     anchoring for the same reason .overlay does, or the keyboard drags the menu off the top. */
   .read-back {
-    position: fixed; inset: 0; height: 100dvh; z-index: 88;
+    position: fixed; left: 0; right: 0; z-index: 88;
+    top: var(--vvt); height: var(--vvh);
     display: flex; align-items: center; justify-content: center;
     /* the page paints under the status bar now, so every full-screen overlay has to
        keep its own content out from under the clock itself */
@@ -546,9 +583,12 @@
     text-transform: uppercase; color: var(--subtle); padding: 8px 14px 4px; margin: 0; }
   .menu-body .group-card { box-shadow: none; border-radius: 16px; background: var(--field); }
 
-  /* full-screen image preview — frosted, blurred backdrop with an optional size rail */
+  /* full-screen image preview — frosted, blurred backdrop with an optional size rail.
+     No text field of its own, but it can be opened from the composer with the keyboard already
+     up, so it takes the same visual-viewport anchoring rather than trusting 100dvh. */
   .img-preview-back {
-    position: fixed; inset: 0; height: 100dvh; z-index: 90;
+    position: fixed; left: 0; right: 0; z-index: 90;
+    top: var(--vvt); height: var(--vvh);
     display: flex; align-items: center; justify-content: center;
     padding: calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 20px);
     background: rgba(28,28,30,0.34);
@@ -844,8 +884,13 @@
   body:has(.read-back) .compose-dock { opacity: 0; pointer-events: none; }
 
   /* sheet */
+  /* Pinned to the VISUAL viewport, not `inset: 0`. A fixed element is positioned against the
+     layout viewport, and when the keyboard opens iOS scrolls that out from under it — so an
+     overlay at `top: 0` ends up above the top of what she can see. `top: var(--vvt)` puts it
+     back on screen, and the height matching --vvh is what lets the sheet inside it fit. */
   .overlay {
-    position: fixed; inset: 0; z-index: 50;
+    position: fixed; left: 0; right: 0; z-index: 50;
+    top: var(--vvt); height: var(--vvh);
     background: rgba(0,0,0,0.4);
     -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
     display: flex; align-items: flex-end; justify-content: center;
@@ -869,8 +914,8 @@
      0.8, so nothing needs re-timing against anything else. */
   .wrap, .compose-dock {
     transform-origin: top center;
-    transition: transform 0.62s cubic-bezier(0.62, 0.01, 0.13, 1),
-                opacity 0.62s cubic-bezier(0.62, 0.01, 0.13, 1);
+    transition: transform calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1),
+                opacity calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1);
   }
   body.composing .wrap { transform: scale(0.93); opacity: 0.4; }
   body.composing .compose-dock { opacity: 0; }
@@ -887,17 +932,30 @@
      the surface, no inset box, so there's nothing to make the writing feel small. */
   .sheet.expanse {
     /* --sheet-h is what the notch drags. The ceiling has to leave the status bar alone:
-       100dvh now includes it, so a bare 98dvh slid the grabber up under the clock. */
+       100dvh now includes it, so a bare 98dvh slid the grabber up under the clock.
+       The ceiling is measured against --vvh (the VISUAL viewport), not 100dvh: with the
+       keyboard open a 98dvh sheet is taller than the space left above it, and Safari's answer
+       to that is to scroll the caret into view — which is what threw the whole composer off the
+       top of the screen. Capped to what's actually visible there is nothing left to scroll, so
+       the field stays exactly where it opened. --sheet-h itself is left alone, so her chosen
+       height comes straight back when the keyboard goes away. */
     height: var(--sheet-h, 98dvh);
-    max-height: calc(100dvh - env(safe-area-inset-top) - 10px);
+    max-height: calc(var(--vvh) - env(safe-area-inset-top) - 10px);
     padding: 12px 20px calc(env(safe-area-inset-bottom) + 24px);
     animation: none; /* the unfold below replaces the generic slide-up */
     clip-path: inset(0 round 20px 20px 0 0);
     /* the toe matters: a deliberate hold of visible growth off the bar, THEN a decisive run
        out to full size. first control point low (slow start), second high and early (fast
-       finish) — a pronounced S-curve, not an ease-out. */
-    transition: clip-path 0.62s cubic-bezier(0.62, 0.01, 0.13, 1),
-                background-color 0.53s cubic-bezier(0.62, 0.01, 0.13, 1);
+       finish) — a pronounced S-curve, not an ease-out.
+       Strengthened 40% from `0.62, 0.01, 0.13, 1` (31 Jul): each control point moved 40% of
+       its remaining distance toward the extreme that deepens the S — x1 toward 1, x2 toward 0
+       — so the toe holds longer and the run-out is harder. Deliberately NOT done by pushing
+       y1 negative, which is the other way to read "stronger": that adds anticipation, and a
+       clip-path box that shrinks before it grows reads as a glitch, not as ease. Shared by all
+       four transitions in the gesture (list recede, clip, grey→white, desktop deck) — they
+       have to move on one curve or the composer stops arriving as a single thing. */
+    transition: clip-path calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1),
+                background-color calc(0.53s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1);
   }
   /* the folded state: the sheet clipped to the compose bar's exact rectangle, in its grey.
      --mt/--mr/--mb/--ml are measured from the real bar on open, so the two are the same
@@ -909,16 +967,19 @@
   /* the folded box has to be PAINTED before the transition is armed — otherwise adding
      .folded just animates into it and the unfold has nowhere to travel from. */
   .sheet.expanse.no-anim, .sheet.expanse.no-anim > * { transition: none; }
-  .sheet.expanse > * { transition: opacity 0.27s ease 0.16s; }
+  .sheet.expanse > * { transition: opacity calc(0.27s * var(--unfold-k)) ease calc(0.16s * var(--unfold-k)); }
   .sheet.expanse.folded > * { opacity: 0; transition-delay: 0s; }
   @media (prefers-reduced-motion: reduce) {
     .sheet.expanse, .sheet.expanse > * { transition: none; }
   }
-  /* the writing surface tracks whatever height the notch has set, less the chrome above it */
+  /* the writing surface tracks whatever height the notch has set, less the chrome above it —
+     but never past the visible viewport, or a min-height taller than the shrunken sheet puts
+     the field's own scroll back in play and the caret goes right back out of view */
   .sheet.expanse textarea.ta-entry {
     background: none; border-radius: 0; padding: 8px 0 0;
     font-size: 17px; line-height: 1.55;
-    min-height: calc(var(--sheet-h, 98dvh) - 250px); max-height: none;
+    min-height: min(calc(var(--sheet-h, 98dvh) - 250px), calc(var(--vvh) - 250px));
+    max-height: none;
   }
   .sheet.expanse textarea.ta-entry::placeholder { color: #B4B4B9; }
   /* the styling row rides under the head, above the field — always in view on a phone */
@@ -1056,6 +1117,25 @@
     color: var(--ink); background: var(--field); border: none; border-radius: 12px;
     padding: 12px 0;
   }
+  /* composer-speed scale: five cells, 1–4 then the rabbit. A segmented control rather than a
+     slider — five discrete notches is not a value worth scrubbing, and the active cell IS the
+     state so nothing else has to report it. Cells share the width so the scale reads as a
+     scale; the ink fill for the active one is the same one the mode chips and provenance
+     pills already use. */
+  .speed-seg { display: flex; gap: 6px; }
+  .speed-cell {
+    flex: 1; height: 38px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 10px; background: var(--field); color: #6B6B70;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .speed-cell.on { background: var(--ink); color: #fff; }
+  .speed-cell svg { width: 18px; height: 18px; }
+  @media (hover: hover) {
+    .speed-cell:not(.on):hover { background: #E9E9EC; color: var(--ink); }
+  }
+
   /* sign-in code row: code input + compact verify button side by side */
   .code-row { display: flex; gap: 8px; margin-top: 10px; }
   .code-input {
@@ -1357,8 +1437,8 @@
       /* NO background, NO shadow, NO overflow clip. The deck is pure layout: the mat
          carries the elevation, and the icon rail has to be able to expand over it. */
       transform-origin: center center;
-      transition: transform 0.62s cubic-bezier(0.62, 0.01, 0.13, 1),
-                  opacity 0.62s cubic-bezier(0.62, 0.01, 0.13, 1);
+      transition: transform calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1),
+                  opacity calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1);
     }
     /* everything recedes behind the composer together — mat and both rails */
     body.composing .deck { transform: scale(0.965); opacity: 0.4; }
@@ -2806,6 +2886,45 @@ function setOldestFirst(v) {
   render();
 }
 
+// ---------- composer unfold speed ----------
+// Five levels, as one multiplier over every duration in the unfold (--unfold-k, see :root).
+// Index 2 is the tuned default and the middle of the scale; the steps are geometric at ×1.4
+// per notch, so each one is a real change rather than a nudge. Level 5 is 0 — every duration
+// collapses to 0s AND the JS takes the same path prefers-reduced-motion takes, so the sheet
+// doesn't run the clip dance at zero length; it just appears.
+const UNFOLD_KEY = "weekly-deposits-unfold";
+const UNFOLD_STEPS = [1.96, 1.4, 1, 0.71, 0];
+const UNFOLD_DEFAULT = 2;
+let unfoldLevel = UNFOLD_DEFAULT;
+try {
+  const raw = parseInt(localStorage.getItem(UNFOLD_KEY), 10);
+  if (raw >= 0 && raw < UNFOLD_STEPS.length) unfoldLevel = raw; // rejects NaN and junk in one test
+} catch (e) {}
+function unfoldK() { return UNFOLD_STEPS[unfoldLevel]; }
+// no animation at all, either because she asked for it or because the OS did
+function unfoldStill() {
+  return unfoldK() === 0 || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+function applyUnfoldSpeed() {
+  document.documentElement.style.setProperty("--unfold-k", String(unfoldK()));
+}
+// the note under the scale states the real duration rather than a vague word — the whole point
+// of the setting is that she can feel the difference, so name the thing she's changing
+function unfoldNote() {
+  if (unfoldK() === 0) {
+    return "no animation — the composer appears at once and the keyboard comes straight up.";
+  }
+  const ms = Math.round(620 * unfoldK());
+  return "how long the composer takes to unfold out of the compose bar: " + ms + "ms"
+    + (unfoldLevel === UNFOLD_DEFAULT ? ", the tuned default." : ".");
+}
+function setUnfoldLevel(i) {
+  unfoldLevel = Math.max(0, Math.min(UNFOLD_STEPS.length - 1, i));
+  try { localStorage.setItem(UNFOLD_KEY, String(unfoldLevel)); } catch (e) {}
+  applyUnfoldSpeed();
+}
+applyUnfoldSpeed();
+
 // topic group display order: latest-updated first
 function orderGroupsForDisplay(groups) {
   const stamp = g => Math.max(...g.entries.map(entryStamp));
@@ -3107,6 +3226,9 @@ const ICO_NEWEST = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 const ICO_OLDEST = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h4M4 12h6.5M4 17.5h9"/><path d="M18 18.5v-13"/><path d="M15.2 8.4 18 5.5l2.8 2.9"/></svg>';
 const ICO_EXPORT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15.5V4"/><path d="M7.8 8.2 12 4l4.2 4.2"/><path d="M5 14v4.6A1.4 1.4 0 0 0 6.4 20h11.2a1.4 1.4 0 0 0 1.4-1.4V14"/></svg>';
 const ICO_SETTINGS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 7.5h8.2M17.2 7.5H20M4 16.5h2.8M11.8 16.5H20"/><circle cx="14.7" cy="7.5" r="2.4"/><circle cx="9.3" cy="16.5" r="2.4"/></svg>';
+// the fast end of the composer-speed scale. Head plus two ears and nothing else — at 18px any
+// more detail (legs, tail, a face) turns to mush, and the ears alone already say rabbit.
+const ICO_RABBIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 13.2C8.5 10.8 7.7 7 8.4 5.5c.6-1.3 1.9-.6 2.5 1.2.6 1.6.9 3.7.9 5.3"/><path d="M14.2 12.7c1-2.4 2.6-4.2 3.7-4.1 1.1.1 1.1 1.7-.1 3.3-.8 1.1-1.9 2-2.9 2.6"/><circle cx="12" cy="16.7" r="3.6"/></svg>';
 
 function icoRow(label, glyph, on, onPick, dot) {
   const b = el("button", {
@@ -3134,11 +3256,15 @@ function renderIconRail() {
 
   bar.appendChild(el("div", { class: "ico-div" }));
 
-  // the arrow points the way the list reads: down = newest at the top, up = oldest at the top
-  bar.appendChild(icoRow(oldestFirst ? "Oldest first" : "Newest first",
+  // Both toggles name themselves the way the mobile menu's rows do — "<name>: On/Off" — so a
+  // status label can't be misread as a command. The bare "Newest first" was already the
+  // CURRENT order, but sitting among Week / Month / Export it read like the thing a click
+  // would do, which is the opposite of what it meant. The arrow still points the way the list
+  // reads: down = newest at the top, up = oldest at the top.
+  bar.appendChild(icoRow("Oldest view: " + (oldestFirst ? "On" : "Off"),
     oldestFirst ? ICO_OLDEST : ICO_NEWEST, oldestFirst,
     () => setOldestFirst(!oldestFirst)));
-  bar.appendChild(icoRow("Day view", ICO_DAY, layout === "day",
+  bar.appendChild(icoRow("Day view: " + (layout === "day" ? "On" : "Off"), ICO_DAY, layout === "day",
     () => { layout = layout === "day" ? "topic" : "day"; render(); }));
   bar.appendChild(icoRow("Export markdown", ICO_EXPORT, false, () => doExport()));
   bar.appendChild(icoRow("Settings", ICO_SETTINGS, false, () => openSettings(),
@@ -3322,7 +3448,14 @@ function render() {
   if (view === "week") {
     let sub = weekRangeLabel(wk.year, wk.week);
     if (wk.year !== currentWk.year) sub += " \u00B7 " + wk.year;
-    periodLabel.appendChild(el("div", { class: "wk-range" }, sub));
+    const range = el("div", { class: "wk-range" }, sub);
+    // "this is the week you're actually in" \u2014 the dates are the only thing on screen that
+    // could say it, since W31 reads the same whichever week you've stepped to. Live only:
+    // a dot on every week would say nothing.
+    const live = wk.year === currentWk.year && wk.week === currentWk.week;
+    // role=img so the label is actually announced — aria-label on a bare span isn't
+    if (live) range.appendChild(el("span", { class: "wk-now", role: "img", "aria-label": "this week" }));
+    periodLabel.appendChild(range);
   } else {
     periodLabel.appendChild(el("div", { class: "wk-range" }, monthLabel(mo.year, mo.month)));
   }
@@ -3363,6 +3496,43 @@ function render() {
 
 // ---------- composer ----------
 const sheetRoot = document.getElementById("sheetRoot");
+
+// ---------- the visual viewport ----------
+// The keyboard does NOT shrink the layout viewport on iOS: 100dvh reads exactly the same with
+// it open, so a sheet sized in dvh is taller than the room left above it. Safari's response is
+// to scroll the visual viewport up until the caret is visible, and since a position:fixed
+// overlay is placed against the LAYOUT viewport, that scroll drags the whole composer off the
+// top of the screen — reported as "the keyboard pushes the composer up and I can't see what I
+// type". These two vars are the fix's raw material: --vvh caps the sheet to what's visible (so
+// there is nothing left for Safari to scroll) and --vvt puts the overlay back over it.
+// resize fires when the keyboard opens/closes; scroll fires when Safari chases the caret.
+const vvp = window.visualViewport;
+// the live composer's field re-measure, registered by build(). autoGrow pins an explicit pixel
+// height on the textarea, so when the sheet shrinks under it the field keeps its old size and
+// puts the caret back out of reach — the same trap setSheetHeight already clears by hand. One
+// at a time, dropped on close: build() makes a new textarea on every rebuild.
+let sheetViewportSync = null;
+function syncViewportVars() {
+  const s = document.documentElement.style;
+  s.setProperty("--vvh", Math.round(vvp ? vvp.height : window.innerHeight) + "px");
+  s.setProperty("--vvt", Math.round(vvp ? vvp.offsetTop : 0) + "px");
+}
+syncViewportVars();
+if (vvp) {
+  // resize = the keyboard came or went, so the field has to be re-measured too. scroll = Safari
+  // chasing the caret, which only needs the overlay moved — re-measuring on every one of those
+  // would be dozens of reflows per keystroke.
+  vvp.addEventListener("resize", () => {
+    syncViewportVars();
+    if (sheetViewportSync) sheetViewportSync();
+  });
+  vvp.addEventListener("scroll", syncViewportVars);
+}
+// orientation lands before the new metrics do, hence the beat
+window.addEventListener("orientationchange", () => setTimeout(() => {
+  syncViewportVars();
+  if (sheetViewportSync) sheetViewportSync();
+}, 80));
 
 // pinned so the list behind a sheet can't scroll while it's open (iOS scroll-chaining fix)
 let composerScrollY = 0;
@@ -3448,7 +3618,8 @@ function openComposer(existing) {
 
   function close() {
     document.body.classList.remove("composing"); // let the list come back forward
-    bindFmtSelectionSync(null); sheetRoot.innerHTML = ""; unlockPageScroll();
+    bindFmtSelectionSync(null); sheetViewportSync = null;
+    sheetRoot.innerHTML = ""; unlockPageScroll();
   }
   // tapping away with unsaved work is an easy way to lose a thought — warn first. covers a
   // brand-new entry with text AND edits to an existing one; an unchanged entry (just opened
@@ -3763,6 +3934,9 @@ function openComposer(existing) {
     function autoGrow() {
       ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px";
     }
+    // re-measure when the keyboard comes or goes: the pinned height above is measured against
+    // whatever the sheet was then, and --vvh has just moved the ceiling under it
+    sheetViewportSync = () => { ta.style.height = ""; autoGrow(); };
     ta.addEventListener("input", () => {
       text = ta.value; saveBtn.disabled = !text.trim(); autoGrow(); syncGhost();
     });
@@ -4355,7 +4529,7 @@ function openComposer(existing) {
   // then release it so the clip opens outward into the full sheet. two frames because the
   // folded state has to be painted before the transition has anything to travel from.
   const barEl = document.querySelector(".compose-bar");
-  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const still = unfoldStill(); // OS reduced-motion, or the rabbit end of the speed setting
   if (barEl && !still) {
     const b = barEl.getBoundingClientRect(), s = sheet.getBoundingClientRect();
     const inset = v => Math.max(0, Math.round(v)) + "px";
@@ -4377,7 +4551,10 @@ function openComposer(existing) {
   setTimeout(() => {
     const ta = sheet.querySelector("textarea");
     if (ta && !existing) ta.focus();
-  }, still ? 120 : 420); // let the unfold land before the keyboard comes up (0.8 × the 520 the 0.78s unfold wanted)
+    // let the unfold land before the keyboard comes up. 420 is 0.8 × the 520 the old 0.78s
+    // unfold wanted, and it has to track the speed setting or a slow unfold gets the keyboard
+    // over the top of it — and a fast one waits on nothing.
+  }, still ? 120 : Math.round(420 * unfoldK()));
 }
 
 // read-only view of the original ramble a deposit was cut from. restoring swaps the
@@ -5487,7 +5664,7 @@ function openMenu() {
       render();
       renderSettings();
     }));
-    body.appendChild(row("Oldest first", oldestFirst ? "on" : "off", () => {
+    body.appendChild(row("Oldest view", oldestFirst ? "on" : "off", () => {
       setOldestFirst(!oldestFirst);
       renderSettings();
     }));
@@ -5687,6 +5864,26 @@ function openSettings() {
       sheet.appendChild(codeRow);
       sheet.appendChild(status);
     }
+
+    // ---- composer speed ----
+    // One sheet serves both viewports: the desktop rail's Settings glyph and the mobile ⋮
+    // menu's Settings row both land here, so this control only has to be built once.
+    sheet.appendChild(el("p", { class: "field-label", style: { marginTop: "26px" } }, "composer speed"));
+    const seg = el("div", { class: "speed-seg", role: "group", "aria-label": "Composer speed" });
+    for (let i = 0; i < UNFOLD_STEPS.length; i++) {
+      const off = UNFOLD_STEPS[i] === 0;
+      const cell = el("button", {
+        class: "speed-cell" + (i === unfoldLevel ? " on" : ""),
+        "aria-pressed": i === unfoldLevel ? "true" : "false",
+        "aria-label": off ? "no animation" : "speed " + (i + 1) + " of " + UNFOLD_STEPS.length,
+        onclick: () => { setUnfoldLevel(i); build(); }
+      });
+      if (off) cell.innerHTML = ICO_RABBIT;
+      else cell.textContent = String(i + 1);
+      seg.appendChild(cell);
+    }
+    sheet.appendChild(seg);
+    sheet.appendChild(el("p", { class: "settings-note" }, unfoldNote()));
 
     sheet.appendChild(el("p", { class: "field-label", style: { marginTop: "26px" } }, "anthropic api key"));
     const input = el("input", { class: "key-input", type: "password", placeholder: "sk-ant-…", autocomplete: "off" });
