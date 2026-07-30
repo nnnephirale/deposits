@@ -16,9 +16,15 @@ particular). Everything here is *as built*, not aspirational. The app is one fil
 --ink      #1C1C1E
 --subtle   #8A8A8E
 --font     system sans (-apple-system …)
---mono     SF Mono / ui-monospace  — periods, pills, labels, all uppercase micro-copy
+--mono     = --font                 — periods, pills, labels, all uppercase micro-copy
 --day      'Lexend Exa' 500        — one use only: the day letter in an entry's badge
 ```
+
+`--mono` **was** `SF Mono / ui-monospace`. Switching that declaration off in inspect and
+comparing settled it: the label layer reads better in the body's own sans, so the token now
+points at `--font`. It stays a separate token so the whole label layer is one edit away from a
+face of its own again. Only two faces differ from the body anywhere now: the day badge's
+Lexend Exa and the weekly summary's serif.
 
 `--canvas-a` / `--canvas-0` are the same grey with alpha, for frosted surfaces. Reference the
 token, never re-type the rgb — there were three hardcoded copies of the old canvas colour and
@@ -122,14 +128,20 @@ pill. Its first entry's badge names the bucket and the repeat run carries it dow
 `anytime` and month view's `W##` buckets aren't days and have no badge equivalent, so they
 keep the label.
 
-Topics ride in a **third flex column** at the right (78px), one pill per tag, stacked. It was
-an absolutely positioned box holding a single pill; an entry with three tags spilled its
-pills straight out of its own bottom edge. As a real column the entry grows to hold them.
+Topics ride on the entry's **own first row**, in line with the day badge — `[badge] [TOPIC]
+[TOPIC…]` — and the text starts underneath at its **full measure**. Two earlier versions:
+an absolutely positioned box holding a single pill (an entry with three tags spilled them
+straight out of its bottom edge), then a real 78px third flex column at the right, which grew
+to hold them but bought its clean right edge with 94px off *every line* — so the same text
+wrapped earlier in day view than in topic view. The row costs one line's height once. The
+pills keep the column's fixed 78px and its `…` truncation: a short label like WORK measures
+the same as a long one, so a run reads as a row of equal marks rather than ragged labels.
 
-**Badge, first line, and first pill share one axis.** `.entry` carries `--line-box: 22.5px`
-(the body text's own line box, 15px × 1.5) and `--pill-h: 18px`; the side column's
-`margin-top` is `(--line-box - --pill-h) / 2` and the badge's is `(--line-box - 22px) / 2`.
-Change the body font size or line-height and `--line-box` is the one number to update.
+**Badge, first line, and pills share one axis.** `.entry` carries `--line-box: 22.5px` (the
+body text's own line box, 15px × 1.5) and `--pill-h: 18px`; the badge's `margin-top` is
+`(--line-box - 22px) / 2`, and the tag row is a 22px box with `align-items: center` — the same
+height as the badge, so the two land together with no second rule. Change the body font size
+or line-height and `--line-box` is the one number to update.
 
 ---
 
@@ -162,7 +174,8 @@ clamp to the ceiling or open as a sliver. Verified: `0.591` gives 532px in a 900
 
 Note a pre-existing disagreement this rides on: the JS ceiling is `0.98 * innerHeight` but the
 desktop CSS caps `.sheet.expanse` at `100dvh - (--deck-x + --mat-y) * 2`, which is tighter. At
-the very top of the range `--sheet-h` can read 882px while the sheet renders 832px. It
+the very top of the range `--sheet-h` can read 882px while the sheet renders 860px (`--mat-y`
+is now `0`, so the gap is the two `--deck-x` insets alone — it was 832px at `--mat-y: 14px`). It
 round-trips to the same *visual* height, so the memory is stable — but the two numbers are not
 the same number.
 
@@ -226,7 +239,9 @@ that looks like a rendering bug. Mask it in the same direction as the tint gradi
 
 **Frosted = blur + *light* tint.** A near-opaque white gradient defeats the blur entirely —
 there's nothing left to see through. The white does the hiding; the blur only softens its
-edge. Bottom fade landed at `blur(14px) saturate(180%)` with white at 0.94 → 0.6 → 0.
+edge. Bottom fade landed at `blur(11px) saturate(180%)` with white at 0.98 → 0.72 → 0 — two
+steps along that axis now (22px, then 14px, both still hazy enough to look broken). Each step
+took the radius down and gave the white back the work.
 
 **An absolutely positioned pseudo-element inside an `overflow` container scrolls with the
 content.** Edge fades on a carousel must hang off a *non-scrolling wrapper*, or they drift
@@ -327,8 +342,12 @@ status bar would sit — then check nothing lands under it.
 
 **The composer unfold.** The sheet is `clip-path`-ed to the compose bar's *measured*
 rectangle — same grey, same 18px rounding — then released, so the box physically opens
-outward while the grey turns white and the content fades in behind it. 0.78s on
-`cubic-bezier(0.62, 0.01, 0.13, 1)`. The list behind it recedes in the same gesture:
+outward while the grey turns white and the content fades in behind it. 0.62s on
+`cubic-bezier(0.62, 0.01, 0.13, 1)` — the curve was right at 0.78s, the run 20% too slow, so
+every duration in the open *and* close move was scaled by 0.8 together (clip 0.62, background
+0.53, content 0.27 after 0.16, and the JS focus delay 520 → 420ms). They only read as one
+gesture while they stay in that ratio; re-time one and re-time all of them.
+The list behind it recedes in the same gesture:
 `scale(0.93)` + `0.4` opacity from a top origin. That recede required *lightening* the
 backdrop to `rgba(0,0,0,.18)` / `blur(2px)` — at 0.4 opacity it was happening behind
 something too opaque to see through.
@@ -421,6 +440,21 @@ height. Dots are 2.6px with 1.3px gaps = 10.4px, measured against the path's own
 specific week" means navigate there first. A zero-result miss names the scope, or a narrowed
 search reads as "this word is nowhere".
 
+**The chip scopes the whole rail, not just search** (31 Jul 2026). The topics list and its
+counts read `scopedEntries()` — so if the chip says `W31` the topics are W31's topics whether
+the centre panel is on that week, its month, or somewhere else entirely. They used to read
+`activeEntries()`, the period being browsed, which made the chip look like it was lying about
+its own column. `renderRails()` / `renderRightRail()` take **no argument** on purpose: the
+`all` that used to be passed in was the coupling.
+
+Two consequences of decoupling the two axes, both intended:
+- A topic filter can now name a topic with nothing in the panel's period — the counts prove
+  the entries exist, just not here. The empty state was already honest about it ("nothing
+  under listening to *this week*. pick another topic, or clear the filter"), and the lit row
+  keeps the filter visible and clearable.
+- `deskTopic` is cleared when its row leaves the *scope*, not the period. With the chip on
+  `ALL` a filter now survives navigating the panel anywhere, which is the point.
+
 **`display: contents` is what keeps the phone safe.** `.deck` and `.deck-main` wrap
 `.wrap` / `.bottom-frost` / `.compose-dock` in the markup, and below the breakpoint they
 leave the box tree entirely — the three lay out as the body children they used to be, with
@@ -431,6 +465,15 @@ reachable, and the rails are `display: none` *and* emptied of children.
 **There is no window frame.** The deck is a bare transparent grid — no background, no shadow,
 no overflow clip (the icon rail has to expand over the mat). Both rails sit directly on the
 canvas wash and paint no surface of their own.
+
+**The mat is floor-to-ceiling: `--mat-y: 0`, `--mat-x: 12px`.** It steps in from the rails and
+nowhere else, so its only inset from the viewport is the deck's own `--deck-x`. It carried
+`--mat-y: 14px` first; switched off in inspect, full height was plainly the one that reads as
+a window — the vertical inset just made the wash above and below look like a missed edge.
+`--mat-y` stays declared rather than being deleted because four other things derive from it
+(`.iconbar` `top`, `.rail-r` `padding-top`, the composer overlay's `padding-bottom`, and
+`.sheet.expanse`'s `max-height`); at `0` they all still line up on the mat's edges by
+construction, and a future inset is one number again.
 
 **Three greys, darkest outward** (30 Jul 2026): the wash the rails sit on, then the mat, then
 the white cards on it. The mat was originally `--card` white, which made the cards it carried
@@ -535,6 +578,13 @@ Still open:
 3. **Keyboard is deliberately small**: ←/→ steps the period, ⌘N opens the composer, ⌘K
    focuses the rail search (falls back to `openMenu()` on mobile widths). Guarded on
    `typingTarget()` and `anySheetOpen()`. Everything else already has a visible control.
+   **⌘K is claimed twice, by depth.** In the composer it's paste-a-link — the same op as the
+   bar's `L`, but it asks for the url straight away instead of needing words selected first
+   (with a selection those words are the label; with a bare cursor the url labels itself with
+   its domain). The composer's handler `stopPropagation`s *and* the document handler bails on
+   `anySheetOpen()`: either alone leaves a hole, because ⌘K pressed on a chip rather than in
+   the textarea never reaches the composer's listener, and used to focus the rail search
+   behind the overlay.
 4. `@media (min-width: 700px)` on the composer textarea is superseded twice over now — by the
    full-height expanse and by the desktop block. Check it before relying on it.
 5. **The week/month jump list is gone**, removed 30 Jul. Period navigation on desktop is the

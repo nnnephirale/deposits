@@ -37,7 +37,12 @@
     --hairline: rgba(0,0,0,0.055);
     --field: #F4F4F6;
     --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
-    --mono: 'SF Mono', ui-monospace, Menlo, monospace;
+    /* the label face — meta rows, pills, rail heads, stepper labels. It WAS 'SF Mono'; with
+       that declaration switched off in inspect the whole interface read better, so the labels
+       now share the body's sans and the only faces that differ anywhere are the day badge's
+       Lexend Exa and the weekly summary's serif. Kept as its own token so the label layer
+       stays one edit away from a face of its own again. */
+    --mono: var(--font);
     --day: 'Lexend Exa', var(--mono);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -323,7 +328,8 @@
     user-select: none; -webkit-user-select: none;
   }
   .day-badge sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
-  /* centre the 22px badge on the 22.5px first line box, same axis as the first side pill.
+  /* centre the 22px badge on the 22.5px first line box — and in day view that first box is
+     the 22px topic row, so badge and pills land on the same axis without a second rule.
      Scoped to the gutter so day view's group heading keeps its own alignment. */
   .entry-gutter .day-badge { margin-top: calc((var(--line-box) - 22px) / 2); }
   .entry-body { flex: 1; min-width: 0; }
@@ -673,23 +679,23 @@
   .pill.mode {
     border: 1px solid var(--hairline); color: var(--subtle); font-weight: 400;
   }
-  /* day view: the topics ride at the entry's right on a fixed width, truncated, so every
-     pill is the same length and the text keeps a clean edge instead of running under them.
-     A real third flex column — NOT an absolute overlay — so an entry with three tags grows
-     to hold them instead of spilling its pills past its own bottom edge. */
-  .entry-side {
-    flex: none; width: 78px;
-    display: flex; flex-direction: column; gap: 5px;
-    /* centres the FIRST pill on the first line of text. The day badge is centred on that
-       same line, so badge, first line and a lone pill all sit on one axis. */
-    margin-top: calc((var(--line-box) - var(--pill-h)) / 2);
+  /* day view: the topics ride on the entry's own first row, in line with the day badge —
+     [badge] [TOPIC] [TOPIC…] — and the text starts underneath at its FULL width. They used
+     to stand in a third column at the right, which was a clean edge bought at the cost of
+     94px off every line, so a day-view entry wrapped where the same text in topic view
+     didn't. The row costs one line's height once; the column cost width on every line. */
+  .entry-tags {
+    display: flex; gap: 5px; margin-bottom: 7px;
+    /* the badge sits at the top of the gutter, so matching its 22px box here puts pill and
+       badge on one axis with no per-element nudging */
+    min-height: 22px; align-items: center;
   }
-  /* width:100% (not max-width) so a short label like WORK is the same length as a long one —
-     uniform pills stacking into a tidy column, which is the whole point of moving them here.
-     Fixed height + matching line-height centres the text without flex, which would break
-     the ellipsis. */
-  .entry-side .pill {
-    width: 100%; height: var(--pill-h); line-height: var(--pill-h);
+  /* the fixed 78px is kept from the old side column: a short label like WORK measures the
+     same as a long one, so a run of pills reads as a row of equal marks rather than ragged
+     labels. Fixed height + matching line-height centres the text without flex, which would
+     break the ellipsis. */
+  .entry-tags .pill {
+    flex: none; width: 78px; height: var(--pill-h); line-height: var(--pill-h);
     padding: 0 8px; text-align: center;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
@@ -744,10 +750,12 @@
   .bottom-frost {
     position: fixed; left: 0; right: 0; bottom: 0;
     height: calc(env(safe-area-inset-bottom) + 162px);
-    /* less blur, more white: at a 22px radius text behind it went hazy enough to look broken.
-       the white is what should do the hiding; the blur just softens the edge of it. */
-    background: linear-gradient(to top, rgba(255,255,255,0.94) 26%, rgba(255,255,255,0.6) 62%, rgba(255,255,255,0));
-    -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%);
+    /* less blur, more white — a second step along the same axis. At 22px, then even at 14px,
+       text behind it went hazy enough to look broken. The white is what should do the hiding;
+       the blur just softens the edge of it, so the solid end holds longer and higher and the
+       radius comes down again to match. */
+    background: linear-gradient(to top, rgba(255,255,255,0.98) 34%, rgba(255,255,255,0.72) 66%, rgba(255,255,255,0));
+    -webkit-backdrop-filter: blur(11px) saturate(180%); backdrop-filter: blur(11px) saturate(180%);
     /* the mask fades the BLUR out with the white; without it the blur stops on a hard line */
     -webkit-mask-image: linear-gradient(to top, black 55%, transparent);
     mask-image: linear-gradient(to top, black 55%, transparent);
@@ -855,11 +863,14 @@
 
   /* while the composer is unfolding, the list behind it recedes — a small shrink and fade,
      so the sheet reads as coming forward rather than sliding over. timed to the unfold, and
-     the backdrop stays light enough that the recede is actually visible through it. */
+     the backdrop stays light enough that the recede is actually visible through it.
+     0.62s is the old 0.78 run 20% quicker — the unfold's own number, so the recede and the
+     clip still land together. Every duration in the open/close move is scaled by that same
+     0.8, so nothing needs re-timing against anything else. */
   .wrap, .compose-dock {
     transform-origin: top center;
-    transition: transform 0.78s cubic-bezier(0.62, 0.01, 0.13, 1),
-                opacity 0.78s cubic-bezier(0.62, 0.01, 0.13, 1);
+    transition: transform 0.62s cubic-bezier(0.62, 0.01, 0.13, 1),
+                opacity 0.62s cubic-bezier(0.62, 0.01, 0.13, 1);
   }
   body.composing .wrap { transform: scale(0.93); opacity: 0.4; }
   body.composing .compose-dock { opacity: 0; }
@@ -885,8 +896,8 @@
     /* the toe matters: a deliberate hold of visible growth off the bar, THEN a decisive run
        out to full size. first control point low (slow start), second high and early (fast
        finish) — a pronounced S-curve, not an ease-out. */
-    transition: clip-path 0.78s cubic-bezier(0.62, 0.01, 0.13, 1),
-                background-color 0.66s cubic-bezier(0.62, 0.01, 0.13, 1);
+    transition: clip-path 0.62s cubic-bezier(0.62, 0.01, 0.13, 1),
+                background-color 0.53s cubic-bezier(0.62, 0.01, 0.13, 1);
   }
   /* the folded state: the sheet clipped to the compose bar's exact rectangle, in its grey.
      --mt/--mr/--mb/--ml are measured from the real bar on open, so the two are the same
@@ -898,7 +909,7 @@
   /* the folded box has to be PAINTED before the transition is armed — otherwise adding
      .folded just animates into it and the unfold has nowhere to travel from. */
   .sheet.expanse.no-anim, .sheet.expanse.no-anim > * { transition: none; }
-  .sheet.expanse > * { transition: opacity 0.34s ease 0.2s; }
+  .sheet.expanse > * { transition: opacity 0.27s ease 0.16s; }
   .sheet.expanse.folded > * { opacity: 0; transition-delay: 0s; }
   @media (prefers-reduced-motion: reduce) {
     .sheet.expanse, .sheet.expanse > * { transition: none; }
@@ -1302,7 +1313,10 @@
       --rail-t: 248px;   /* topics rail */
       --deck-x: 20px;    /* viewport inset */
       --deck-cap: 1400px;
-      --mat-y: 14px; --mat-x: 12px;
+      /* no vertical inset: the mat takes the deck's full height and only steps in from the
+         rails. Compared with the 14px it had, floor-to-ceiling is the one that reads as a
+         window — the inset just made the wash above and below look like a missed edge. */
+      --mat-y: 0px; --mat-x: 12px;
       /* the middle grey. Far enough under #FFF that a card has an edge without the
          mat itself reading as a tinted panel. The frosts over it are tinted to match.
          Every value below is its first cut with 20% of its distance from #FFF taken
@@ -1343,8 +1357,8 @@
       /* NO background, NO shadow, NO overflow clip. The deck is pure layout: the mat
          carries the elevation, and the icon rail has to be able to expand over it. */
       transform-origin: center center;
-      transition: transform 0.78s cubic-bezier(0.62, 0.01, 0.13, 1),
-                  opacity 0.78s cubic-bezier(0.62, 0.01, 0.13, 1);
+      transition: transform 0.62s cubic-bezier(0.62, 0.01, 0.13, 1),
+                  opacity 0.62s cubic-bezier(0.62, 0.01, 0.13, 1);
     }
     /* everything recedes behind the composer together — mat and both rails */
     body.composing .deck { transform: scale(0.965); opacity: 0.4; }
@@ -2849,8 +2863,9 @@ function entryDayKey(e) {
 
 function entryEl(e, opts) {
   opts = opts || {};
-  // day view hoists the entry's topics to fixed-width pills in a column at the right, so
-  // they line up and the text keeps a clean edge instead of wrapping under them.
+  // day view hoists the entry's topics out of the meta row and onto a row of their own at
+  // the top, in line with the day badge — fixed-width and truncated so they line up, while
+  // the text keeps the same full measure it has in topic view.
   const sideTopics = opts.sidePill
     ? (e.tags || []).map(tg => topicById[tg]).filter(t => t && t.id !== opts.skipTag)
     : [];
@@ -2867,6 +2882,15 @@ function entryEl(e, opts) {
   if (!opts.repeat) gutter.appendChild(dayBadgeEl(dayIdx == null ? "–" : DAY_TOKENS[dayIdx]));
   entry.appendChild(gutter);
   const body = el("div", { class: "entry-body" });
+  // day view's topics: the body's first row, so they sit beside the badge in the gutter and
+  // the text below them runs the entry's full width
+  if (sideTopics.length) {
+    const tagRow = el("div", { class: "entry-tags" });
+    for (const t of sideTopics) {
+      tagRow.appendChild(el("span", { class: "pill", style: { background: t.bg, color: t.fg } }, t.label));
+    }
+    body.appendChild(tagRow);
+  }
   const collapse = compactView && entryWords(e) > SUMMARY_MIN_WORDS;
   const onResize = (imgId, size) => setImageSize(e.id, imgId, size);
   const onCheck = (li, c) => setLineChecked(e.id, li, c);
@@ -2911,22 +2935,13 @@ function entryEl(e, opts) {
     if (tg === opts.skipTag) continue;
     const tt = topicById[tg], mm = modeById[tg];
     if (tt) {
-      if (sideTopics.some(s => s.id === tt.id)) continue; // already riding at the side
+      if (sideTopics.some(s => s.id === tt.id)) continue; // already riding on the top row
       meta.appendChild(el("span", { class: "pill", style: { background: tt.bg, color: tt.fg } }, tt.label));
     }
     else if (mm) meta.appendChild(el("span", { class: "pill mode" }, mm.label));
   }
   if (meta.children.length) body.appendChild(meta);
   entry.appendChild(body);
-  // a real third column rather than an absolutely positioned overlay: every topic gets a
-  // pill, they stack downward, and the entry grows to hold them instead of them spilling out
-  if (sideTopics.length) {
-    const side = el("div", { class: "entry-side" });
-    for (const t of sideTopics) {
-      side.appendChild(el("span", { class: "pill", style: { background: t.bg, color: t.fg } }, t.label));
-    }
-    entry.appendChild(side);
-  }
   return entry;
 }
 
@@ -3173,7 +3188,12 @@ function buildRightRail() {
   railR.appendChild(railRScroll);
 }
 
-function renderRightRail(all) {
+// The whole rail answers to the scope pill, not to the main panel: the pill says what this
+// column is about, so if it reads W31 the topics are W31's topics whether the panel is showing
+// that week, its month, or a different one entirely. Search already worked this way — the list
+// underneath was the one part still counting the period being browsed, which made the pill look
+// like it was lying.
+function renderRightRail() {
   if (!deskSearchInput || !deskSearchInput.isConnected) buildRightRail();
   railScopeBtn.textContent = scopeLabel();
   railScopeBtn.title = scopeTitle();
@@ -3198,12 +3218,14 @@ function renderRightRail(all) {
   scroll.innerHTML = "";
   scroll.appendChild(el("p", { class: "rail-head" }, "topics"));
 
-  // counted off the unfiltered period, in the order TOPICS declares \u2014 the same order the
-  // composer's chips use, so the two lists never disagree about what comes first
+  // counted off the SCOPE, unfiltered, in the order TOPICS declares \u2014 the same order the
+  // composer's chips use, so the two lists never disagree about what comes first. Unfiltered
+  // still matters for a different reason: a count that collapsed to whatever topic is active
+  // would leave no way to see what clearing the filter gets you.
   const counts = {};
-  for (const e of all) for (const t of e.tags) counts[t] = (counts[t] || 0) + 1;
+  for (const e of scopedEntries()) for (const t of e.tags) counts[t] = (counts[t] || 0) + 1;
   const present = TOPICS.filter(t => counts[t.id]);
-  if (deskTopic && !counts[deskTopic]) deskTopic = null; // filter can't survive leaving its period
+  if (deskTopic && !counts[deskTopic]) deskTopic = null; // filter can't outlive its own row
 
   if (!present.length) {
     scroll.appendChild(el("p", { class: "rail-empty" }, "\u2014"));
@@ -3220,7 +3242,7 @@ function renderRightRail(all) {
   }
 }
 
-function renderRails(all) {
+function renderRails() {
   if (!deskMQ.matches) {
     // dropping below the breakpoint takes the rails' state with it, or the phone layout
     // would silently stay filtered with no control left on screen to clear it
@@ -3230,7 +3252,7 @@ function renderRails(all) {
     return;
   }
   renderIconRail();
-  renderRightRail(all);
+  renderRightRail();
 }
 
 // the centre pane, when the rail's search field has something in it
@@ -3307,9 +3329,9 @@ function render() {
 
   entriesRoot.innerHTML = "";
   const all = activeEntries();
-  // the rails read the *unfiltered* period, so the topic counts don't collapse to
-  // whatever is currently filtered — and so clearing a filter is always reachable
-  renderRails(all);
+  // the rails are on their own axis — the scope pill's, not this panel's. They read no
+  // argument on purpose: passing `all` in was what tied the topic list to the period.
+  renderRails();
 
   // desktop only: the right rail's search takes over the centre pane entirely
   if (deskQuery) { syncWrappedCue(null); renderDeskSearch(); return; }
@@ -3839,7 +3861,13 @@ function openComposer(existing) {
     // cursor between them, typing lands inside, and the same combo steps back out.
     ta.addEventListener("keydown", ev => {
       if (!(ev.metaKey || ev.ctrlKey) || ev.altKey) return;
-      const pair = { b: ["**", "**"], i: ["*", "*"], u: ["__", "__"] }[ev.key.toLowerCase()];
+      const key = ev.key.toLowerCase();
+      // ⌘K is the link, the same op as the bar's L: it asks for the url straight away rather
+      // than needing words selected first. stopPropagation as well as preventDefault — the
+      // document-level ⌘K (rail search on desktop, menu on a phone) is listening too, and
+      // without it the paste prompt arrives with focus already yanked out of the composer.
+      if (key === "k") { ev.preventDefault(); ev.stopPropagation(); linkSel(); return; }
+      const pair = { b: ["**", "**"], i: ["*", "*"], u: ["__", "__"] }[key];
       if (!pair) return;
       ev.preventDefault();
       if (ta.selectionStart !== ta.selectionEnd) wrapSel(pair[0], pair[1]);
@@ -3947,9 +3975,11 @@ function openComposer(existing) {
     // link: wrap the selection as [label](url). if the selection is itself a url, it
     // becomes a domain-labelled pill with no typing; otherwise prompt for the url and
     // keep the selected words as the label. either way the label stays editable in raw text.
+    // The bar's L only shows with a selection, but ⌘K fires on a bare cursor too — that path
+    // has no words to label with, so the url labels itself with its domain, exactly as a
+    // pasted-and-selected url does. Nothing is inserted if the prompt is dismissed.
     function linkSel() {
       const s = ta.selectionStart, en = ta.selectionEnd;
-      if (s === en) return;
       const v = ta.value, sel = v.slice(s, en).trim();
       const looksUrl = /^(https?:\/\/\S+|www\.\S+|\S+\.[a-z]{2,}(\/\S*)?)$/i.test(sel);
       let url, label;
@@ -3958,10 +3988,10 @@ function openComposer(existing) {
         label = domainOf(url);
       } else {
         let u = prompt("paste the link url");
-        if (!u) return;
+        if (!u || !u.trim()) return;
         u = u.trim();
         url = /^https?:\/\//i.test(u) ? u : "https://" + u;
-        label = sel;
+        label = sel || domainOf(url);
       }
       const md = "[" + label + "](" + url + ")";
       ta.value = v.slice(0, s) + md + v.slice(en);
@@ -4347,7 +4377,7 @@ function openComposer(existing) {
   setTimeout(() => {
     const ta = sheet.querySelector("textarea");
     if (ta && !existing) ta.focus();
-  }, still ? 120 : 520); // let the unfold land before the keyboard comes up
+  }, still ? 120 : 420); // let the unfold land before the keyboard comes up (0.8 × the 520 the 0.78s unfold wanted)
 }
 
 // read-only view of the original ramble a deposit was cut from. restoring swaps the
@@ -6106,10 +6136,14 @@ document.addEventListener("keydown", ev => {
   // the scope pull-down closes before anything else claims Escape
   if (ev.key === "Escape" && deskScopeOpen) { ev.stopPropagation(); deskScopeOpen = false; render(); return; }
   const meta = ev.metaKey || ev.ctrlKey;
+  // ⌘K reaches search only when nothing is open over the list. With a sheet up the key
+  // belongs to that sheet — the composer claims it for paste-a-link, and the search sheet IS
+  // what this would have opened. Focusing the rail field behind an overlay was the bug.
   if (meta && (ev.key === "k" || ev.key === "K")) {
+    if (anySheetOpen()) return;
     ev.preventDefault();
     if (deskMQ.matches && deskSearchInput) deskSearchInput.focus();
-    else if (!anySheetOpen()) openMenu();
+    else openMenu();
     return;
   }
   if (meta && (ev.key === "n" || ev.key === "N")) {
