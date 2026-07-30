@@ -1158,35 +1158,45 @@
      the box tree entirely, so .wrap / .bottom-frost / .compose-dock lay out as the
      body children they used to be. Nothing above this block is touched.
 
-     There is no window frame. The deck is a bare transparent grid; the only painted
-     surface is the centre MAT, a rounded white card floating on the canvas wash.
-     Both rails sit directly on that wash — which is why the wash has to carry the
-     whole composition, and why nothing here paints a grey of its own.
+     There is no window frame. The deck is a bare transparent grid; the one painted
+     surface is the centre MAT, a rounded card floating on the canvas wash. Both
+     rails sit directly on that wash and paint nothing of their own.
 
-     The wash is pure --canvas family: same #F0F0F1, lifted and settled by a few
-     percent of lightness only. No hue is introduced anywhere, and no text colour
-     exists on desktop that doesn't exist on mobile.
+     Three greys, darkest outward: the wash the rails sit on, then the mat, then the
+     white cards on top of it. On the phone the cards are white on grey and that
+     reads; a white mat left them invisible, so the mat steps down to --mat and the
+     wash steps down again below it. Every value stays in the --canvas family —
+     lightness only, no hue introduced, and no text colour that mobile doesn't have.
      ============================================================================ */
   .deck, .deck-main { display: contents; }
   .rail { display: none; }
 
   @media (min-width: 1080px) {
     :root {
-      --rail-i: 64px;    /* icon rail at rest — one 38px glyph plus its gutters */
-      --rail-x: 212px;   /* …and expanded on hover, as an overlay, never a reflow */
+      --rail-i: 64px;    /* icon rail — one 38px glyph plus its gutters, at every state:
+                            the hover label is a pill that overflows it, not a wider rail */
       --rail-t: 248px;   /* topics rail */
       --deck-x: 20px;    /* viewport inset */
       --deck-cap: 1400px;
       --mat-y: 14px; --mat-x: 12px;
+      /* the middle grey. Far enough under #FFF that a card has an edge without the
+         mat itself reading as a tinted panel. The frosts over it are tinted to match.
+         Every value below is its first cut with 20% of its distance from #FFF taken
+         back out — the three steps still read, they just sit closer together. */
+      --mat: #F4F4F5;
+      --mat-a: rgba(244,244,245,0.88);
+      --mat-0: rgba(244,244,245,0);
     }
     html, body { height: 100%; overflow: hidden; }
+    /* the wash, one step below the mat everywhere including its own highlights, so the
+       rails always read as the deepest surface no matter which corner you look at */
     body {
       background:
-        radial-gradient(115% 85% at 8% -8%,   #FDFDFE 0%, rgba(253,253,254,0) 60%),
-        radial-gradient(95% 75%  at 96% 4%,   #FAFAFB 0%, rgba(250,250,251,0) 55%),
-        radial-gradient(90% 75%  at 84% 108%, #E1E1E4 0%, rgba(225,225,228,0) 64%),
-        radial-gradient(75% 65%  at -4% 96%,  #E5E5E8 0%, rgba(229,229,232,0) 60%),
-        var(--canvas);
+        radial-gradient(115% 85% at 8% -8%,   #EEEEF0 0%, rgba(238,238,240,0) 60%),
+        radial-gradient(95% 75%  at 96% 4%,   #EDEDEE 0%, rgba(237,237,238,0) 55%),
+        radial-gradient(90% 75%  at 84% 108%, #DFDFE2 0%, rgba(223,223,226,0) 64%),
+        radial-gradient(75% 65%  at -4% 96%,  #E3E3E6 0%, rgba(227,227,230,0) 60%),
+        #E9E9EC;
     }
 
     /* the scroll affordance is the content moving; a grey bar in each pane is three
@@ -1221,7 +1231,7 @@
     .deck-main {
       display: block; position: relative; min-width: 0; min-height: 0;
       margin: var(--mat-y) var(--mat-x);
-      background: var(--card);
+      background: var(--mat);
       border-radius: 24px; overflow: hidden;
       box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 6px 18px rgba(0,0,0,0.045),
                   0 24px 56px rgba(0,0,0,0.05);
@@ -1236,14 +1246,23 @@
        the bar's edges line up with the cards' — change one, change the other. */
     .wrap > .header, #entriesRoot { max-width: 600px; margin: 0 auto; }
     .wrap > .header { padding: 34px 0 44px; }
-    /* over white content the header's grey frost read as a band — same recipe, white tint */
+    /* the frost is tinted to the surface it sits on, or it reads as a band: on the phone
+       that's the canvas, here it's the mat */
     .header, .header::after {
-      background: rgba(255,255,255,0.86);
+      background: var(--mat-a);
       -webkit-backdrop-filter: blur(14px) saturate(150%);
       backdrop-filter: blur(14px) saturate(150%);
     }
     .header.hidden { transform: none; } /* hide-on-scroll is a phone pattern */
-    .stepper-btn { box-shadow: none; background: var(--field); }
+    /* white, like the cards — --field is #F4F4F6 and the mat is #F4F4F5, i.e. the same
+       colour, so anything --field that sits DIRECTLY on the mat disappears into it. The
+       stepper arrows and the week summary's provenance pills are the two that do; every
+       other --field surface lives inside a white card or sheet and is unaffected. */
+    .stepper-btn {
+      background: var(--card);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 2px 6px rgba(0,0,0,0.035);
+    }
+    .wsum-pill:not(.on) { background: var(--card); }
 
     .bottom-frost, .compose-dock { position: absolute; }
     /* inside the mat there is nothing behind this worth seeing through — on the phone the
@@ -1251,7 +1270,7 @@
        the compose bar. Same recipe, opaque at the base. */
     .bottom-frost {
       height: 172px;
-      background: linear-gradient(to top, #fff 30%, rgba(255,255,255,0.72) 66%, rgba(255,255,255,0));
+      background: linear-gradient(to top, var(--mat) 30%, var(--mat-a) 66%, var(--mat-0));
     }
     .compose-dock { left: 24px; right: 24px; max-width: 600px; padding: 0 0 22px; }
     /* the ⋮ menu held search, day view, export and settings — all four now have a visible
@@ -1265,37 +1284,33 @@
     }
 
     /* ---- left: the icon rail ----
-       At rest it is nothing but a column of glyphs on the wash. On hover (or when
-       tabbed into) it widens into a floating panel with the names. It is ABSOLUTELY
-       positioned so widening is an overlay, never a reflow — expanding it in the grid
-       would re-wrap every line of every entry as the pointer crossed it. */
+       A column of glyphs on the wash. On hover (or when tabbed into) the row under the
+       pointer names itself. The bar is ABSOLUTELY positioned so the name is an overlay,
+       never a reflow — anything that widened in the grid would re-wrap every line of
+       every entry as the pointer crossed it. */
     .rail-l { position: relative; overflow: visible; }
-    /* No panel. The bar is just a column of glyphs on the wash; the ROW under the pointer
-       grows into a lozenge and names itself, and nothing else moves. Opening a whole panel
-       to answer one question meant four blank rows came along for the ride. */
+    /* No panel. The bar is just a column of glyphs on the wash; the row under the pointer
+       names itself with a white pill beside the glyph, and nothing else moves. Opening a
+       whole panel to answer one question meant four blank rows came along for the ride. */
     .iconbar {
       position: absolute; left: 0; top: var(--mat-y);
       width: var(--rail-i); z-index: 5;
       display: flex; flex-direction: column; gap: 2px;
       padding: 8px 0;
-      overflow: visible;  /* the hovered lozenge extends past the rail, over the mat */
+      overflow: visible;  /* the hovered label pill extends past the rail, over the mat */
     }
+    /* the row never changes size or paints anything: it stays exactly the rail's width and
+       lets the label pill overflow it to the right. Nothing reflows, and the pill's shadow
+       isn't clipped the way an overflow:hidden lozenge would clip it. */
     .ico-row {
-      flex: none; display: flex; align-items: center; gap: 12px;
+      /* 2px, not a gap: the pill reads as sitting against the circle. It can't be 0 —
+         on an active row the circle is white too, and flush they merge back into the
+         one-piece lozenge this replaced. */
+      flex: none; display: flex; align-items: center; gap: 2px;
       width: var(--rail-i); padding: 0 13px; height: 42px;
       background: none; border: none; text-align: left;
-      border-radius: 999px; overflow: hidden; white-space: nowrap;
-      transition: width 0.34s cubic-bezier(0.16, 1, 0.3, 1),
-                  background-color 0.24s ease, box-shadow 0.24s ease;
+      border-radius: 999px; overflow: visible; white-space: nowrap;
     }
-    .ico-row:hover, .ico-row:focus-visible {
-      width: var(--rail-x);
-      background: rgba(255,255,255,0.92);
-      -webkit-backdrop-filter: blur(22px) saturate(160%);
-      backdrop-filter: blur(22px) saturate(160%);
-      box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 8px 26px rgba(0,0,0,0.10);
-    }
-    @media (prefers-reduced-motion: reduce) { .ico-row { transition: none; } }
     .ico-glyph {
       position: relative; flex: none;
       width: 38px; height: 38px; border-radius: 999px;
@@ -1304,10 +1319,24 @@
       transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
     }
     .ico-glyph svg { width: 18px; height: 18px; }
+    /* the label IS the pill: a white lozenge the height of the glyph's circle, cut to the
+       length of the word. Decoration only — pointer-events off, so the 64px row stays the
+       hit target and the pill never sits over the mat catching clicks meant for a card. */
     .ico-label {
-      white-space: nowrap; font-size: 13px; color: var(--subtle);
-      opacity: 0; transition: opacity 0.16s ease;
+      flex: none; white-space: nowrap;
+      height: 38px; padding: 0 15px; border-radius: 999px;
+      display: flex; align-items: center;
+      font-size: 13px; color: var(--subtle);
+      background: var(--card);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.035), 0 4px 14px rgba(0,0,0,0.06);
+      pointer-events: none;
+      /* 4px of travel, not 6: any further and the pill starts at rest *underneath* the
+         circle it sits 2px from, and slides out over its edge */
+      opacity: 0; transform: translateX(-4px);
+      transition: opacity 0.16s ease,
+                  transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
+    @media (prefers-reduced-motion: reduce) { .ico-label { transition: none; transform: none; } }
     .ico-row.on .ico-glyph {
       background: var(--card); color: var(--ink);
       box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.04);
@@ -1323,12 +1352,17 @@
     .ico-dot.live { background: #55A862; }
 
     .ico-row:hover .ico-label, .ico-row:focus-visible .ico-label {
-      opacity: 1; transition-delay: 0.04s;
+      opacity: 1; transform: none; transition-delay: 0.04s;
     }
-    /* the lozenge IS the hover feedback, so the glyph drops its own; an active glyph keeps a
-       circle, switched to grey so it stays visible against the white lozenge */
-    .ico-row:hover .ico-glyph { color: var(--ink); background: none; box-shadow: none; }
-    .ico-row.on:hover .ico-glyph { background: rgba(0,0,0,0.055); }
+    /* under the pointer the glyph takes a soft grey circle of its own; an active glyph keeps
+       its white one — there's no white lozenge behind it any more to hide against */
+    .ico-row:hover .ico-glyph, .ico-row:focus-visible .ico-glyph {
+      color: var(--ink); background: rgba(0,0,0,0.05); box-shadow: none;
+    }
+    .ico-row.on:hover .ico-glyph, .ico-row.on:focus-visible .ico-glyph {
+      background: var(--card);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.04);
+    }
 
     /* ---- right: topics ---- */
     .rail-r { padding: var(--mat-y) 0 16px; }

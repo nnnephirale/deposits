@@ -24,6 +24,9 @@ particular). Everything here is *as built*, not aspirational. The app is one fil
 token, never re-type the rgb — there were three hardcoded copies of the old canvas colour and
 changing the background meant hunting them down.
 
+`--mat` `#F4F4F5` (plus `--mat-a` / `--mat-0`) is **desktop only**, declared inside the
+`min-width: 1080px` block: the middle grey between the wash and the white cards. See §5.
+
 **Radii:** 24px cards · 20px sheets · 18px compose bar · 999px pills and format buttons ·
 14px gallery cards · 12px arrow buttons.
 
@@ -241,13 +244,33 @@ the left, the content as its own rounded surface, a quiet panel on the right.
   64px          600px             248px
 ```
 
-**The icon rail has no panel.** It's a column of glyphs on the wash; the *row* under the
-pointer grows into a lozenge and names itself, and nothing else moves — opening a whole
-panel to answer one question brought four blank rows along for the ride. The rows are
-absolutely positioned within the rail so a lozenge overlays the mat rather than reflowing
-it: widening in the grid would re-wrap every line of every entry as the pointer crossed.
-Each row is sized to the *expanded* width and clipped, so the label never re-wraps mid
-transition. `:focus-visible` opens it too, so tabbing works.
+**The icon rail has no panel.** It's a column of glyphs on the wash; the row under the
+pointer names itself and nothing else moves — opening a whole panel to answer one question
+brought four blank rows along for the ride. The bar is absolutely positioned within the rail
+so the naming overlays the mat rather than reflowing it: widening in the grid would re-wrap
+every line of every entry as the pointer crossed. `:focus-visible` names it too, so tabbing
+works.
+
+**The name is a pill, not a lozenge** (30 Jul 2026). The first version grew the whole *row*
+into a white capsule at a fixed `--rail-x: 212px` and clipped it — so a three-letter label
+and a twelve-letter one got the same slab, most of it empty. Now `.ico-label` *is* the pill:
+white, `999px`, the same 38px height as the glyph's circle, `padding: 0 15px`, and therefore
+cut to the length of the word. It sits **2px** from the circle, not `gap: 8px` (read as a gap)
+and not 0 — on an *active* row the circle is white too, and flush they merge back into the
+one-piece lozenge this replaced. The travel is 4px for the same reason: 6px started the pill
+underneath the circle it's 2px from. The row itself never changes size or paints anything — it
+stays exactly `--rail-i` wide and lets the pill overflow it to the right, which is why
+`.ico-row` is `overflow: visible` (an `overflow: hidden` capsule clipped the pill's own
+shadow) and why there is no `width` transition left to animate. The reveal is
+`opacity` + a 6px `translateX`. Two consequences worth remembering:
+
+- **The pill is `pointer-events: none`.** It hangs over the mat, and without this it would
+  catch clicks aimed at a card underneath — and it would keep catching them at `opacity: 0`,
+  since a transparent element still hit-tests. The 64px row stays the only target.
+- **The glyph gets its own hover circle back.** It had dropped it because the lozenge behind
+  it was the feedback; with no lozenge, hover paints `rgba(0,0,0,0.05)` on the circle. An
+  *active* glyph keeps its white circle on hover — the reason it used to switch to grey was
+  to stay visible against the white lozenge, and that's gone.
 
 **Haptics were tried and removed** (30 Jul 2026). The `web-haptics` vocabulary was inlined
 against `navigator.vibrate`, with a hidden `<input type="checkbox" switch>` fallback for
@@ -277,11 +300,36 @@ the dock is `position: fixed`, the header is back to its grey `--canvas-a` frost
 reachable, and the rails are `display: none` *and* emptied of children.
 
 **There is no window frame.** The deck is a bare transparent grid — no background, no shadow,
-no overflow clip (the icon rail has to expand over the mat). The only painted surface is the
-mat; both rails sit directly on the canvas wash, which is why the wash carries the whole
-composition and nothing else paints a grey of its own. The wash is pure `--canvas` family:
-same `#F0F0F1`, lifted and settled a few percent in *lightness only*. No hue is introduced,
-and no text colour exists on desktop that doesn't exist on mobile.
+no overflow clip (the icon rail has to expand over the mat). Both rails sit directly on the
+canvas wash and paint no surface of their own.
+
+**Three greys, darkest outward** (30 Jul 2026): the wash the rails sit on, then the mat, then
+the white cards on it. The mat was originally `--card` white, which made the cards it carried
+invisible — on the phone a white card reads because the canvas behind it is grey, and the
+desktop had thrown that away. So the mat steps down to `--mat: #F4F4F5` and the wash steps
+down again below it (base `#E9E9EC`, `#EEEEF0` at its lightest corner, `#DFDFE2` at its
+darkest). The wash's *highlights* matter as much as its shadows here: they have to stay under
+the mat too, or the composition inverts in whichever corner the light falls. Everything stays
+in the `--canvas` family, lightness only — no hue introduced, and no text colour that mobile
+doesn't have.
+
+Those are the first cut's values with **20% of each one's distance from `#FFF` taken back
+out** — the first pass (mat `#F1F1F3`, wash `#E4E4E7`) was right in structure and too strong
+in degree. Scaling toward white rather than re-picking by eye is what keeps the three steps
+proportional to each other; if it needs moving again, scale it again. Note the ratio this
+leaves: the card→mat step is ~11 levels and mat→wash ~11 more, so **the mat is the fragile
+one** — anything painted on it needs to be white or clearly darker, never near-white.
+
+Anything frosted over the mat is tinted to the mat, never to white: `--mat-a` / `--mat-0`
+exist for exactly that, and both the header frost and the bottom fade use them. A white
+frost over a grey mat reads as a band.
+
+**`--field` is `#F4F4F6` and the mat is `#F4F4F5` — the same colour.** So *anything `--field`
+that sits directly on the mat disappears entirely.* Two things do, and both are overridden to
+`--card` in the desktop block: `.stepper-btn` (which also gained a shadow) and `.wsum-pill`
+(the week summary has no card of its own — it sits straight on the mat, and its MINE/V1/V2
+pills went invisible). Every other `--field` surface in the app lives inside a white card or a
+sheet and is unaffected — that's the list to re-check if the mat value ever moves again.
 
 Things that cost real debugging, or that will bite the next change:
 
@@ -343,8 +391,9 @@ Things that cost real debugging, or that will bite the next change:
   `deskTopic` and `deskScope`, or the phone layout stays silently filtered with no control on
   screen to clear it.
 - **The bottom frost is opaque at its base on desktop.** The 0.94 white was tuned to let the
-  grey canvas glow through on a phone; inside a white mat there is nothing behind it worth
-  seeing through, and the translucency just let entries peek out under the compose bar.
+  grey canvas glow through on a phone; inside the mat there is nothing behind it worth seeing
+  through, and the translucency just let entries peek out under the compose bar. It fades
+  `--mat → --mat-a → --mat-0`, so it stays invisible against whatever the mat is.
 
 Still open:
 
