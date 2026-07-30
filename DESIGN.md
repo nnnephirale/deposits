@@ -145,6 +145,27 @@ cell and calendar cell commits on pointerdown with `preventDefault()` to keep fo
 pointerdown does *not* grant on touch — the photo picker silently refused to open. That one
 button commits on `click`.
 
+**The composer notch remembers its height as a FRACTION of the viewport** (30 Jul 2026), not
+as pixels — `weekly-deposits-composer-height-frac`, device-local, never synced. The notch is
+really answering "how much of the screen should the composer take", so a fraction survives a
+rotate, a window resize and the phone↔desktop jump, where a saved pixel height would either
+clamp to the ceiling or open as a sliver. Verified: `0.591` gives 532px in a 900px window and
+480px at 812px, same proportion both times. Three things to keep right if this is touched:
+
+- **Save on `pointerup`, not in the move handler.** A drag is ~60 writes a second, and the
+  height mid-drag isn't the one she chose.
+- **Save `manualHeight`, not the raw drag delta**, so what's stored is the value *after*
+  `SHEET_MIN`/`SHEET_MAX` clamping — never one that reopening would reject.
+- **Guard the value on read.** `parseFloat` of a corrupted key gives `NaN`, and `NaN` survives
+  both `Math.max` and `Math.min` — it would propagate into `--sheet-h` and collapse the sheet.
+  The range test `> 0.2 && <= 1` rejects `NaN`, `0`, negatives and absurd values in one line.
+
+Note a pre-existing disagreement this rides on: the JS ceiling is `0.98 * innerHeight` but the
+desktop CSS caps `.sheet.expanse` at `100dvh - (--deck-x + --mat-y) * 2`, which is tighter. At
+the very top of the range `--sheet-h` can read 882px while the sheet renders 832px. It
+round-trips to the same *visual* height, so the memory is stable — but the two numbers are not
+the same number.
+
 **`selectionchange`, not `select`.** `select` fires when text *becomes* selected and never
 when it clears, and on iOS the tap that dismisses a selection is swallowed by the callout, so
 no pointerup arrives either. Bind `selectionchange` on both the element (newer engines) and

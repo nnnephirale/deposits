@@ -3206,6 +3206,25 @@ function bindFmtSelectionSync(fn) {
   if (fn) document.addEventListener("selectionchange", fn);
 }
 
+// the composer height the notch was last dragged to, remembered across opens and reloads.
+// Stored as a FRACTION of the viewport, not pixels: the notch is really answering "how much
+// of the screen should the composer take", and a fraction survives a window resize, a rotate,
+// and the phone→desktop jump — where a saved pixel height would either clamp to the ceiling
+// or turn into a sliver. Device-local on purpose (never synced): a phone and a 1440px window
+// want different composers.
+const SHEET_FRAC_KEY = "weekly-deposits-composer-height-frac";
+let sheetFrac = null;
+try {
+  const raw = parseFloat(localStorage.getItem(SHEET_FRAC_KEY));
+  // guard the stored value, don't trust it: a NaN would poison every height calculation
+  // downstream, and Math.max/min can't rescue NaN — it propagates through both.
+  if (raw > 0.2 && raw <= 1) sheetFrac = raw;
+} catch (e) {}
+function saveSheetFrac(frac) {
+  sheetFrac = frac;
+  try { localStorage.setItem(SHEET_FRAC_KEY, String(frac)); } catch (e) {}
+}
+
 function openComposer(existing) {
   let text = existing ? existing.text : "";
   let tags = existing ? [...existing.tags] : [];
@@ -3228,8 +3247,9 @@ function openComposer(existing) {
     : { year: cw.year, week: cw.week, day };
   // segmentation proposal: null | { busy: true } | { ranges: [{start, end, topic}] }
   let segState = null, segErr = null, segTagOpen = -1;
-  // manual composer height (px) set by dragging the notch; persists across rebuilds
-  let manualHeight = null;
+  // manual composer height (px) set by dragging the notch; persists across rebuilds, and
+  // now across opens too — seeded from the remembered fraction of THIS viewport
+  let manualHeight = sheetFrac != null ? Math.round(sheetFrac * window.innerHeight) : null;
   // once the format bar has shown, keep it shown (survives rebuilds too — no reflow jump)
   let barShown = false;
 
@@ -3593,6 +3613,10 @@ function openComposer(existing) {
         grabber.removeEventListener("pointerup", onUp);
         grabber.style.cursor = "";
         try { grabber.releasePointerCapture(e.pointerId); } catch (err) {}
+        // remembered on release, not on every pointermove — a drag is ~60 writes a second,
+        // and the value mid-drag isn't the one she chose. manualHeight (not the raw drag
+        // delta) so what's stored is the CLAMPED height, never one the min/max would reject.
+        if (manualHeight != null) saveSheetFrac(manualHeight / window.innerHeight);
       };
       grabber.addEventListener("pointermove", onMove);
       grabber.addEventListener("pointerup", onUp);
