@@ -1156,10 +1156,15 @@
      are one scope split by a hairline, and dropping an unrelated control into that pill would make
      it read as a third part of the same date. */
   .head-left { display: flex; align-items: center; min-width: 0; }
+  /* --head-h is the head row's one height: the day/week lozenge sets it, and the tag lozenge and
+     both ring buttons take it from here. Previously each was sized by its own padding and they
+     came out 31 / 32 / 34, which reads as three not-quite-aligned controls on one row. */
+  :root { --head-h: 31px; }
   .head-tag {
-    display: inline-flex; align-items: center; gap: 6px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: var(--head-h); box-sizing: border-box;
     background: var(--field); border: none; border-radius: 999px;
-    padding: 8px 12px; margin-left: 8px; color: var(--subtle);
+    padding: 0 11px; margin-left: 8px; color: var(--subtle);
     font-family: var(--mono); font-size: 13px; font-weight: 600;
     user-select: none; -webkit-user-select: none;
   }
@@ -1169,20 +1174,28 @@
   .head-tag .ht-count { line-height: 1; }
   /* the two ring buttons. The ring is here, not in the SVGs, so both are the same circle and only
      their glyph differs — and so the disabled/active states have one thing to restyle. */
+  /* the commit/dismiss pair. One light grey does all the work: it FILLS the tick and OUTLINES
+     the cross, including the cross's own stroke, so the two read as a matched pair at the same
+     quiet weight. The tick previously carried a near-black ring, which made a 31px circle the
+     loudest thing on the row — louder than the entry itself. A muted grey fill is the house
+     treatment for a primary action anyway; the tick reads because it is filled, not because it
+     is dark, so its glyph can stay ink without the surround shouting. */
+  :root { --act-grey: #DCDCE2; }
   .head-acts { display: flex; align-items: center; gap: 8px; }
   .head-act {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 34px; height: 34px; padding: 0; flex: none;
-    background: none; border: 1.5px solid var(--hairline); border-radius: 50%;
-    color: var(--ink);
+    width: var(--head-h); height: var(--head-h); padding: 0; flex: none;
+    box-sizing: border-box;
+    background: none; border: 1.5px solid transparent; border-radius: 50%;
   }
-  .head-act svg { width: 18px; height: 18px; }
-  .head-act.act-save { border-color: var(--ink); }
-  .head-act.act-save:not(:disabled):active { background: var(--ink); color: #fff; }
+  .head-act svg { width: 16px; height: 16px; }
+  .head-act.act-save { background: var(--act-grey); color: var(--ink); }
+  .head-act.act-save:not(:disabled):active { background: #C9C9D1; }
+  .head-act.act-close { border-color: var(--act-grey); color: var(--act-grey); }
   .head-act.act-close:active { background: var(--field); }
-  /* nothing to save reads as a faint outline rather than a missing button — the control stays
+  /* nothing to save reads as a fainter fill rather than a missing button — the control stays
      where it is so the row never reflows as text comes and goes. */
-  .head-act.act-save:disabled { border-color: var(--hairline); color: #C7C7CC; }
+  .head-act.act-save:disabled { background: var(--field); color: #C7C7CC; }
 
   /* the topic/mode chips, folded away behind the tag lozenge */
   .tag-pop {
@@ -3839,6 +3852,23 @@ function clearKeyboardReserve() {
   clearTimeout(kbReserveTimer);
   setKbReserve(0);
 }
+// The keyboard RE-opening is not as well announced as its first arrival. Focus a field again
+// after dismissing it and iOS can bring the keyboard back without firing a visualViewport resize
+// or scroll that lands on the settled geometry — so --vvh/--vvt/--vvb keep describing a screen
+// with no keyboard on it, and anything docked to that measurement stays down where the keyboard
+// now is. It came back the moment the page was scrolled, which is simply the next event that
+// happened to run syncViewportVars: the reading was always available, nothing had asked for it.
+// So ask, on a short ladder rather than once — the geometry settles somewhere inside the
+// keyboard's own animation and the exact frame isn't knowable. reserveForKeyboard() alongside it
+// covers the same gap from the other side, predicting the band from the cached height so the
+// first frame is already right; syncViewportVars hands the reserve back as soon as a real
+// measurement disagrees.
+let kbResyncTimers = [];
+function resyncForKeyboard() {
+  kbResyncTimers.forEach(clearTimeout);
+  kbResyncTimers = [60, 180, 350, 600, 900].map(d => setTimeout(syncViewportVars, d));
+  reserveForKeyboard();
+}
 
 function syncViewportVars() {
   const s = document.documentElement.style;
@@ -4594,6 +4624,10 @@ function openComposer(existing) {
     ta.addEventListener("selectionchange", updateBar);
     bindFmtSelectionSync(updateBar);
     ["keyup", "pointerup", "input", "focus", "blur"].forEach(evt => ta.addEventListener(evt, updateBar));
+    // Every focus, not just the composer's first: openComposer only predicts the band for the
+    // keyboard it raises itself, so tapping away and back left the bar sitting under the keyboard
+    // until some unrelated event happened to re-measure. See resyncForKeyboard.
+    ta.addEventListener("focus", resyncForKeyboard);
 
     // markers have to hug the words they style, one line at a time — that's what makes the
     // difference between a style that renders and one that shows its asterisks. a selection
@@ -4958,11 +4992,15 @@ function openComposer(existing) {
       const topicChips = el("div", { class: "chips" });
       for (const t of TOPICS) {
         const on = tags.includes(t.id);
+        // A topic's colour is what identifies it, so it carries that colour whether or not it is
+        // on — unselected chips used to be uniformly grey, which made the palette something you
+        // only discovered by selecting things. Selection is now carried by the FILL (tinted bg +
+        // weight) against a plain surface, rather than by colour-vs-no-colour.
         const chip = el("button", {
           class: "chip",
           style: on
             ? { background: t.bg, color: t.fg, borderColor: t.dot, fontWeight: "600" }
-            : {}
+            : { background: "transparent", color: t.fg, borderColor: t.bg }
         }, t.label);
         topicChips.appendChild(chipPress(chip, t.id));
       }
