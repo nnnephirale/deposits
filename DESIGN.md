@@ -451,10 +451,8 @@ tap bounced the whole screen up once.
   gives back and **the sheet does not move at all**. Measured: 410px before and 410px after.
 
 Three details that are the whole design:
-- **Reserve on `--kbr`, never by shrinking `--vvh`.** `--vvh` is the backdrop's height. Shrink it
-  and the frost stops covering the bottom of the screen, showing the list unblurred under the
-  sheet. `--kbr` is `padding-bottom` on `.overlay` instead: the backdrop still spans the whole
-  viewport and `align-items: flex-end` drops the sheet above the band. (Desktop's `.overlay`
+- **Overlays run to the SCREEN bottom, not the visual viewport's bottom** (corrected 31 Jul,
+  second pass — see below). Top is `var(--vvt)`, bottom is `0`. (Desktop's `.overlay`
   overrides that padding, and has no keyboard anyway.)
 - **The measurement always beats the prediction.** As soon as a real keyboard is seen, `--kbr`
   is handed back and `--vvh` rules. A stale cache costs one small correction (predicted 392,
@@ -464,6 +462,44 @@ Three details that are the whole design:
 
 First composer on a fresh install still adjusts once, because there is nothing to predict from
 yet. Existing entries open to be read: no focus, no reserve.
+
+**iOS draws its own accessory bar in the keyboard's region** (31 Jul, second pass). Sizing the
+overlay and the sheet to `--vvh` — the visual viewport — was still wrong, just less obviously:
+the visual viewport ends where the keyboard's region *begins*, and iOS paints its `^ ⌄ ✓`
+form-navigation bar in that region, above the keys. So the sheet's white stopped short, the topic
+pills were chopped mid-row, and the accessory bar sat on a see-through strip with the entry list
+showing through behind it. Reported as *"a cutoff between the end of the actual window and a
+clear space where the arrow up/down/tick reveals the layer behind — it should be a continuation
+of the actual window."*
+
+The correction separates **the box** from **the content**:
+
+| | before | after |
+|---|---|---|
+| `.overlay` | `top: var(--vvt); height: var(--vvh)` | `top: var(--vvt); bottom: 0` |
+| `.sheet.expanse` ceiling | `var(--vvh) - var(--kbr) - …` | `100dvh - var(--vvt) - …` |
+| keyboard kept off content by | shortening the box | `padding-bottom` |
+
+`--kb` (live band, `innerHeight - (--vvh + --vvt)`) and `--kbr` (the prediction) are never both
+set, so `calc(var(--kb) + var(--kbr))` is the band either way. Every overlay's `padding-bottom`
+carries it — bottom-anchored sheets to lift their content, and the centred `.read-back` /
+`.img-preview-back` so `align-items: center` still centres in the part she can see.
+
+A bonus from doing it this way: **the box no longer resizes when the keyboard lands at all** —
+only its inner padding changes — so there is nothing left for Safari to scroll the caret into
+view *from*. The reserve is now belt-and-braces for content stability rather than the thing
+holding the bounce off.
+
+**The band needs a floor and a device gate, or it fires on a window resize.** The first cut
+learned from any "visual viewport is >80px shorter than `innerHeight`" reading. Resizing the
+desktop window caught a transient 88px difference, cached it, and from then on padded the
+desktop composer by 88px of nothing. Now: `SOFT_KB` (`(hover: none) and (pointer: coarse)`)
+gates learning, reserving *and* `--kb` itself, and `KB_MIN` is 140px — Safari's collapsing URL
+bar is ~60–90px and the accessory bar alone is ~50px, neither of which is a keyboard. Learning
+also requires `--vvt < 4`: once Safari has scrolled, the band measures keyboard *plus* scroll,
+and caching that would over-reserve next time. The key is versioned (`-v2`) so the bad value is
+dropped. Consequence for testing: with `SOFT_KB` false in a desktop preview pane, the reserve
+path can only be exercised on a real device — drive `--kb`/`--kbr` by hand to check the geometry.
 
 **Pinch a photo run** closed and it fans into a deck (white ring per card so they stay
 distinct); spread it back to a row. State is keyed by the run's markers so it survives the

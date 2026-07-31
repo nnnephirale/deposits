@@ -57,9 +57,12 @@
        open. The fallbacks are what desktop and any browser without visualViewport get. */
     --vvh: 100dvh;
     --vvt: 0px;
-    /* the band held back for a keyboard that is coming but hasn't landed — see
-       reserveForKeyboard. The sheet's ceiling is --vvh minus this, so when the keyboard
-       arrives --vvh drops by the same amount this gives back and the sheet doesn't move. */
+    /* the keyboard's band, in two halves that are never both set: --kb is the LIVE one, measured
+       as innerHeight - (--vvh + --vvt), and --kbr is the one PREDICTED from last time while the
+       keyboard is still on its way (see reserveForKeyboard). Overlays run to the screen bottom
+       and lift their content by the sum, so the sum staying constant across the keyboard's
+       arrival is what keeps anything from moving. */
+    --kb: 0px;
     --kbr: 0px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -525,11 +528,15 @@
      anchoring for the same reason .overlay does, or the keyboard drags the menu off the top. */
   .read-back {
     position: fixed; left: 0; right: 0; z-index: 88;
-    top: var(--vvt); height: var(--vvh);
+    /* to the screen bottom so the frost covers the keyboard's region too (iOS paints its
+       accessory bar there), with the band as padding so `align-items: center` still centres
+       the card in the part she can actually see rather than behind the keyboard */
+    top: var(--vvt); bottom: 0;
     display: flex; align-items: center; justify-content: center;
     /* the page paints under the status bar now, so every full-screen overlay has to
        keep its own content out from under the clock itself */
-    padding: calc(env(safe-area-inset-top) + 22px) 22px calc(env(safe-area-inset-bottom) + 22px);
+    padding: calc(env(safe-area-inset-top) + 22px) 22px
+             calc(env(safe-area-inset-bottom) + 22px + var(--kb) + var(--kbr));
     background: rgba(0,0,0,0.4);
     -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
     opacity: 0; transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -592,9 +599,10 @@
      up, so it takes the same visual-viewport anchoring rather than trusting 100dvh. */
   .img-preview-back {
     position: fixed; left: 0; right: 0; z-index: 90;
-    top: var(--vvt); height: var(--vvh);
+    top: var(--vvt); bottom: 0;
     display: flex; align-items: center; justify-content: center;
-    padding: calc(env(safe-area-inset-top) + 20px) 20px calc(env(safe-area-inset-bottom) + 20px);
+    padding: calc(env(safe-area-inset-top) + 20px) 20px
+             calc(env(safe-area-inset-bottom) + 20px + var(--kb) + var(--kbr));
     background: rgba(28,28,30,0.34);
     -webkit-backdrop-filter: blur(18px) saturate(1.1); backdrop-filter: blur(18px) saturate(1.1);
     opacity: 0; transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
@@ -888,25 +896,30 @@
   body:has(.read-back) .compose-dock { opacity: 0; pointer-events: none; }
 
   /* sheet */
-  /* Pinned to the VISUAL viewport, not `inset: 0`. A fixed element is positioned against the
-     layout viewport, and when the keyboard opens iOS scrolls that out from under it — so an
-     overlay at `top: 0` ends up above the top of what she can see. `top: var(--vvt)` puts it
-     back on screen, and the height matching --vvh is what lets the sheet inside it fit. */
+  /* Top pinned to the VISUAL viewport, bottom to the SCREEN. A fixed element is positioned
+     against the layout viewport, and when the keyboard opens iOS scrolls that out from under it
+     — so an overlay at `top: 0` ends up above the top of what she can see, hence `--vvt`.
+     But the BOTTOM must stay at `0`, not at the visual viewport's bottom edge: the visual
+     viewport ends where the keyboard's region begins, and iOS draws its own accessory bar
+     (the ^ ⌄ ✓ row) in that region. An overlay that stopped there left the accessory bar
+     sitting on a see-through strip with the entry list showing behind it. Running to the screen
+     bottom means the backdrop — and the sheet inside it — carry on underneath. */
   .overlay {
     position: fixed; left: 0; right: 0; z-index: 50;
-    top: var(--vvt); height: var(--vvh);
-    /* the reserved band sits INSIDE the backdrop: the frost still covers the whole screen while
-       the keyboard is on its way, and flex-end drops the sheet above the band rather than under
-       where the keyboard will be. box-sizing is border-box app-wide, so the height still holds. */
-    padding-bottom: var(--kbr);
+    top: var(--vvt); bottom: 0;
     background: rgba(0,0,0,0.4);
     -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
     display: flex; align-items: flex-end; justify-content: center;
   }
+  /* The sheet's BOX runs to the bottom of the screen, under the keyboard and its accessory bar,
+     so its white is continuous with no strip showing through. Only its CONTENT is lifted clear,
+     by carrying the keyboard's band in padding-bottom. --kb is the live band and --kbr the one
+     predicted before it lands; exactly one of them is ever non-zero, so the sum is the band
+     either way and nothing shifts when the real keyboard arrives. */
   .sheet {
     background: var(--card); width: 100%; max-width: 520px;
     border-radius: 20px 20px 0 0;
-    padding: 12px 20px calc(env(safe-area-inset-bottom) + 28px);
+    padding: 12px 20px calc(env(safe-area-inset-bottom) + 28px + var(--kb) + var(--kbr));
     max-height: 88vh; overflow-y: auto;
     box-shadow: 0 -8px 40px rgba(0,0,0,0.12);
     animation: slideUp 0.22s ease;
@@ -941,15 +954,16 @@
   .sheet.expanse {
     /* --sheet-h is what the notch drags. The ceiling has to leave the status bar alone:
        100dvh now includes it, so a bare 98dvh slid the grabber up under the clock.
-       The ceiling is measured against --vvh (the VISUAL viewport), not 100dvh: with the
-       keyboard open a 98dvh sheet is taller than the space left above it, and Safari's answer
-       to that is to scroll the caret into view — which is what threw the whole composer off the
-       top of the screen. Capped to what's actually visible there is nothing left to scroll, so
-       the field stays exactly where it opened. --sheet-h itself is left alone, so her chosen
-       height comes straight back when the keyboard goes away. */
+       The ceiling runs to the SCREEN bottom (100dvh) less the visible top (--vvt), NOT to the
+       visual viewport's bottom: the box has to carry on under the keyboard's region or its white
+       stops short and iOS's accessory bar sits on a see-through strip. The keyboard is kept off
+       the content by padding-bottom (inherited from .sheet) rather than by shortening the box —
+       which also means the box never resizes when the keyboard lands, so there is nothing for
+       Safari to scroll the caret into view *from*. --sheet-h is left alone, so her chosen height
+       comes straight back when the keyboard goes away. */
     height: var(--sheet-h, 98dvh);
-    max-height: calc(var(--vvh) - var(--kbr) - env(safe-area-inset-top) - 10px);
-    padding: 12px 20px calc(env(safe-area-inset-bottom) + 24px);
+    max-height: calc(100dvh - var(--vvt) - env(safe-area-inset-top) - 10px);
+    padding: 12px 20px calc(env(safe-area-inset-bottom) + 24px + var(--kb) + var(--kbr));
     animation: none; /* the unfold below replaces the generic slide-up */
     clip-path: inset(0 round 20px 20px 0 0);
     /* the toe matters: a deliberate hold of visible growth off the bar, THEN a decisive run
@@ -981,8 +995,11 @@
     .sheet.expanse, .sheet.expanse > * { transition: none; }
   }
   /* the writing surface tracks whatever height the notch has set, less the chrome above it —
-     but never past the visible viewport, or a min-height taller than the shrunken sheet puts
-     the field's own scroll back in play and the caret goes right back out of view */
+     but never past the VISIBLE area, or a field taller than the room above the keyboard puts
+     its own scroll back in play and the caret goes right back out of view. `--vvh - --kbr` is
+     that room in both directions: with the keyboard up --vvh already excludes it and --kbr is 0;
+     while it's still on its way --vvh is full and --kbr is the band. Never both, so the number
+     is the same across the arrival — which is why the field doesn't resize either. */
   .sheet.expanse textarea.ta-entry {
     background: none; border-radius: 0; padding: 8px 0 0;
     font-size: 17px; line-height: 1.55;
@@ -3531,11 +3548,19 @@ let sheetViewportSync = null;
 // keyboard lands; every one after that opens already sized for it. The 80px floor keeps
 // Safari's collapsing toolbar out of the number, and the 600 ceiling keeps a junk value from
 // swallowing the whole screen.
-const KB_KEY = "weekly-deposits-kb-h";
+// Only devices that actually HAVE a soft keyboard may learn or reserve. Without this gate a
+// plain window resize on desktop reads as a keyboard: the first cut used a bare "the visual
+// viewport is >80px shorter than innerHeight" test, caught an 88px difference while the window
+// was being resized, cached it, and from then on padded the desktop composer by 88px of nothing.
+const SOFT_KB = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+// 140px floor, not 80: Safari's collapsing URL bar is ~60–90px and iOS's accessory bar alone is
+// ~50px, and neither is a keyboard. A real phone keyboard is ~250–400px.
+const KB_MIN = 140;
+const KB_KEY = "weekly-deposits-kb-h-v2";   // v2: the old key may hold a resize mistaken for a keyboard
 let kbHeight = 0;
 try {
   const v = parseInt(localStorage.getItem(KB_KEY), 10);
-  if (v > 80 && v < 600) kbHeight = v;
+  if (v >= KB_MIN && v < 600) kbHeight = v;
 } catch (e) {}
 
 // --kbr is the band held back for a keyboard that is on its way but hasn't arrived. The BACKDROP
@@ -3550,8 +3575,8 @@ function setKbReserve(px) {
 }
 function reserveForKeyboard() {
   clearTimeout(kbReserveTimer);
-  if (!kbHeight) return;                                     // nothing learned yet
-  if (vvp && vvp.height < window.innerHeight - 80) return;    // already up: --vvh has it
+  if (!SOFT_KB || !kbHeight) return;                          // no soft keyboard, or nothing learned
+  if (vvp && vvp.height < window.innerHeight - KB_MIN) return; // already up: --vvh has it
   setKbReserve(kbHeight);
   // a hardware keyboard means it never comes, and a dismissed one means it left again — either
   // way don't sit on the band forever, or the composer stays short for no reason
@@ -3565,18 +3590,31 @@ function clearKeyboardReserve() {
 function syncViewportVars() {
   const s = document.documentElement.style;
   const h = Math.round(vvp ? vvp.height : window.innerHeight);
+  const t = Math.round(vvp ? vvp.offsetTop : 0);
   s.setProperty("--vvh", h + "px");
-  s.setProperty("--vvt", Math.round(vvp ? vvp.offsetTop : 0) + "px");
-  // the keyboard is up: learn its height for next time, and give the reserved band back, since
-  // --vvh now accounts for the real thing. Trusting the measurement over the prediction is what
-  // self-corrects a stale cache — worst case one small adjustment, never the full-height jump.
-  const gap = Math.round(window.innerHeight - h);
-  if (gap > 80) {
-    if (gap !== kbHeight) {
-      kbHeight = gap;
-      try { localStorage.setItem(KB_KEY, String(gap)); } catch (e) {}
-    }
+  s.setProperty("--vvt", t + "px");
+  // How much of the LAYOUT viewport the keyboard (plus iOS's own accessory bar) is sitting on
+  // top of. Overlays run to the screen bottom, so this is what their content has to be lifted
+  // by — expressed in layout coordinates, which is why --vvt belongs in the sum: the visual
+  // viewport's bottom edge is at --vvt + --vvh, and everything below that is covered.
+  // Gated the same way the cache is: anything under KB_MIN is a collapsing toolbar or a window
+  // being dragged, not a keyboard, and padding the sheet by it is a visible glitch.
+  const band = Math.max(0, window.innerHeight - (h + t));
+  const isKb = SOFT_KB && band >= KB_MIN && band < 600;
+  s.setProperty("--kb", (isKb ? band : 0) + "px");
+  if (isKb) {
+    // Hand the reserved band back — --vvh accounts for the real keyboard now. Trusting the
+    // measurement over the prediction is what self-corrects a stale cache: worst case one small
+    // adjustment, never the full-height jump. This runs on every reading, scrolled or not.
     if (kbReserve) clearKeyboardReserve();
+    // But only LEARN from an undistorted one (t ≈ 0). Once Safari has scrolled the visual
+    // viewport, the band describes keyboard + scroll rather than the keyboard, and caching that
+    // would over-reserve on the next open. t is 0 at the moment a keyboard first appears, which
+    // is the reading we wanted anyway.
+    if (t < 4 && band !== kbHeight) {
+      kbHeight = band;
+      try { localStorage.setItem(KB_KEY, String(band)); } catch (e) {}
+    }
   }
 }
 syncViewportVars();
