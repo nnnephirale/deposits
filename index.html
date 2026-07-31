@@ -57,6 +57,9 @@
        open. The fallbacks are what desktop and any browser without visualViewport get. */
     --vvh: 100dvh;
     --vvt: 0px;
+    /* the raw, ungated version of the band below — see syncViewportVars. Anything that needs to
+       SIT ON TOP of the keyboard (rather than reserve space for it) wants this one. */
+    --vvb: 0px;
     /* the keyboard's band, in two halves that are never both set: --kb is the LIVE one, measured
        as innerHeight - (--vvh + --vvt), and --kbr is the one PREDICTED from last time while the
        keyboard is still on its way (see reserveForKeyboard). Overlays run to the screen bottom
@@ -730,12 +733,17 @@
      so closing that last gap wouldn't remove a visible seam, just an amount of hidden padding. */
   .fmt-bar {
     position: fixed; left: 0; right: 0; z-index: 55;
-    /* env(safe-area-inset-bottom), not just --kb/--kbr: with the keyboard down both of those are
-       0, and this is the same "clear the home indicator" term the sheet's own padding already
-       carries (see the `.sheet` rule below) — reused rather than re-decided, since whether that
-       inset stays meaningful once the keyboard is up is exactly the kind of iOS behaviour this
-       file has already had to get right once. */
-    bottom: calc(env(safe-area-inset-bottom) + var(--kb) + var(--kbr) + 12px);
+    /* max(), NOT a sum — this is the whole of "the bar sits way too high". These three are
+       alternative descriptions of the same floor (how far up the screen bottom is obstructed),
+       not things to stack: --vvb is the measured obstruction, --kbr the predicted one before the
+       keyboard has landed, and the safe-area inset the home indicator when nothing else is there.
+       Adding them double-counts: measured on her iPhone the pill's bottom sat 424px up, which is
+       exactly 34 (inset) + 378 (band) + 12 — the inset is already inside the keyboard's region,
+       so it bought 34px of nothing. max() picks whichever floor is real and lands it at 390.
+       --vvb rather than --kb on purpose: --kb is gated (see syncViewportVars) and reads 0 whenever
+       a measurement falls outside those gates, which drops the bar to the bottom of the screen and
+       leaves it stranded under the keyboard on the next focus. */
+    bottom: calc(max(var(--vvb), var(--kbr), env(safe-area-inset-bottom)) + 12px);
     display: none; justify-content: center;
     padding: 0 20px; pointer-events: none; /* only the pill itself should catch taps */
     /* Do NOT put a transition on `bottom` here. Measured in Chrome (31 Jul): with
@@ -749,12 +757,20 @@
        to smooth over in the first place. */
   }
   .fmt-bar.show { display: flex; }
+  /* the styling row stands down while the tag popover is open. It is fixed at z-index 55 and the
+     popover is inside the sheet, so the bar would otherwise float across the chips — and there is
+     nothing to format while picking tags anyway. */
+  .fmt-bar.show.tag-open { display: none; }
+  /* full width of the sheet's own column rather than shrink-wrapping the buttons: a pill sized to
+     its contents changes width every time the row swaps (4 line ops vs 6 span ops), which reads as
+     the toolbar twitching rather than as its contents changing. Fixed width, contents distributed. */
   .fmt-bar-pill {
     display: flex; gap: 2px; pointer-events: auto;
+    flex: 1; max-width: 520px; justify-content: space-around;
     background: #fff; border-radius: 999px; padding: 6px;
     box-shadow: 0 2px 10px rgba(0,0,0,0.08), 0 10px 28px rgba(0,0,0,0.10);
     border: 1px solid rgba(0,0,0,0.04);
-    max-width: 100%; overflow-x: auto; scrollbar-width: none;
+    overflow-x: auto; scrollbar-width: none;
   }
   .fmt-bar-pill::-webkit-scrollbar { width: 0; height: 0; }
   /* the docked bar floats OVER the sheet rather than in it, so the sheet has to give back the
@@ -1135,6 +1151,54 @@
     touch-action: none; user-select: none; -webkit-user-select: none;
   }
   .scope-div { flex: none; width: 1px; height: 15px; background: rgba(0,0,0,0.13); }
+  /* ---- head: tag lozenge on the left of the pills, commit/dismiss pair on the right ---- */
+  /* the tag button is its own lozenge rather than a third segment inside .head-pills: day and week
+     are one scope split by a hairline, and dropping an unrelated control into that pill would make
+     it read as a third part of the same date. */
+  .head-left { display: flex; align-items: center; min-width: 0; }
+  .head-tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--field); border: none; border-radius: 999px;
+    padding: 8px 12px; margin-left: 8px; color: var(--subtle);
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    user-select: none; -webkit-user-select: none;
+  }
+  .head-tag svg { width: 16px; height: 16px; display: block; }
+  /* carrying tags is the notable state, so it takes the ink; empty stays quiet */
+  .head-tag.has-tags { background: var(--ink); color: #fff; }
+  .head-tag .ht-count { line-height: 1; }
+  /* the two ring buttons. The ring is here, not in the SVGs, so both are the same circle and only
+     their glyph differs — and so the disabled/active states have one thing to restyle. */
+  .head-acts { display: flex; align-items: center; gap: 8px; }
+  .head-act {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; padding: 0; flex: none;
+    background: none; border: 1.5px solid var(--hairline); border-radius: 50%;
+    color: var(--ink);
+  }
+  .head-act svg { width: 18px; height: 18px; }
+  .head-act.act-save { border-color: var(--ink); }
+  .head-act.act-save:not(:disabled):active { background: var(--ink); color: #fff; }
+  .head-act.act-close:active { background: var(--field); }
+  /* nothing to save reads as a faint outline rather than a missing button — the control stays
+     where it is so the row never reflows as text comes and goes. */
+  .head-act.act-save:disabled { border-color: var(--hairline); color: #C7C7CC; }
+
+  /* the topic/mode chips, folded away behind the tag lozenge */
+  .tag-pop {
+    position: absolute; left: 0; top: calc(100% + 10px); z-index: 8;
+    width: min(320px, calc(100vw - 56px)); padding: 12px 14px 14px;
+    background: var(--card); border-radius: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 12px 34px rgba(0,0,0,0.16);
+    /* against --vvh, not vh: the list has to stop at the top of the KEYBOARD, and vh knows
+       nothing about it — a 50vh cap runs the last few chips underneath it where they can't be
+       tapped. 170px covers the head above the popover plus a margin below it. */
+    max-height: min(380px, calc(var(--vvh) - 170px)); overflow-y: auto; overscroll-behavior: contain;
+    animation: lpDrop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @media (prefers-reduced-motion: reduce) { .tag-pop { animation: none; } }
+  .tag-pop .field-label:first-child { margin-top: 0; }
+
   .day-strip {
     position: absolute; left: 0; right: 0; top: calc(100% + 10px);
     display: flex; background: var(--field); border-radius: 14px; padding: 4px;
@@ -2180,6 +2244,13 @@ const FOLD_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" s
 // with a 2.2 stroke to survive being tiny inline; this one is a 24px toolbar icon at the 1.8
 // stroke the rest of the button set uses. Two sizes of the same idea, not one reusable asset.
 const FMT_LINK_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5"/><path d="M11 7.5 12.4 6.1a3.5 3.5 0 0 1 4.95 4.95L15.9 12.5"/><path d="M13 16.5 11.6 17.9a3.5 3.5 0 0 1-4.95-4.95L8.1 11.5"/></svg>';
+// head controls: tag (folds the topic/mode chips away) and the dismiss half of the commit pair.
+// The tick is the existing TICK_ICON further down — one tick for the whole app, rather than a
+// second one here that would drift from it. Neither glyph carries its own circle: the ring is a
+// CSS border on .head-act, so both buttons share one ring geometry and stay the same size
+// whatever is inside them.
+const TAG_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.2 3.5H5a1.5 1.5 0 0 0-1.5 1.5v6.2a2 2 0 0 0 .6 1.4l7 7a1.5 1.5 0 0 0 2.1 0l6.2-6.2a1.5 1.5 0 0 0 0-2.1l-7-7a2 2 0 0 0-1.4-.6Z"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/></svg>';
+const CROSS_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>';
 // a bar wiping across the line — the ||redact|| marker's own idea (mask, not strike) rather
 // than the highlighter-pen glyph a literal read of "highlight" would suggest.
 const REDACT_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.5 5.5h15" stroke-opacity="0.4"/><path d="M4.5 18.5h9" stroke-opacity="0.4"/><rect x="3.5" y="9.5" width="17" height="5" rx="2.5" fill="currentColor" stroke="none"/></svg>';
@@ -3784,6 +3855,14 @@ function syncViewportVars() {
   const band = Math.max(0, window.innerHeight - (h + t));
   const isKb = SOFT_KB && band >= KB_MIN && band < 600;
   s.setProperty("--kb", (isKb ? band : 0) + "px");
+  // The same measurement, UNGATED. --kb's gates exist to protect the cached keyboard HEIGHT from
+  // learning a window-drag or a collapsing toolbar; they are wrong for anything that just needs
+  // to sit on top of whatever is covering the screen right now. Something docked to the keyboard
+  // via --kb drops to the bottom and hides under it the moment a reading falls outside the gate
+  // (band under KB_MIN, or SOFT_KB false), and it stays there, because nothing re-opens the gate.
+  // --vvb is simply "how far the visual viewport's bottom is above the screen's" — no
+  // classification, so nothing to get wrong and nothing to get stuck.
+  s.setProperty("--vvb", band + "px");
   if (isKb) {
     // Hand the reserved band back — --vvh accounts for the real keyboard now. Trusting the
     // measurement over the prediction is what self-corrects a stale cache: worst case one small
@@ -3920,6 +3999,10 @@ function openComposer(existing) {
   let reapplySheetHeight = null;
   // once the format bar has shown, keep it shown (survives rebuilds too — no reflow jump)
   let barShown = false;
+  // the tag popover's open state. Lives out here, not in build(), because picking a tag calls
+  // build() — a rebuild would otherwise slam the popover shut on every single selection, which
+  // makes choosing two topics impossible without reopening it each time.
+  let tagPopOpen = false;
   // the fmt bar is fixed-position and docked to the keyboard, so it lives OUTSIDE `sheet` —
   // sheet.innerHTML = "" at the top of every build() would otherwise never touch it, and
   // build() runs on every tag toggle, day change, segmentation offer... every one of those
@@ -4206,7 +4289,8 @@ function openComposer(existing) {
     }
 
     const saveBtn = el("button", {
-      class: "save",
+      class: "head-act act-save",
+      "aria-label": "Save",
       onclick: () => {
         if (!text.trim()) return;
         const save = (segState && segState.ranges) ? doSaveSegments : doSave;
@@ -4219,25 +4303,55 @@ function openComposer(existing) {
           save();
         }
       }
-    }, "Save");
+    });
+    saveBtn.innerHTML = TICK_ICON;
     saveBtn.disabled = !text.trim();
+    // the dismiss half of the pair. requestClose, not close: the discard confirm still stands
+    // between an unsaved ramble and losing it — this is a shortcut to the backdrop tap, not a
+    // new way to throw work away. preventDefault on pointerdown so the keyboard doesn't collapse
+    // under the sheet on the way to a confirm that might be declined.
+    const closeBtn = el("button", { class: "head-act act-close", "aria-label": "Close", onclick: requestClose });
+    closeBtn.innerHTML = CROSS_ICON;
+    closeBtn.addEventListener("pointerdown", ev => ev.preventDefault());
+    const headActs = el("div", { class: "head-acts" }, closeBtn, saveBtn);
 
-    if (monthMode) {
+    // the topic/mode chips used to be two labelled rows standing open at the foot of the sheet,
+    // where they took most of the visible composer below the fold. They fold into this one
+    // lozenge instead: it carries the count, so what's on the entry is still legible at a glance
+    // without the rows being permanently unpacked.
+    const tagCount = tags.length;
+    const tagBtn = el("button", {
+      class: "head-tag" + (tagCount ? " has-tags" : ""),
+      "aria-label": tagCount ? tagCount + " tags" : "Add tags",
+      "aria-expanded": String(tagPopOpen)
+    });
+    tagBtn.innerHTML = TAG_ICON;
+    if (tagCount) tagBtn.appendChild(el("span", { class: "ht-count" }, String(tagCount)));
+    // pointerdown + preventDefault, like every other head control: a tap here must not pull focus
+    // out of the textarea, or the keyboard collapses and the sheet resizes under the popover.
+    tagBtn.addEventListener("pointerdown", ev => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      tagPopOpen = !tagPopOpen;
+      build();
+    });
+
+    const pills = monthMode
       // month entries carry no week/day — a single quiet pill names the month instead
-      const monthPill = el("button", { class: "day-pill", style: { cursor: "default" } },
-        new Date(cmo.year, cmo.month, 1).toLocaleDateString("en-SG", { month: "short" }).toUpperCase()
-        + (cmo.year !== nowWk.year ? "·" + String(cmo.year).slice(2) : ""));
-      monthPill.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused
-      head.appendChild(el("div", { class: "head-pills" }, monthPill));
-    } else {
-      head.appendChild(el("div", { class: "head-pills" },
-        dayPill, el("span", { class: "scope-div" }), weekPill));
-    }
+      ? (() => {
+          const monthPill = el("button", { class: "day-pill", style: { cursor: "default" } },
+            new Date(cmo.year, cmo.month, 1).toLocaleDateString("en-SG", { month: "short" }).toUpperCase()
+            + (cmo.year !== nowWk.year ? "·" + String(cmo.year).slice(2) : ""));
+          monthPill.addEventListener("pointerdown", ev => ev.preventDefault()); // keep the textarea focused
+          return el("div", { class: "head-pills" }, monthPill);
+        })()
+      : el("div", { class: "head-pills" }, dayPill, el("span", { class: "scope-div" }), weekPill);
+    head.appendChild(el("div", { class: "head-left" }, pills, tagBtn));
     // no "New entry" label: an empty field that says "Start typing…" is already the message.
     if (segState && segState.ranges) {
       head.appendChild(el("span", { class: "title" }, segState.ranges.length + " deposits"));
     }
-    head.appendChild(saveBtn);
+    head.appendChild(headActs);
     sheet.appendChild(head);
 
     // ---- segmentation preview: the ramble cut into blocks, nothing else on the sheet ----
@@ -4467,6 +4581,7 @@ function openComposer(existing) {
       fmtBar.classList.toggle("has-sel", hasSel);
       if (focused || hasSel) barShown = true;
       fmtBar.classList.toggle("show", barShown);
+      fmtBar.classList.toggle("tag-open", tagPopOpen); // stand down under the tag popover
       // the docked bar floats over the sheet, so the sheet reserves the room it covers — but
       // only once it's actually showing, or every composer opens with a band of dead space.
       sheet.classList.toggle("has-fmt", barShown);
@@ -4620,6 +4735,12 @@ function openComposer(existing) {
     // a tap anywhere else in the sheet puts it away
     sheet.addEventListener("pointerdown", ev => {
       if (linePop && !linePop.contains(ev.target) && !ev.target.closest(".fmt-lines")) closeLinePop();
+      // same for the tag popover — but NOT when the tap is the lozenge itself, or this would close
+      // it a moment before the lozenge's own handler toggles it back open.
+      if (tagPopOpen && !ev.target.closest(".tag-pop") && !ev.target.closest(".head-tag")) {
+        tagPopOpen = false;
+        build();
+      }
     }, true);
 
     // checklist toggle is its own transform, shared by the standalone button below and by
@@ -4780,6 +4901,10 @@ function openComposer(existing) {
       else { sheetRoot.appendChild(fmtBar); fmtBarEl = fmtBar; }
     };
     attachFmtBar();
+    // build() makes a NEW bar each time, and the show/has-sel/tag-open classes are only applied by
+    // updateBar's event handlers — so without this a rebuild (any tag pick, day change, or
+    // segmentation offer) hands back a bar with none of them until the next keystroke.
+    updateBar();
     // Crossing the breakpoint does NOT rebuild the composer (onBreakpointCross calls render(),
     // which redraws the list behind it), so a live bar has to be told to re-home itself — an
     // in-flow row left parked in sheetRoot would render adrift at the foot of the page.
@@ -4814,33 +4939,44 @@ function openComposer(existing) {
       build();
     }
 
-    // ---- topics ----
-    sheet.appendChild(el("p", { class: "field-label" }, "topic"));
-    const topicChips = el("div", { class: "chips" });
-    for (const t of TOPICS) {
-      const on = tags.includes(t.id);
-      const chip = el("button", {
-        class: "chip",
-        style: on
-          ? { background: t.bg, color: t.fg, borderColor: t.dot, fontWeight: "600" }
-          : {},
-        onclick: () => { toggleTag(t.id); build(); }
-      }, t.label);
-      topicChips.appendChild(chip);
-    }
-    sheet.appendChild(topicChips);
+    // ---- topics + modes, inside the tag popover ----
+    // Built only while it's open, and hung off `head` (which is position: relative) so it drops
+    // from the lozenge rather than sitting in the sheet's scroll flow. Chips commit on
+    // pointerdown for the same reason the lozenge does — a click would blur the textarea first.
+    if (tagPopOpen) {
+      const tagPop = el("div", { class: "tag-pop" });
+      const chipPress = (chip, id) => {
+        chip.addEventListener("pointerdown", ev => {
+          if (ev.button !== 0) return;
+          ev.preventDefault();
+          toggleTag(id);
+          build(); // tagPopOpen is still true, so the popover comes straight back with the new state
+        });
+        return chip;
+      };
+      tagPop.appendChild(el("p", { class: "field-label" }, "topic"));
+      const topicChips = el("div", { class: "chips" });
+      for (const t of TOPICS) {
+        const on = tags.includes(t.id);
+        const chip = el("button", {
+          class: "chip",
+          style: on
+            ? { background: t.bg, color: t.fg, borderColor: t.dot, fontWeight: "600" }
+            : {}
+        }, t.label);
+        topicChips.appendChild(chipPress(chip, t.id));
+      }
+      tagPop.appendChild(topicChips);
 
-    // ---- modes ----
-    sheet.appendChild(el("p", { class: "field-label" }, "mode"));
-    const modeChips = el("div", { class: "chips" });
-    for (const m of MODES) {
-      const chip = el("button", {
-        class: "chip mode" + (tags.includes(m.id) ? " on" : ""),
-        onclick: () => { toggleTag(m.id); build(); }
-      }, m.label);
-      modeChips.appendChild(chip);
+      tagPop.appendChild(el("p", { class: "field-label" }, "mode"));
+      const modeChips = el("div", { class: "chips" });
+      for (const m of MODES) {
+        const chip = el("button", { class: "chip mode" + (tags.includes(m.id) ? " on" : "") }, m.label);
+        modeChips.appendChild(chipPress(chip, m.id));
+      }
+      tagPop.appendChild(modeChips);
+      head.appendChild(tagPop);
     }
-    sheet.appendChild(modeChips);
 
     if (existing && existing.sourceId) {
       // this deposit was cut from a longer ramble — the untouched original is two taps away
