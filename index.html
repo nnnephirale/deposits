@@ -981,9 +981,19 @@
        the content by padding-bottom (inherited from .sheet) rather than by shortening the box —
        which also means the box never resizes when the keyboard lands, so there is nothing for
        Safari to scroll the caret into view *from*. --sheet-h is left alone, so her chosen height
-       comes straight back when the keyboard goes away. */
-    height: var(--sheet-h, 98dvh);
-    max-height: calc(100dvh - var(--vvt) - env(safe-area-inset-top) - 10px);
+       comes straight back when the keyboard goes away.
+
+       The default opens at 85% of that ceiling, not at it. It used to ask for 98dvh, which on a
+       notched phone the ceiling clamped straight back down to itself — the composer opened at its
+       absolute maximum, so the notch could only ever make it SHORTER and a drag upward was a
+       silent no-op. Measured on a 812px notched viewport: default and ceiling were both 743px,
+       zero headroom. 85% leaves ~110px to grow into, which is what makes the notch read as a
+       two-way control; the height she settles on is remembered, so opening shorter is a one-time
+       cost rather than a permanent one. */
+    --sheet-ceil: calc(100dvh - var(--vvt) - env(safe-area-inset-top) - 10px);
+    --sheet-default: calc(var(--sheet-ceil) * 0.85);
+    height: var(--sheet-h, var(--sheet-default));
+    max-height: var(--sheet-ceil);
     padding: 12px 20px calc(env(safe-area-inset-bottom) + 24px + var(--kb) + var(--kbr));
     animation: none; /* the unfold below replaces the generic slide-up */
     clip-path: inset(0 round 20px 20px 0 0);
@@ -1024,7 +1034,7 @@
   .sheet.expanse textarea.ta-entry {
     background: none; border-radius: 0; padding: 8px 0 0;
     font-size: 17px; line-height: 1.55;
-    min-height: min(calc(var(--sheet-h, 98dvh) - 250px), calc(var(--vvh) - var(--kbr) - 250px));
+    min-height: min(calc(var(--sheet-h, var(--sheet-default)) - 250px), calc(var(--vvh) - var(--kbr) - 250px));
     max-height: none;
   }
   .sheet.expanse textarea.ta-entry::placeholder { color: #B4B4B9; }
@@ -1750,14 +1760,18 @@
        --ml/--mr to 0 and the box only opens vertically. 680 leaves 40px of travel a side. */
     .sheet { border-radius: 20px; max-width: 680px; }
     .sheet.expanse {
-      /* top and bottom both land on the mat's edges */
-      max-height: calc(100dvh - (var(--deck-x) + var(--mat-y)) * 2);
+      /* top and bottom both land on the mat's edges. --sheet-ceil is redefined rather than just
+         max-height, so the 85% default is 85% of THIS ceiling — otherwise the desktop deck would
+         size itself off the phone's safe-area formula and land somewhere arbitrary. Desktop had
+         the same no-headroom problem in miniature: 828px default against an 860px cap. */
+      --sheet-ceil: calc(100dvh - (var(--deck-x) + var(--mat-y)) * 2);
+      max-height: var(--sheet-ceil);
       clip-path: inset(0 round 20px);
     }
     .sheet { scrollbar-width: none; }
     .sheet::-webkit-scrollbar { width: 0; height: 0; }
     .sheet.expanse.folded { clip-path: inset(var(--mt) var(--mr) var(--mb) var(--ml) round 18px); }
-    .sheet.expanse textarea.ta-entry { min-height: calc(var(--sheet-h, 92dvh) - 250px); }
+    .sheet.expanse textarea.ta-entry { min-height: calc(var(--sheet-h, var(--sheet-default)) - 250px); }
   }
 
   /* between the phone column and the three-pane window, just let the column breathe */
@@ -3747,9 +3761,17 @@ function bindFmtSelectionSync(fn) {
 // and the phone→desktop jump — where a saved pixel height would either clamp to the ceiling
 // or turn into a sliver. Device-local on purpose (never synced): a phone and a 1440px window
 // want different composers.
-const SHEET_FRAC_KEY = "weekly-deposits-composer-height-frac";
+// -frac2: the v1 key can hold a value that was never a choice. Back when the composer opened at
+// its ceiling, dragging UP clamped to the height it already had and stored that — so a phone that
+// had ever felt an upward drag carries a fraction pinned to its own safe area, and would keep
+// opening at full height and never meet the new 85% default. There is no way to tell that artifact
+// apart from a deliberate drag to the top, which is now a real preference, so the key retires
+// instead of being guessed at. v1 is removed rather than left to sit in a budget shared with the
+// entries and their base64 images.
+const SHEET_FRAC_KEY = "weekly-deposits-composer-height-frac2";
 let sheetFrac = null;
 try {
+  localStorage.removeItem("weekly-deposits-composer-height-frac");
   const raw = parseFloat(localStorage.getItem(SHEET_FRAC_KEY));
   // guard the stored value, don't trust it: a NaN would poison every height calculation
   // downstream, and Math.max/min can't rescue NaN — it propagates through both.
@@ -4128,11 +4150,12 @@ function openComposer(existing) {
 
     // ---- notch = resize handle: drag it up to grow the sheet, down to shrink ----
     // it used to stretch the textarea, which does nothing now that the sheet is a fixed-height
-    // expanse. it resizes the SHEET instead, and the field follows via --sheet-h. 98% of the
-    // viewport is the ceiling — just a sliver of the list left to tap away on.
-    // matches the CSS ceiling exactly (100dvh - safe-area-top - 10px). It used to be
-    // 0.98 * innerHeight, which was fine when the viewport started BELOW the status bar;
-    // now innerHeight includes it, so that let the notch drag the sheet under the clock.
+    // expanse. it resizes the SHEET instead, and the field follows via --sheet-h.
+    // matches the CSS ceiling exactly (100dvh - safe-area-top - 10px) — that inset is what keeps
+    // the grabber out from under the clock. It used to be 0.98 * innerHeight, which was fine when
+    // the viewport started BELOW the status bar; now innerHeight includes it, so that let the
+    // notch drag the sheet under the clock. The sheet OPENS at 85% of this (see --sheet-default),
+    // so there is somewhere for an upward drag to go.
     const SHEET_MAX = () => Math.round(window.innerHeight - safeTop() - 10);
     const SHEET_MIN = () => Math.min(300, Math.round(window.innerHeight * 0.45));
     // Belt and braces for the memory: a debounced write means the height persists even if the
@@ -4141,11 +4164,17 @@ function openComposer(existing) {
     // than the ~60/second the release-only version was avoiding, and the value written is the
     // final one rather than a mid-drag frame.
     let sheetFracTimer = null;
+    // manualHeight (not the raw drag delta) so what's stored is the CLAMPED height, never one the
+    // min/max would reject on the way back in. Every height it can hold is a real preference now
+    // that the sheet opens below its ceiling — including the ceiling itself, which is why this
+    // writes rather than deciding some values aren't worth keeping.
+    function commitSheetFrac() {
+      clearTimeout(sheetFracTimer);
+      if (manualHeight != null) saveSheetFrac(manualHeight / window.innerHeight);
+    }
     function rememberSheetHeight() {
       clearTimeout(sheetFracTimer);
-      sheetFracTimer = setTimeout(() => {
-        if (manualHeight != null) saveSheetFrac(manualHeight / window.innerHeight);
-      }, 250);
+      sheetFracTimer = setTimeout(commitSheetFrac, 250);
     }
     function setSheetHeight(h) {
       manualHeight = Math.max(SHEET_MIN(), Math.min(SHEET_MAX(), Math.round(h)));
@@ -4175,10 +4204,10 @@ function openComposer(existing) {
         grabber.removeEventListener("lostpointercapture", onEnd);
         grabber.style.cursor = "";
         try { grabber.releasePointerCapture(e.pointerId); } catch (err) {}
-        // remembered on release, not on every pointermove — a drag is ~60 writes a second,
-        // and the value mid-drag isn't the one she chose. manualHeight (not the raw drag
-        // delta) so what's stored is the CLAMPED height, never one the min/max would reject.
-        if (manualHeight != null) saveSheetFrac(manualHeight / window.innerHeight);
+        // written on release, not on every pointermove — a drag is ~60 writes a second, and the
+        // value mid-drag isn't the one she chose. Same function the debounce calls, so the release
+        // path and the belt-and-braces path can't drift apart on what counts as worth storing.
+        commitSheetFrac();
       };
       grabber.addEventListener("pointermove", onMove);
       grabber.addEventListener("pointerup", onEnd);
