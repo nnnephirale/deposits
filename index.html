@@ -3285,12 +3285,13 @@ function renderIconRail() {
 
   bar.appendChild(el("div", { class: "ico-div" }));
 
-  // Both toggles name themselves the way the mobile menu's rows do — "<name>: On/Off" — so a
-  // status label can't be misread as a command. The bare "Newest first" was already the
-  // CURRENT order, but sitting among Week / Month / Export it read like the thing a click
-  // would do, which is the opposite of what it meant. The arrow still points the way the list
+  // Both toggles name themselves the way the mobile menu's rows do, so a status label can't be
+  // misread as a command: the bare "Newest first" was already the CURRENT order, but sitting
+  // among Week / Month / Export it read like the thing a click would DO. The order names what
+  // it's showing rather than an on/off, because "Oldest view: Off" makes you work out that off
+  // means newest — "Showing: Most recent" just says it. The arrow still points the way the list
   // reads: down = newest at the top, up = oldest at the top.
-  bar.appendChild(icoRow("Oldest view: " + (oldestFirst ? "On" : "Off"),
+  bar.appendChild(icoRow("Showing: " + (oldestFirst ? "Oldest" : "Most recent"),
     oldestFirst ? ICO_OLDEST : ICO_NEWEST, oldestFirst,
     () => setOldestFirst(!oldestFirst)));
   bar.appendChild(icoRow("Day view: " + (layout === "day" ? "On" : "Off"), ICO_DAY, layout === "day",
@@ -3461,7 +3462,50 @@ document.addEventListener("pointerdown", ev => {
   render();
 }, true);
 
+// ---------- keeping your place across a re-render ----------
+// `entriesRoot.innerHTML = ""` collapses the scroller's content to nothing, and the browser
+// clamps the scroll offset to the new maximum \u2014 0 \u2014 on the spot. Re-adding the content does NOT
+// put it back. So saving, deleting or ticking anything threw the list to the top, which is
+// worst in day view where the list is longest. Measured: scrolled to 600, cleared, scrollY reads
+// 0 before a single row is re-added.
+// The offset is only worth keeping when it still means the same thing, so it's restored when the
+// view's IDENTITY is unchanged and dropped when it isn't. Doing it that way needs no changes at
+// the ~40 render() call sites: a mutation leaves the identity alone and keeps your place, while
+// stepping the period or flipping the order changes it and starts at the top, as before.
+function viewIdentity() {
+  return [view, layout, oldestFirst, deskTopic, deskQuery, deskScope,
+          view === "week" ? wk.year + "w" + wk.week : mo.year + "m" + mo.month].join("|");
+}
+// desktop scrolls .wrap internally; the phone scrolls the window. Queried live rather than
+// captured, because render() runs before the module-level wrapEl const is initialised.
+function listScroller() {
+  return deskMQ.matches ? document.querySelector(".wrap") : null;
+}
+function listScrollTop() {
+  const el = listScroller();
+  return el ? el.scrollTop : window.scrollY;
+}
+function setListScrollTop(y) {
+  const el = listScroller();
+  if (el) el.scrollTop = y;
+  else window.scrollTo(0, y);
+}
+let lastViewId = null;
+
+// A wrapper, so the restore covers renderView's three separate `return`s (search takeover,
+// empty state, normal) without having to remember it at each one.
 function render() {
+  const viewId = viewIdentity();
+  // compared against the PREVIOUS render's identity: callers mutate state before calling in
+  const keepPlace = viewId === lastViewId;
+  const prevScroll = keepPlace ? listScrollTop() : 0;
+  lastViewId = viewId;
+  renderView();
+  // AFTER the rebuild: a scroller with no content can't hold an offset, which is the whole bug
+  setListScrollTop(prevScroll);
+}
+
+function renderView() {
   // the period tabs are both the identity and the switcher: W## reads the week being
   // viewed, 7\u6708 the month. the active one is dark, the other recedes.
   navWeek.textContent = "W" + pad2(wk.week);
@@ -3635,10 +3679,11 @@ window.addEventListener("orientationchange", () => setTimeout(() => {
 }, 80));
 
 // pinned so the list behind a sheet can't scroll while it's open (iOS scroll-chaining fix)
-let composerScrollY = 0;
+let composerScrollY = 0, lockedViewId = null;
 function lockPageScroll() {
   if (document.body.style.position === "fixed") return; // already locked (e.g. composer opened from search)
   composerScrollY = window.scrollY;
+  lockedViewId = lastViewId; // so unlock can tell whether the list underneath is still the same one
   document.body.style.position = "fixed";
   document.body.style.top = -composerScrollY + "px";
   document.body.style.width = "100%";
@@ -3647,7 +3692,12 @@ function unlockPageScroll() {
   document.body.style.position = "";
   document.body.style.top = "";
   document.body.style.width = "";
-  window.scrollTo(0, composerScrollY);
+  // A remembered offset is only meaningful if it still points at the same list. Toggling day
+  // view or the order from the ⋮ menu re-renders underneath a locked page, so restoring the
+  // pre-menu offset would drop her partway down a list that has been reordered — while the
+  // header's own week/month tabs (no lock involved) correctly start at the top. Same rule for
+  // both now.
+  window.scrollTo(0, lastViewId === lockedViewId ? composerScrollY : 0);
 }
 
 // document-level selectionchange hook for whichever composer textarea is live. build()
@@ -5780,7 +5830,8 @@ function openMenu() {
       render();
       renderSettings();
     }));
-    body.appendChild(row("Oldest view", oldestFirst ? "on" : "off", () => {
+    // named the same way the rail names it, so the two surfaces agree
+    body.appendChild(row("Showing", oldestFirst ? "oldest" : "most recent", () => {
       setOldestFirst(!oldestFirst);
       renderSettings();
     }));

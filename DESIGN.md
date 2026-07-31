@@ -417,6 +417,11 @@ Two things that are easy to miss here:
   and comes straight back when the keyboard goes away; only the *rendered* ceiling moves. Had
   `SHEET_MAX()` been switched to the visual viewport instead, `saveSheetFrac` would have
   persisted the keyboard-shrunk height and her composer would have got shorter every session.
+  Verified working end to end (31 Jul): dragged 796→616px, stored as the fraction 0.7586, and
+  616px on both reopen and a full reload. The related hazard first flagged here — dragging *while
+  the keyboard is up* persisting a clamped fraction — **stopped existing** once the box no longer
+  shrank for the keyboard: `.sheet.expanse`'s ceiling doesn't reference `--kb`, so the dragged
+  height is keyboard-independent (measured 683px with the keyboard and without). No guard needed.
 - **`autoGrow` pins an explicit pixel height on the textarea**, so the field keeps its old size
   when the sheet shrinks under it and puts the caret straight back out of view — `min-height`
   can't fix that, only re-measuring can. Hence `sheetViewportSync`, registered by `build()` and
@@ -578,11 +583,14 @@ needs iOS 17.4+ and only ever produces one fixed tap.
 **Week and Month share one frame box** (`x3 y4.5 18×16 r3`) — week draws the columns, month
 adds the rows. Drawing them at different heights made one look like the lesser control.
 
-**The rail's toggles name their own state** (31 Jul 2026): `Oldest view: On/Off`,
-`Day view: On/Off` — the same shape the mobile menu's rows use, and the mobile row was renamed
-from "Oldest first" to match. The bare `Newest first` it replaced was *already* the current
-order, but sitting in a column with Week / Month / Export / Settings it read as the thing a
-click would *do*. A status label among command labels needs to say it's a status.
+**The rail's toggles name their own state** (31 Jul 2026): `Showing: Most recent` / `Showing:
+Oldest`, and `Day view: On/Off` — the same shape the mobile menu's rows use, and the mobile row
+was renamed to match (`Showing` · `most recent`/`oldest`). The bare `Newest first` it started as
+was *already* the current order, but sitting in a column with Week / Month / Export / Settings it
+read as the thing a click would *do*. A status label among command labels has to say it's a
+status. The order went through `Oldest view: On/Off` on the way and that was still wrong for a
+different reason: an on/off makes you work out that *off* means newest. Name the state, not the
+switch — an on/off is only right when one of the two states is genuinely "nothing".
 
 **The `⋮` menu is gone on desktop.** All four of its items have a visible home now, so the
 button was a second route to nothing. It stays on mobile, where it's the only route. Sizing
@@ -657,6 +665,39 @@ that sits directly on the mat disappears entirely.* Two things do, and both are 
 (the week summary has no card of its own — it sits straight on the mat, and its MINE/V1/V2
 pills went invisible). Every other `--field` surface in the app lives inside a white card or a
 sheet and is unaffected — that's the list to re-check if the mat value ever moves again.
+
+**A re-render must not lose your place** (31 Jul 2026). Reported as *"when viewing by days,
+deleting or creating new entries causes the screen to jump up back to the top."*
+`entriesRoot.innerHTML = ""` collapses the scroller's content to nothing, and **the browser
+clamps the scroll offset to the new maximum — 0 — on the spot.** Re-adding the rows does not put
+it back. Measured directly: scroll to 600, clear, and `scrollY` reads 0 before a single row
+returns. Worst in day view because that list is longest, but it was every view and every
+mutation.
+
+The offset is only worth keeping when it still *means* the same thing, so `render()` compares a
+`viewIdentity()` key — `view · layout · oldestFirst · deskTopic · deskQuery · deskScope ·
+period` — against the previous render's. Same identity (any mutation: save, delete, a ticked
+checkbox, a sync pull) restores the offset; different identity (stepping the period, flipping the
+order, switching layout) starts at the top, exactly as it did before. **That's why this needed no
+changes at the ~40 `render()` call sites** — the rule reads the state rather than trusting each
+caller to say what it meant.
+
+Two mechanical notes:
+- `render()` is now a thin wrapper around `renderView()` purely so the restore covers all three
+  of its `return`s (search takeover, empty state, normal). Restoring at each one is the kind of
+  thing the next `return` forgets.
+- **Restore AFTER the rebuild.** A scroller with no content cannot hold an offset — that is the
+  bug itself, so doing it in the wrong order is a no-op that looks like a fix.
+- The scroller differs by viewport: `.wrap` scrolls internally on desktop, the window on the
+  phone. `listScroller()` resolves it live rather than caching `wrapEl`, because `render()` is
+  defined before that `const` is initialised.
+
+**`unlockPageScroll` had the same staleness in reverse.** The `⋮` menu locks the page, so
+toggling day view or the order *from the menu* re-rendered underneath a locked body and then
+restored the pre-menu offset — leaving her partway down a list that had just been reordered,
+while the header's own week/month tabs (no lock involved) correctly went to the top. It now
+records the view identity at lock time and only restores the offset if it still matches. Same
+rule on both paths.
 
 Things that cost real debugging, or that will bite the next change:
 
