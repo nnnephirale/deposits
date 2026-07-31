@@ -3723,7 +3723,19 @@ window.addEventListener("orientationchange", () => setTimeout(() => {
   if (sheetViewportSync) sheetViewportSync();
 }, 80));
 
-// pinned so the list behind a sheet can't scroll while it's open (iOS scroll-chaining fix)
+// pinned so the list behind a sheet can't scroll while it's open (iOS scroll-chaining fix).
+// The desktop three-pane deck scrolls .wrap itself (position: absolute; overflow-y: auto) —
+// the page never scrolls there at all, per the comment on that rule — so pinning body.style
+// only fixes the phone. Locking .wrap too is deskMQ-gated: below the desktop breakpoint .wrap
+// has no overflow rule of its own (the phone scrolls the window instead, per listScroller()),
+// and setting overflow-y there would flip it off its default `visible` for no reason — CSS ties
+// the axes together, so overflow-y: hidden while overflow-x is still `visible` forces overflow-x
+// to compute as `auto`, which can put a horizontal scrollbar where there never was one. But the
+// CLEAR on unlock is unconditional, not equally gated — the breakpoint can cross while a sheet
+// is open (rotate, resize the window), and checking deskMQ.matches again at unlock time would
+// read the NEW breakpoint, skip clearing a lock made under the OLD one, and leave .wrap stuck
+// with an inline overflow-y: hidden after crossing down to mobile. Clearing an inline style
+// that was never set is a harmless no-op, so there's nothing to gate on the way out.
 let composerScrollY = 0, lockedViewId = null;
 function lockPageScroll() {
   if (document.body.style.position === "fixed") return; // already locked (e.g. composer opened from search)
@@ -3732,11 +3744,14 @@ function lockPageScroll() {
   document.body.style.position = "fixed";
   document.body.style.top = -composerScrollY + "px";
   document.body.style.width = "100%";
+  if (deskMQ.matches) { const dw = document.querySelector(".wrap"); if (dw) dw.style.overflowY = "hidden"; }
 }
 function unlockPageScroll() {
   document.body.style.position = "";
   document.body.style.top = "";
   document.body.style.width = "";
+  const dw = document.querySelector(".wrap");
+  if (dw) dw.style.overflowY = "";
   // A remembered offset is only meaningful if it still points at the same list. Toggling day
   // view or the order from the ⋮ menu re-renders underneath a locked page, so restoring the
   // pre-menu offset would drop her partway down a list that has been reordered — while the
@@ -4151,12 +4166,18 @@ function openComposer(existing) {
     // ---- notch = resize handle: drag it up to grow the sheet, down to shrink ----
     // it used to stretch the textarea, which does nothing now that the sheet is a fixed-height
     // expanse. it resizes the SHEET instead, and the field follows via --sheet-h.
-    // matches the CSS ceiling exactly (100dvh - safe-area-top - 10px) — that inset is what keeps
-    // the grabber out from under the clock. It used to be 0.98 * innerHeight, which was fine when
-    // the viewport started BELOW the status bar; now innerHeight includes it, so that let the
-    // notch drag the sheet under the clock. The sheet OPENS at 85% of this (see --sheet-default),
-    // so there is somewhere for an upward drag to go.
-    const SHEET_MAX = () => Math.round(window.innerHeight - safeTop() - 10);
+    // matches the CSS ceiling exactly — (100dvh - --vvt - safe-area-top - 10px). It used to be
+    // 0.98 * innerHeight, which was fine when the viewport started BELOW the status bar; now
+    // innerHeight includes it, so that let the notch drag the sheet under the clock. The sheet
+    // OPENS at 85% of this (see --sheet-default), so there is somewhere for an upward drag to go.
+    // --vvt has to be in this sum too, not just the CSS side: it's Safari's caret-chasing scroll,
+    // live at 0 most of the time but pushed up while she's mid-type and reaches for the grabber.
+    // Drop it here and the two ceilings disagree exactly then — JS thinks there's more room than
+    // the box actually has, lets the drag go past what CSS renders, and stores a fraction that
+    // reopens near the true (bigger, keyboard-down) ceiling regardless of where she let go. That's
+    // the "it favours max height" report: the box LOOKED clamped correctly during the drag, only
+    // the memory was wrong.
+    const SHEET_MAX = () => Math.round(window.innerHeight - (vvp ? vvp.offsetTop : 0) - safeTop() - 10);
     const SHEET_MIN = () => Math.min(300, Math.round(window.innerHeight * 0.45));
     // Belt and braces for the memory: a debounced write means the height persists even if the
     // drag never ends in an event we hear — a pointercancel we somehow miss, the app being killed
