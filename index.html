@@ -3822,6 +3822,9 @@ function openComposer(existing) {
   // manual composer height (px) set by dragging the notch; persists across rebuilds, and
   // now across opens too — seeded from the remembered fraction of THIS viewport
   let manualHeight = sheetFrac != null ? Math.round(sheetFrac * window.innerHeight) : null;
+  // build()'s applySheetHeight, published so the open path can run it again once the sheet is
+  // actually in the document — inside build() there is nothing to measure yet.
+  let reapplySheetHeight = null;
   // once the format bar has shown, keep it shown (survives rebuilds too — no reflow jump)
   let barShown = false;
 
@@ -4166,14 +4169,16 @@ function openComposer(existing) {
     // ---- notch = resize handle: drag it up to grow the sheet, down to shrink ----
     // it used to stretch the textarea, which does nothing now that the sheet is a fixed-height
     // expanse. it resizes the SHEET instead, and the field follows via --sheet-h.
-    // matches the CSS ceiling exactly (100dvh - safe-area-top - 10px) — that inset is what keeps
-    // the grabber out from under the clock. It used to be 0.98 * innerHeight, which was fine when
-    // the viewport started BELOW the status bar; now innerHeight includes it, so that let the
-    // notch drag the sheet under the clock. The sheet OPENS at 85% of this (see --sheet-default),
-    // so there is somewhere for an upward drag to go.
-    // NOT reduced by --vvt: subtracting Safari's caret-chase offset here made the ceiling move
-    // under a live drag and was reverted (31 Jul).
-    const SHEET_MAX = () => Math.round(window.innerHeight - safeTop() - 10);
+    // There is deliberately NO SHEET_MAX here. Two attempts (31 Jul) tried to keep a JS copy of
+    // the ceiling in step with the CSS one — first `innerHeight - safeTop() - 10`, then the same
+    // less --vvt — and both were wrong on a real phone in different directions: the first stored
+    // heights the CSS then clamped, so every upward drag came back as "max" no matter where it
+    // ended; the second moved the ceiling underneath a live drag. The ceiling depends on dvh, the
+    // safe-area inset and the caret-chase offset, all of which CSS already resolves and JS can
+    // only approximate. So it isn't approximated any more: `max-height` is the single source of
+    // truth, JS asks for a height and then MEASURES what was actually rendered. Whatever CSS says
+    // it is, is what gets remembered — which makes the two-ceilings-disagree bug unrepresentable
+    // rather than merely fixed.
     const SHEET_MIN = () => Math.min(300, Math.round(window.innerHeight * 0.45));
     // Belt and braces for the memory: a debounced write means the height persists even if the
     // drag never ends in an event we hear — a pointercancel we somehow miss, the app being killed
@@ -4181,10 +4186,8 @@ function openComposer(existing) {
     // than the ~60/second the release-only version was avoiding, and the value written is the
     // final one rather than a mid-drag frame.
     let sheetFracTimer = null;
-    // manualHeight (not the raw drag delta) so what's stored is the CLAMPED height, never one the
-    // min/max would reject on the way back in. Every height it can hold is a real preference now
-    // that the sheet opens below its ceiling — including the ceiling itself, which is why this
-    // writes rather than deciding some values aren't worth keeping.
+    // manualHeight is the height the sheet was MEASURED at, never the raw drag delta — so what's
+    // stored is always a height the sheet actually rendered, and reopening reproduces it exactly.
     function commitSheetFrac() {
       clearTimeout(sheetFracTimer);
       if (manualHeight != null) saveSheetFrac(manualHeight / window.innerHeight);
@@ -4193,15 +4196,35 @@ function openComposer(existing) {
       clearTimeout(sheetFracTimer);
       sheetFracTimer = setTimeout(commitSheetFrac, 250);
     }
-    function setSheetHeight(h) {
-      manualHeight = Math.max(SHEET_MIN(), Math.min(SHEET_MAX(), Math.round(h)));
-      sheet.style.setProperty("--sheet-h", manualHeight + "px");
+    // Apply a height WITHOUT remembering it. The restore-on-open path has to use this one: it runs
+    // inside build(), and build() is called before the overlay is appended (see below), so the
+    // sheet may not be measurable yet — and more importantly, a restore is not a choice. When
+    // setSheetHeight did the persisting, merely opening the composer rewrote the stored value from
+    // whatever the viewport happened to be mid-open, so a transient ceiling could quietly shrink
+    // her preference a little on every single open.
+    function applySheetHeight(h) {
+      const want = Math.max(SHEET_MIN(), Math.round(h));
+      sheet.style.setProperty("--sheet-h", want + "px");
+      // Read back what CSS actually rendered — max-height may have clamped it. A detached or
+      // not-yet-painted sheet measures 0, which is not a clamp: trust the request in that case
+      // rather than writing a zero height into the variable.
+      const got = Math.round(sheet.getBoundingClientRect().height);
+      const applied = got > 0 ? got : want;
+      // keep --sheet-h in agreement with reality: the textarea's min-height is derived from it,
+      // so leaving it at an over-tall `want` would size the field past the box it lives in.
+      if (applied !== want) sheet.style.setProperty("--sheet-h", applied + "px");
+      manualHeight = applied;
       // autoGrow pins an explicit pixel height on the field; left alone it keeps the height
       // it had at the OLD sheet size and overflows once the sheet shrinks under it.
       ta.style.height = "";
       autoGrow();
+    }
+    // the drag's entry point: apply, then remember — dragging IS the choice.
+    function setSheetHeight(h) {
+      applySheetHeight(h);
       rememberSheetHeight();
     }
+    reapplySheetHeight = applySheetHeight; // for the post-append re-measure in openComposer
     grabber.addEventListener("pointerdown", ev => {
       ev.preventDefault();
       const startY = ev.clientY;
@@ -4231,8 +4254,9 @@ function openComposer(existing) {
       grabber.addEventListener("pointercancel", onEnd);
       grabber.addEventListener("lostpointercapture", onEnd);
     });
-    // a height chosen earlier survives a rebuild (day/week change)
-    if (manualHeight != null) setSheetHeight(manualHeight);
+    // a height chosen earlier survives a rebuild (day/week change) and an earlier session.
+    // applySheetHeight, not setSheetHeight: restoring is not choosing, so it must not write back.
+    if (manualHeight != null) applySheetHeight(manualHeight);
 
     // shared image pipeline: ⌘V paste and the format-bar photo button both land here.
     // the image is downscaled (max 1100px), stored on the entry, and referenced inline
@@ -4784,6 +4808,12 @@ function openComposer(existing) {
   // settle into. This is what stops the one-off bounce: the caret is inside the visible area
   // from the first frame, so iOS has no reason to scroll anything into view.
   if (wantsFocus) reserveForKeyboard();
+  // Now the sheet is in the document and the keyboard's band is already held back, so this is the
+  // first moment a measurement means anything. Re-apply the restored height against the real box:
+  // whatever max-height does to it here is what --sheet-h settles to, which also has to happen
+  // BEFORE the fold is measured below, or the unfold would travel to a height the sheet then
+  // leaves. Re-applying never persists — a restore still isn't a choice.
+  if (reapplySheetHeight && manualHeight != null) reapplySheetHeight(manualHeight);
   const barEl = document.querySelector(".compose-bar");
   const still = unfoldStill(); // OS reduced-motion, or the rabbit end of the speed setting
   if (barEl && !still) {
