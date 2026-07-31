@@ -87,7 +87,12 @@ a search field at the top — typing morphs the body below into matching entries
 otherwise the settings list (Day view toggle, Export markdown, Settings).
 
 **Layouts:** only two. The default topic grouping, and a "Day view" toggle. `mix` and
-`dense` were experiments and are gone; "nothing selected" is a real, reachable state.
+`dense` were experiments and are gone; "nothing selected" is a real, reachable state. **Day view
+persists** across a killed session (31 Jul, `LAYOUT_KEY`), the way the reading order already did —
+it's a way of looking at the week, not a per-visit mode, and switching it back on at every launch
+made it feel like a toy. Every toggle routes through `setLayout()` rather than assigning `layout`
+directly, so no call site can change it without writing it; only the literal `"day"` is honoured
+on read, so a junk value can't strand the app in a layout it has no renderer for.
 
 **Reading order** (`oldestFirst`, persisted, default false = newest first). Topic groups have
 always floated the latest-touched to the top; from 30 Jul the entries *inside* them read the
@@ -110,6 +115,8 @@ run states the day once and the gutter thread carries it:
    ╰─                    a 9px elbow turns toward the text where the next badge would be
    ┆                     …a gap, then dashes through the rest of the run
    ┆  entry text         no badge
+   ╰─                    every repeat with another below it turns in too (31 Jul)
+   ┆  entry text
 [W]│ entry text          new day: badge and solid thread return
 ```
 
@@ -126,7 +133,17 @@ construction rather than by eye. Three details that matter:
   the next row's top) before the half line box; measuring as if from the border box leaves it
   a full 30px high.
 - **A repeat's dashed `::before` replaces the solid `::after`**, which is set to
-  `display: none`. Drawing both stacks two lines in the same column.
+  `display: none` — drawing both *as full-height verticals* stacks two lines in one column.
+  **Amended 31 Jul:** a run of three or more got exactly one elbow, the first repeat's, and every
+  repeat below that had a dashed line running straight past it pointing at nothing. Each repeat
+  with another below it now draws the turn as well, via
+  `.entry.rep:has(+ .entry.rep) .entry-gutter::after` — which beats the `display: none` on
+  specificity (four classes to two), so its position in the file is for reading, not the cascade.
+  The conflict above is avoided by drawing **only the corner**: a 14px box (a short solid lead-in
+  plus the 9px radius) pinned to the bottom, so the dashes keep doing the vertical work and the
+  elbow reads as them turning solid to make the turn. `top: auto` is required — an absolutely
+  positioned box with top, bottom *and* height set ignores `bottom`, which would pin the corner to
+  the top of the gutter.
 - **Sameness is a full day key, not `entryDay()`.** Two Mondays from different weeks share
   weekday index 0 and would silently merge in month view. `entryDayKey()` is
   `year | week-or-month | weekday`.
@@ -417,11 +434,28 @@ Two things that are easy to miss here:
   and comes straight back when the keyboard goes away; only the *rendered* ceiling moves. Had
   `SHEET_MAX()` been switched to the visual viewport instead, `saveSheetFrac` would have
   persisted the keyboard-shrunk height and her composer would have got shorter every session.
-  Verified working end to end (31 Jul): dragged 796→616px, stored as the fraction 0.7586, and
-  616px on both reopen and a full reload. The related hazard first flagged here — dragging *while
-  the keyboard is up* persisting a clamped fraction — **stopped existing** once the box no longer
-  shrank for the keyboard: `.sheet.expanse`'s ceiling doesn't reference `--kb`, so the dragged
-  height is keyboard-independent (measured 683px with the keyboard and without). No guard needed.
+  The related hazard first flagged here — dragging *while the keyboard is up* persisting a clamped
+  fraction — **stopped existing** once the box no longer shrank for the keyboard:
+  `.sheet.expanse`'s ceiling doesn't reference `--kb`, so the dragged height is
+  keyboard-independent (measured 683px with the keyboard and without).
+
+  **But the memory was broken on device anyway, for an unrelated reason: `pointercancel`.** The
+  drag only saved on `pointerup`. iOS ends a pointer sequence with `pointercancel` whenever it
+  reinterprets the gesture or the visual viewport shifts under it — and in the composer the
+  keyboard is up, which is exactly when that happens. Because `pointermove` had already applied
+  every intermediate height, the notch *looked* like it worked and only the memory was missing,
+  which is why it read as "the resize is fine but it forgets" (her hunch — that the keyboard was
+  involved — was right, just one layer out). The listeners leaked as well. Reproduced by
+  dispatching `pointercancel` instead of `pointerup`: the sheet resized to 616px and storage
+  stayed empty.
+
+  Fixed twice over, deliberately: `pointerup`, `pointercancel` **and** `lostpointercapture` all
+  run one shared teardown, *and* `setSheetHeight` debounces a write 250ms after the last move. The
+  debounce is the one that actually guarantees it — it survives a terminal event nobody listened
+  for, and an app killed mid-gesture. Still one write per drag, and the value written is the final
+  one rather than a mid-drag frame, so it also retires the reason the original code gave for
+  saving only on release. **Any drag handler that persists on release only has this bug on
+  touch.**
 - **`autoGrow` pins an explicit pixel height on the textarea**, so the field keeps its old size
   when the sheet shrinks under it and puts the caret straight back out of view — `min-height`
   can't fix that, only re-measuring can. Hence `sheetViewportSync`, registered by `build()` and

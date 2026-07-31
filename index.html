@@ -360,6 +360,27 @@
     bottom: -32px;
     border-left: 1px dashed var(--hairline);
   }
+  /* ...and it keeps turning in. A run of three or more used to get exactly one elbow — the first
+     repeat's, drawn by the entry above it — and every repeat after that got a dashed line running
+     straight past, pointing at nothing. Each repeat that has another below it now draws the turn
+     into it as well.
+     Only the CORNER is drawn, not the whole vertical: the dashed thread above is already doing
+     that work, so this is a short solid lead-in plus the 9px curve, and the elbow reads as the
+     dashes turning solid to make the turn rather than as a second line beside them. The 14px is
+     that lead-in plus the radius; `top: auto` is required because an absolutely positioned box
+     with top, bottom AND height set ignores `bottom`, which would pin the corner to the top of
+     the gutter instead of the bottom. Beats `.entry.rep …::after { display: none }` above on
+     specificity (four classes to two), so order here is for reading, not for the cascade. */
+  .entry.rep:has(+ .entry.rep) .entry-gutter::after {
+    content: ""; display: block;
+    width: 11px;                /* the same reach toward the text as the solid elbow */
+    height: 14px; top: auto;
+    bottom: calc(-1 * (var(--entry-pad-y) * 2 + var(--line-box) / 2));
+    background: none;
+    border-left: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+    border-bottom-left-radius: 9px;
+  }
   .entry.rep:last-child .entry-gutter::before { bottom: 16px; }
   .day-badge {
     display: flex; align-items: center; justify-content: center;
@@ -2897,7 +2918,18 @@ function el(tag, attrs, ...children) {
 // in week view, week headers in month view. mix and dense are gone.
 // tapping the active toggle returns to the baseline, so "nothing selected" is a real state.
 const LAYOUT_OPTIONS = ["day"];
+// Day view survives a kill, the same way the reading order already did — it's a way of looking at
+// the week, not a per-visit mode, and having to switch it back on every launch made it feel like
+// a toy. Only "day" is remembered as such; anything else in storage falls back to topic, so a
+// junk value can't leave the app in a layout it can't render.
+const LAYOUT_KEY = "weekly-deposits-layout";
 let layout = "topic";
+try { if (localStorage.getItem(LAYOUT_KEY) === "day") layout = "day"; } catch (e) {}
+function setLayout(v) {
+  layout = v === "day" ? "day" : "topic";
+  try { localStorage.setItem(LAYOUT_KEY, layout); } catch (e) {}
+  render();
+}
 
 // Reading order WITHIN a group. Default newest first — the thing you just wrote is the thing
 // you want to see, and it matches the way the topic groups themselves are ordered
@@ -2983,8 +3015,7 @@ if (layoutBtns) for (const name of LAYOUT_OPTIONS) {
   layoutBtns.appendChild(el("button", {
     "data-name": name,
     onclick: () => {
-      layout = (layout === name) ? "topic" : name; // tap active again = back to baseline
-      render();
+      setLayout((layout === name) ? "topic" : name); // tap active again = back to baseline
     }
   }, name));
 }
@@ -3295,7 +3326,7 @@ function renderIconRail() {
     oldestFirst ? ICO_OLDEST : ICO_NEWEST, oldestFirst,
     () => setOldestFirst(!oldestFirst)));
   bar.appendChild(icoRow("Day view: " + (layout === "day" ? "On" : "Off"), ICO_DAY, layout === "day",
-    () => { layout = layout === "day" ? "topic" : "day"; render(); }));
+    () => setLayout(layout === "day" ? "topic" : "day")));
   bar.appendChild(icoRow("Export markdown", ICO_EXPORT, false, () => doExport()));
   bar.appendChild(icoRow("Settings", ICO_SETTINGS, false, () => openSettings(),
     el("span", { class: "ico-dot" + (session ? " live" : "") })));
@@ -4104,6 +4135,18 @@ function openComposer(existing) {
     // now innerHeight includes it, so that let the notch drag the sheet under the clock.
     const SHEET_MAX = () => Math.round(window.innerHeight - safeTop() - 10);
     const SHEET_MIN = () => Math.min(300, Math.round(window.innerHeight * 0.45));
+    // Belt and braces for the memory: a debounced write means the height persists even if the
+    // drag never ends in an event we hear — a pointercancel we somehow miss, the app being killed
+    // mid-gesture, a rebuild. 250ms after the last move, so it is still one write per drag rather
+    // than the ~60/second the release-only version was avoiding, and the value written is the
+    // final one rather than a mid-drag frame.
+    let sheetFracTimer = null;
+    function rememberSheetHeight() {
+      clearTimeout(sheetFracTimer);
+      sheetFracTimer = setTimeout(() => {
+        if (manualHeight != null) saveSheetFrac(manualHeight / window.innerHeight);
+      }, 250);
+    }
     function setSheetHeight(h) {
       manualHeight = Math.max(SHEET_MIN(), Math.min(SHEET_MAX(), Math.round(h)));
       sheet.style.setProperty("--sheet-h", manualHeight + "px");
@@ -4111,6 +4154,7 @@ function openComposer(existing) {
       // it had at the OLD sheet size and overflows once the sheet shrinks under it.
       ta.style.height = "";
       autoGrow();
+      rememberSheetHeight();
     }
     grabber.addEventListener("pointerdown", ev => {
       ev.preventDefault();
@@ -4119,9 +4163,16 @@ function openComposer(existing) {
       grabber.style.cursor = "grabbing";
       try { grabber.setPointerCapture(ev.pointerId); } catch (e) {}
       const onMove = e => setSheetHeight(startH + (startY - e.clientY)); // up = taller, 1:1
-      const onUp = e => {
+      // pointerUP is not the only way a drag ends. iOS ends one with pointerCANCEL whenever it
+      // reinterprets the gesture or the visual viewport shifts under it — and in the composer the
+      // keyboard is up, which is exactly when that happens. The resize itself still applied on
+      // every pointermove, so the notch LOOKED like it worked and only the memory was missing;
+      // the listeners leaked too. Every terminal event has to run the same teardown.
+      const onEnd = e => {
         grabber.removeEventListener("pointermove", onMove);
-        grabber.removeEventListener("pointerup", onUp);
+        grabber.removeEventListener("pointerup", onEnd);
+        grabber.removeEventListener("pointercancel", onEnd);
+        grabber.removeEventListener("lostpointercapture", onEnd);
         grabber.style.cursor = "";
         try { grabber.releasePointerCapture(e.pointerId); } catch (err) {}
         // remembered on release, not on every pointermove — a drag is ~60 writes a second,
@@ -4130,7 +4181,9 @@ function openComposer(existing) {
         if (manualHeight != null) saveSheetFrac(manualHeight / window.innerHeight);
       };
       grabber.addEventListener("pointermove", onMove);
-      grabber.addEventListener("pointerup", onUp);
+      grabber.addEventListener("pointerup", onEnd);
+      grabber.addEventListener("pointercancel", onEnd);
+      grabber.addEventListener("lostpointercapture", onEnd);
     });
     // a height chosen earlier survives a rebuild (day/week change)
     if (manualHeight != null) setSheetHeight(manualHeight);
@@ -5826,8 +5879,7 @@ function openMenu() {
     body.innerHTML = "";
     // day view's home, finally: a plain row that names its own state
     body.appendChild(row("Day view", layout === "day" ? "on" : "off", () => {
-      layout = layout === "day" ? "topic" : "day";
-      render();
+      setLayout(layout === "day" ? "topic" : "day");
       renderSettings();
     }));
     // named the same way the rail names it, so the two surfaces agree
