@@ -718,21 +718,73 @@
   .line-pop-row .lp-label { flex: 1; min-width: 0; }
 
   /* format bar — line ops (bullet/indent) while just typing, span ops (B I U…) once
-     text is selected. one slim row either way; the contents swap, the row never grows. */
-  .fmt-bar { position: relative; display: none; gap: 8px; margin-top: 8px; }
+     text is selected. one slim row either way; the contents swap, the row never grows.
+     Floated free of the sheet's own flow and docked to the keyboard, not slotted between the
+     head and the field: a row that scrolls with the text is a row you lose the moment you type
+     past the first screen, and re-finding it costs a scroll every time you want to select
+     something. --kb / --kbr are the same live/predicted keyboard-band pair the sheet's own
+     padding uses (see reserveForKeyboard) — reusing them means the bar arrives already docked
+     to wherever the keyboard actually is, with no separate measurement to keep in sync. Distance
+     above the keyboard is fixed (12px gap) rather than tracking the tick accessory bar the way
+     the sheet's content does: the accessory bar's own iOS chrome sits between them either way,
+     so closing that last gap wouldn't remove a visible seam, just an amount of hidden padding. */
+  .fmt-bar {
+    position: fixed; left: 0; right: 0; z-index: 55;
+    /* env(safe-area-inset-bottom), not just --kb/--kbr: with the keyboard down both of those are
+       0, and this is the same "clear the home indicator" term the sheet's own padding already
+       carries (see the `.sheet` rule below) — reused rather than re-decided, since whether that
+       inset stays meaningful once the keyboard is up is exactly the kind of iOS behaviour this
+       file has already had to get right once. */
+    bottom: calc(env(safe-area-inset-bottom) + var(--kb) + var(--kbr) + 12px);
+    display: none; justify-content: center;
+    padding: 0 20px; pointer-events: none; /* only the pill itself should catch taps */
+    /* Do NOT put a transition on `bottom` here. Measured in Chrome (31 Jul): with
+       `transition: bottom …` on this rule, changing --kb on :root leaves the computed bottom
+       stuck at its old value forever — 12px with --kb at 336px — so the bar silently stops
+       tracking the keyboard altogether. Removing the transition, or setting --kb directly on
+       this element instead of an ancestor, both resolve it correctly to 348px. A transitioned
+       property whose value comes from calc(var(…)) does not get re-resolved when that var
+       changes on an ancestor. Nothing is lost: --kb and --kbr are built so exactly one is ever
+       non-zero and the sum is the same across the keyboard's arrival, so there is no jump here
+       to smooth over in the first place. */
+  }
   .fmt-bar.show { display: flex; }
+  .fmt-bar-pill {
+    display: flex; gap: 2px; pointer-events: auto;
+    background: #fff; border-radius: 999px; padding: 6px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08), 0 10px 28px rgba(0,0,0,0.10);
+    border: 1px solid rgba(0,0,0,0.04);
+    max-width: 100%; overflow-x: auto; scrollbar-width: none;
+  }
+  .fmt-bar-pill::-webkit-scrollbar { width: 0; height: 0; }
+  /* the docked bar floats OVER the sheet rather than in it, so the sheet has to give back the
+     room it covers or the last line of text sits under the pill — reachable only by scrolling
+     it out from under, which is the thing a fixed bar is supposed to stop happening. --fmt-h is
+     the pill's own height plus its 12px gap, kept as one value used by both sides so the
+     clearance can't drift from the thing it is clearing. Only applied once the bar is actually
+     showing (.has-fmt), since before that there is nothing over the content. */
+  :root { --fmt-h: 60px; }
+  .sheet.expanse.has-fmt {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 28px + var(--kb) + var(--kbr) + var(--fmt-h));
+  }
   .fmt-bar .sel-only, .fmt-bar .line-only { display: none; }
   .fmt-bar.has-sel .sel-only { display: flex; }
   .fmt-bar:not(.has-sel) .line-only { display: flex; }
+  /* No individual chip background any more — that was right for a row sitting loose on the
+     sheet, but this row now sits on ONE shared pill (.fmt-bar-pill), and a grey chip inside a
+     white pill reads as a second layer of chrome the screenshot doesn't have. Fixed width in
+     place of the old `flex: 1`: the row no longer spans full width to distribute evenly across,
+     and a single-glyph button ("I" is much narrower than "M") needs an explicit tap target or
+     the thin ones fall under the 40px-ish comfortable minimum. */
   .fmt-btn {
-    flex: 1; font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
-    background: var(--field); color: var(--ink); border: none; border-radius: 999px;
-    height: 31px; padding: 0; align-items: center; justify-content: center;
+    flex: none; width: 38px; height: 36px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
+    background: none; color: var(--ink); border: none; border-radius: 10px;
+    padding: 0; align-items: center; justify-content: center;
     user-select: none; -webkit-user-select: none;
   }
   .fmt-btn svg { display: block; }
-  /* line ops (bullet/indent/outdent): smaller, and the muted grey of the topic chips below —
-     31px tall to match the chip row's own height, not a separate, taller kind of control */
+  /* line ops (bullet/indent/outdent): the muted grey of the topic chips below, same as before */
   .fmt-btn.line-only { color: #6B6B70; }
   .fmt-btn.line-only:active { color: #fff; } /* keep the press invert (specificity beats the rest colour) */
   .fmt-btn.line-only svg { width: 16.5px; height: 16.5px; }
@@ -740,7 +792,12 @@
   .fmt-b { font-weight: 700; }
   .fmt-i { font-style: italic; }
   .fmt-u { text-decoration: underline; text-underline-offset: 2px; }
+  /* redact and link replace what used to be bare "R"/"L" letters (see LINK_ICON / REDACT_ICON) —
+     redact keeps the old letter's muted weight since a mask action reads as secondary next to
+     B/I/U; link stays full ink, matching how it reads in the screenshot. */
+  .fmt-btn.fmt-icon svg { width: 18px; height: 18px; }
   .fmt-r { color: var(--subtle); }
+  .fmt-r:active { color: #fff; }
   .entry-meta {
     display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center;
   }
@@ -1038,8 +1095,10 @@
     max-height: none;
   }
   .sheet.expanse textarea.ta-entry::placeholder { color: #B4B4B9; }
-  /* the styling row rides under the head, above the field — always in view on a phone */
-  .sheet.expanse .fmt-bar { margin: 2px 0 6px; }
+  /* the bar used to ride in-flow under the head; now it's position: fixed and docked to the
+     keyboard (see .fmt-bar), so there's nothing here to offset any more. Left as a marker so a
+     future margin added here isn't a surprise: a fixed box with only `bottom` set still honours
+     margin, which would just silently open a gap on top of the one --kb/--kbr already give it. */
 
   /* the notch doubles as a resize handle for the composer: drag it to set the height */
   .grabber {
@@ -1768,6 +1827,25 @@
       max-height: var(--sheet-ceil);
       clip-path: inset(0 round 20px);
     }
+    /* No keyboard-docked pill on desktop: there is no soft keyboard to dock to (SOFT_KB gates
+       --kb/--kbr off entirely, so they are permanently 0), and the composer here is a centred
+       window rather than a phone sheet. Straight back to the in-flow row it has always been —
+       the pill's own chrome is unwound too, so the buttons get their grey chips back instead of
+       floating on a white capsule that would now be sitting on white. The bar is also RE-HOMED
+       in the DOM at this breakpoint (see attachFmtBar): in-flow means it has to be inside the
+       sheet, not parked in sheetRoot. */
+    .fmt-bar {
+      position: static; z-index: auto; bottom: auto;
+      padding: 0; pointer-events: auto; transition: none;
+      margin: 2px 0 6px;
+    }
+    .fmt-bar-pill {
+      background: none; box-shadow: none; border: none; border-radius: 0;
+      padding: 0; gap: 8px; width: 100%; overflow: visible;
+    }
+    .fmt-btn { flex: 1; width: auto; height: 31px; background: var(--field); border-radius: 999px; }
+    /* and no clearance to reserve, since nothing is floating over the content any more */
+    .sheet.expanse.has-fmt { padding-bottom: calc(env(safe-area-inset-bottom) + 28px + var(--kb) + var(--kbr)); }
     .sheet { scrollbar-width: none; }
     .sheet::-webkit-scrollbar { width: 0; height: 0; }
     .sheet.expanse.folded { clip-path: inset(var(--mt) var(--mr) var(--mb) var(--ml) round 18px); }
@@ -2095,6 +2173,16 @@ const IMG_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" st
 const CHECKBOX_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>';
 const LINES_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="5" cy="6" r="1.5" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="5" cy="18" r="1.5" fill="currentColor" stroke="none"/><path d="M10 6h9M10 12h6M10 18h9"/></svg>';
 const FOLD_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16"/><path d="M8 13l4 4 4-4"/></svg>';
+// the fmt bar's own two icon buttons — same stroke language as the set above (24 viewBox,
+// currentColor, 1.8 stroke, round caps/joins) so they read as one family, not an import.
+// FMT_ prefix because LINK_ICON is already taken, by the 10px glyph that marks a rendered link
+// inside an entry (see its use in the card renderer). Same shape, but that one is drawn at 10px
+// with a 2.2 stroke to survive being tiny inline; this one is a 24px toolbar icon at the 1.8
+// stroke the rest of the button set uses. Two sizes of the same idea, not one reusable asset.
+const FMT_LINK_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 14.5 14.5 9.5"/><path d="M11 7.5 12.4 6.1a3.5 3.5 0 0 1 4.95 4.95L15.9 12.5"/><path d="M13 16.5 11.6 17.9a3.5 3.5 0 0 1-4.95-4.95L8.1 11.5"/></svg>';
+// a bar wiping across the line — the ||redact|| marker's own idea (mask, not strike) rather
+// than the highlighter-pen glyph a literal read of "highlight" would suggest.
+const REDACT_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4.5 5.5h15" stroke-opacity="0.4"/><path d="M4.5 18.5h9" stroke-opacity="0.4"/><rect x="3.5" y="9.5" width="17" height="5" rx="2.5" fill="currentColor" stroke="none"/></svg>';
 
 // derive a compact display domain from a url (drops scheme, www, and path)
 function domainOf(u) {
@@ -3494,6 +3582,7 @@ function onBreakpointCross() {
     if (deskMQ.matches === deskWas) return;
     deskWas = deskMQ.matches;
     render();
+    if (composerFmtReattach) composerFmtReattach(); // the open composer's bar changes parent here
   }, 60);
 }
 deskMQ.addEventListener("change", onBreakpointCross);
@@ -3630,6 +3719,10 @@ const vvp = window.visualViewport;
 // puts the caret back out of reach — the same trap setSheetHeight already clears by hand. One
 // at a time, dropped on close: build() makes a new textarea on every rebuild.
 let sheetViewportSync = null;
+// the live composer's fmt-bar re-home, registered by build(). The bar's DOM parent depends on
+// the breakpoint (docked pill on a phone, in-flow row on desktop) and crossing it doesn't
+// rebuild the composer, so the crossing has to reach in and move it. Dropped on close.
+let composerFmtReattach = null;
 
 // ---------- the keyboard's height, remembered ----------
 // iOS won't tell you how tall the keyboard is until it has already opened, so it can only be
@@ -3827,6 +3920,12 @@ function openComposer(existing) {
   let reapplySheetHeight = null;
   // once the format bar has shown, keep it shown (survives rebuilds too — no reflow jump)
   let barShown = false;
+  // the fmt bar is fixed-position and docked to the keyboard, so it lives OUTSIDE `sheet` —
+  // sheet.innerHTML = "" at the top of every build() would otherwise never touch it, and
+  // build() runs on every tag toggle, day change, segmentation offer... every one of those
+  // would leave the old bar behind and append a fresh one on top of it. This is the one
+  // element build() has to clean up by hand instead of getting the wipe for free.
+  let fmtBarEl = null;
 
   sheetRoot.innerHTML = ""; // never stack on another sheet (composer can open from search results)
   lockPageScroll();
@@ -3840,6 +3939,9 @@ function openComposer(existing) {
   function close() {
     document.body.classList.remove("composing"); // let the list come back forward
     bindFmtSelectionSync(null); sheetViewportSync = null; clearKeyboardReserve();
+    composerFmtReattach = null; fmtBarEl = null;
+    // clears the bar along with everything else: on a phone it is a direct child of sheetRoot,
+    // on desktop it is nested inside the sheet — either way this is its ancestor.
     sheetRoot.innerHTML = ""; unlockPageScroll();
   }
   // tapping away with unsaved work is an easy way to lose a thought — warn first. covers a
@@ -3867,6 +3969,7 @@ function openComposer(existing) {
 
   function build() {
     sheet.innerHTML = "";
+    if (fmtBarEl) { fmtBarEl.remove(); fmtBarEl = null; } // see the note on fmtBarEl above
     const grabber = el("div", { class: "grabber", title: "Drag to resize" });
     sheet.appendChild(grabber);
 
@@ -4347,6 +4450,11 @@ function openComposer(existing) {
     // ---- format bar: line ops (• ⇥ ⇤) while just typing, span ops (B I U M R L)
     // once text is selected — the row swaps contents rather than growing ----
     const fmtBar = el("div", { class: "fmt-bar" });
+    // the actual pill: fmtBar itself is the fixed-position, full-width positioning shell
+    // (centred, docked to the keyboard); this is the floating white capsule inside it that
+    // the buttons live on and that the "sel-only"/"line-only" swap toggles the contents of.
+    const fmtBarPill = el("div", { class: "fmt-bar-pill" });
+    fmtBar.appendChild(fmtBarPill);
     // once the bar has appeared it stays put for the life of the composer: hiding it on
     // blur reflows the sheet, and the height jump made it easy to tap the backdrop by
     // accident and trip the discard prompt. it still swaps line-ops <-> span-ops.
@@ -4359,6 +4467,9 @@ function openComposer(existing) {
       fmtBar.classList.toggle("has-sel", hasSel);
       if (focused || hasSel) barShown = true;
       fmtBar.classList.toggle("show", barShown);
+      // the docked bar floats over the sheet, so the sheet reserves the room it covers — but
+      // only once it's actually showing, or every composer opens with a band of dead space.
+      sheet.classList.toggle("has-fmt", barShown);
     };
     // selectionchange is the only event that fires for BOTH making and clearing a selection:
     // `select` fires only when text becomes selected — never when it collapses — and on iOS
@@ -4535,10 +4646,10 @@ function openComposer(existing) {
       ev.preventDefault();
       openLinePop(linesBtn, LINE_OPS);
     });
-    fmtBar.appendChild(linesBtn);
+    fmtBarPill.appendChild(linesBtn);
     const checkBtn = el("button", { class: "fmt-btn line-only", "aria-label": "Checkbox" });
     checkBtn.innerHTML = CHECKBOX_ICON;
-    fmtBar.appendChild(fmtPress(checkBtn, () => lineOp(checkboxTransform)));
+    fmtBarPill.appendChild(fmtPress(checkBtn, () => lineOp(checkboxTransform)));
 
     // fold: drop a "+++" cut on its own line. everything below it collapses in the card
     // behind a Read-more that floats the whole entry in a centred modal.
@@ -4558,7 +4669,7 @@ function openComposer(existing) {
     }
     const foldBtn = el("button", { class: "fmt-btn line-only", "aria-label": "Fold (read more)" });
     foldBtn.innerHTML = FOLD_ICON;
-    fmtBar.appendChild(fmtPress(foldBtn, insertFold));
+    fmtBarPill.appendChild(fmtPress(foldBtn, insertFold));
 
     // photo button: pick from disk / photo library — the same pipeline as ⌘V,
     // for the phone (and anyone who doesn't live on the clipboard)
@@ -4576,7 +4687,7 @@ function openComposer(existing) {
     // keeps focus in the textarea, so the keyboard doesn't collapse and the click lands here.
     imgBtn.addEventListener("pointerdown", ev => ev.preventDefault());
     imgBtn.addEventListener("click", () => imgInput.click());
-    fmtBar.appendChild(imgBtn);
+    fmtBarPill.appendChild(imgBtn);
     sheet.appendChild(imgInput);
 
     // enter continues the current line's structure: a bullet keeps its marker+indent, an
@@ -4633,15 +4744,46 @@ function openComposer(existing) {
       updateBar();
     });
 
-    [["B", "**", "**", "fmt-b"], ["I", "*", "*", "fmt-i"], ["U", "__", "__", "fmt-u"],
-     ["M", "`", "`", "fmt-m"], ["R", "||", "||", "fmt-r"]].forEach(([label, pre, post, cls]) => {
-      const b = el("button", { class: "fmt-btn sel-only " + cls }, label);
-      fmtBar.appendChild(fmtPress(b, () => wrapSel(pre, post)));
-    });
-    fmtBar.appendChild(fmtPress(el("button", { class: "fmt-btn sel-only fmt-l" }, "L"), linkSel));
-    // directly under the day/week/Save row, NOT at the foot of the sheet: on a phone the
-    // keyboard covers the bottom third, and a styling row you can't see is a row you can't use.
-    head.insertAdjacentElement("afterend", fmtBar);
+    // B I U M stay plain styled letters — that's the part already spot on, nothing to change.
+    // Redact swapped from a bare "R" to REDACT_ICON: once the row is a fixed pictorial pill
+    // rather than a row of labelled chips, a letter reads as an abbreviation to decode rather
+    // than a mark, and it's now sitting next to an actual pictogram (link) with no third state
+    // to make "which kind of button is this" obvious. aria-label carries what the glyph no
+    // longer spells out.
+    [["B", "**", "**", "fmt-b", "Bold"], ["I", "*", "*", "fmt-i", "Italic"],
+     ["U", "__", "__", "fmt-u", "Underline"], ["M", "`", "`", "fmt-m", "Code"]]
+      .forEach(([label, pre, post, cls, aria]) => {
+        const b = el("button", { class: "fmt-btn sel-only " + cls, "aria-label": aria }, label);
+        fmtBarPill.appendChild(fmtPress(b, () => wrapSel(pre, post)));
+      });
+    const redactBtn = el("button", { class: "fmt-btn sel-only fmt-r fmt-icon", "aria-label": "Redact" });
+    redactBtn.innerHTML = REDACT_ICON;
+    fmtBarPill.appendChild(fmtPress(redactBtn, () => wrapSel("||", "||")));
+    const linkBtn = el("button", { class: "fmt-btn sel-only fmt-l fmt-icon", "aria-label": "Link" });
+    linkBtn.innerHTML = FMT_LINK_ICON;
+    fmtBarPill.appendChild(fmtPress(linkBtn, linkSel));
+
+    // Where the bar lives depends on the breakpoint, because the two versions of it are
+    // positioned in genuinely different ways and neither can be reached from the other's parent:
+    //  - phone: fixed and docked to the keyboard, so it must NOT be inside the sheet — the sheet
+    //    scrolls its own content and clips to a rounded rect during the unfold, and clip-path
+    //    clips fixed descendants too, so a bar inside it would be cut off. sheetRoot is used
+    //    rather than overlay because sheetRoot has no transformed ancestor: `position: fixed`
+    //    resolves against the real screen there, and an ancestor that later gained a transform
+    //    would silently re-anchor it and stop it tracking the keyboard.
+    //  - desktop: an ordinary in-flow row under the head, which means it has to be inside the
+    //    sheet to sit in that flow at all.
+    // fmtBarEl is only set in the phone case: that is the one build()'s `sheet.innerHTML = ""`
+    // cannot reach, so it is the one that has to be removed by hand.
+    const attachFmtBar = () => {
+      if (deskMQ.matches) { head.insertAdjacentElement("afterend", fmtBar); fmtBarEl = null; }
+      else { sheetRoot.appendChild(fmtBar); fmtBarEl = fmtBar; }
+    };
+    attachFmtBar();
+    // Crossing the breakpoint does NOT rebuild the composer (onBreakpointCross calls render(),
+    // which redraws the list behind it), so a live bar has to be told to re-home itself — an
+    // in-flow row left parked in sheetRoot would render adrift at the foot of the page.
+    composerFmtReattach = attachFmtBar;
 
     // ---- segmentation offer: appears once the ramble is long enough (and a key exists) ----
     const segOffer = segState && segState.busy
