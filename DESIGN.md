@@ -373,17 +373,28 @@ The list behind it recedes in the same gesture:
 backdrop to `rgba(0,0,0,.18)` / `blur(2px)` — at 0.4 opacity it was happening behind
 something too opaque to see through.
 
-**Composer speed is a setting** (31 Jul 2026): five levels in one shared Settings sheet (the
+**Composer speed is a setting** (31 Jul 2026): four levels in one shared Settings sheet (the
 desktop rail's Settings glyph and the mobile `⋮` → Settings both land in `openSettings`, so the
 control is built once). Implemented as ONE multiplier, `--unfold-k`, over every duration in the
-gesture — `UNFOLD_STEPS = [1.96, 1.4, 1, 0.71, 0]`, geometric at ×1.4 a notch, index 2 the
-tuned default and the middle of the scale. Multiplying rather than replacing is the point: the
-ratios between the four transitions survive any setting, which is what keeps them one move.
-Level 5 is `0` — every duration collapses to `0s` *and* `unfoldStill()` sends the JS down the
-same path `prefers-reduced-motion` takes, so the sheet doesn't run a zero-length clip dance, it
-just appears. The focus delay scales with it (`420 * unfoldK()`), or a slow unfold gets the
-keyboard over the top of it. A segmented control, not a slider — five notches isn't a value
-worth scrubbing, and the active cell is the state. Cells read `1 2 3 4 🐇`.
+gesture — `UNFOLD_STEPS = [1, 0.71, 0.6, 0]` = 620 / 440 / 372 / 0ms, index **1** the default.
+Multiplying rather than replacing is the point: the ratios between the four transitions survive
+any setting, which is what keeps them one move. Level 4 is `0` — every duration collapses to
+`0s` *and* `unfoldStill()` sends the JS down the same path `prefers-reduced-motion` takes, so the
+sheet doesn't run a zero-length clip dance, it just appears. A segmented control, not a slider —
+four notches isn't a value worth scrubbing, and the active cell is the state. Cells read
+`1 2 3 🐇`.
+
+The ladder was rebuilt the same day it shipped: the first cut was five rungs
+(`[1.96, 1.4, 1, 0.71, 0]`, ×1.4 apart, default in the middle) and *nothing slower than the
+default was ever wanted*. So the old level 4 became level 2 **and** the default, the two slowest
+rungs went, and level 3 is only a nudge quicker than 2 rather than another full step. Two things
+that had to move with it:
+- **The storage key is versioned** (`weekly-deposits-unfold-v2`). `unfoldLevel` persists as an
+  *index*, so a stored `3` used to mean 440ms and would now mean no-motion. The old value has to
+  be dropped, not reinterpreted — the one real hazard in re-spacing a scale like this.
+- **`620` in `unfoldNote()` is the `k = 1` baseline**, the same number as the CSS `0.62s`. It
+  only stays honest because level 1 is still `k = 1`; rescale by editing the CSS base durations
+  instead and this constant has to follow, or the sheet misreports its own duration.
 
 **The keyboard must not move the composer** (31 Jul 2026). Reported as *"when I tap and the
 keyboard comes in, it pushes the composer all the way up and I can't even see what I type."*
@@ -416,6 +427,43 @@ Two things that are easy to miss here:
 Verified by shadowing `visualViewport.height`/`offsetTop` with `Object.defineProperty` and
 firing the real `resize`/`scroll` events — setting the CSS vars by hand does *not* test it,
 because the handler immediately overwrites them with the true values.
+
+**Tap once, and don't bounce** (31 Jul 2026, the follow-up). The fix above stopped the composer
+being *shoved* off-screen but left two things she then reported precisely: tapping "Start typing"
+expanded the window and she had to tap "Start typing" *again* to get a keyboard, and that second
+tap bounced the whole screen up once.
+
+- **The double tap is iOS's user-activation rule.** A programmatic `.focus()` only raises the
+  keyboard inside a real gesture's activation window; the focus was in `setTimeout(…, 420)`,
+  outside it. iOS obliged by focusing the field — caret and all — and leaving the keyboard down,
+  which is why the cue said "Start typing" at something that wouldn't. Focus now runs
+  **synchronously** at the end of `openComposer`, still inside the click. The deferred call stays
+  as a fallback, guarded on `document.activeElement` so a focus that already took isn't repeated
+  (each repeat is another chance to trigger a scroll-into-view). **It must stay on `click`** —
+  `pointerdown` grants activation only for `pointerType: "mouse"`, the same rule that stops the
+  photo button committing on pointerdown.
+- **The bounce was the sheet resizing after the keyboard arrived.** Sized against the full
+  viewport, the sheet's bottom was under the keyboard, so iOS scrolled to reveal the caret. The
+  cure is for the sheet to be its keyboard-up size *before* the keyboard exists: `kbHeight` is
+  learned from the last time (iOS won't tell you before it opens) and cached in localStorage, and
+  `reserveForKeyboard()` publishes it as `--kbr` before the fold is even measured. The sheet's
+  ceiling is `--vvh - --kbr`, so when the keyboard lands `--vvh` drops by exactly what `--kbr`
+  gives back and **the sheet does not move at all**. Measured: 410px before and 410px after.
+
+Three details that are the whole design:
+- **Reserve on `--kbr`, never by shrinking `--vvh`.** `--vvh` is the backdrop's height. Shrink it
+  and the frost stops covering the bottom of the screen, showing the list unblurred under the
+  sheet. `--kbr` is `padding-bottom` on `.overlay` instead: the backdrop still spans the whole
+  viewport and `align-items: flex-end` drops the sheet above the band. (Desktop's `.overlay`
+  overrides that padding, and has no keyboard anyway.)
+- **The measurement always beats the prediction.** As soon as a real keyboard is seen, `--kbr`
+  is handed back and `--vvh` rules. A stale cache costs one small correction (predicted 392,
+  real 300 → a 92px adjustment) instead of the 386px bounce, and re-caches on the way through.
+- **A keyboard that never comes** — hardware keyboard, or dismissed — would otherwise leave the
+  composer permanently short, so the reserve self-releases after 1400ms.
+
+First composer on a fresh install still adjusts once, because there is nothing to predict from
+yet. Existing entries open to be read: no focus, no reserve.
 
 **Pinch a photo run** closed and it fans into a deck (white ring per card so they stay
 distinct); spread it back to a row. State is keyed by the run's markers so it survives the

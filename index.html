@@ -57,6 +57,10 @@
        open. The fallbacks are what desktop and any browser without visualViewport get. */
     --vvh: 100dvh;
     --vvt: 0px;
+    /* the band held back for a keyboard that is coming but hasn't landed — see
+       reserveForKeyboard. The sheet's ceiling is --vvh minus this, so when the keyboard
+       arrives --vvh drops by the same amount this gives back and the sheet doesn't move. */
+    --kbr: 0px;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; padding: 0; }
@@ -891,6 +895,10 @@
   .overlay {
     position: fixed; left: 0; right: 0; z-index: 50;
     top: var(--vvt); height: var(--vvh);
+    /* the reserved band sits INSIDE the backdrop: the frost still covers the whole screen while
+       the keyboard is on its way, and flex-end drops the sheet above the band rather than under
+       where the keyboard will be. box-sizing is border-box app-wide, so the height still holds. */
+    padding-bottom: var(--kbr);
     background: rgba(0,0,0,0.4);
     -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
     display: flex; align-items: flex-end; justify-content: center;
@@ -940,7 +948,7 @@
        the field stays exactly where it opened. --sheet-h itself is left alone, so her chosen
        height comes straight back when the keyboard goes away. */
     height: var(--sheet-h, 98dvh);
-    max-height: calc(var(--vvh) - env(safe-area-inset-top) - 10px);
+    max-height: calc(var(--vvh) - var(--kbr) - env(safe-area-inset-top) - 10px);
     padding: 12px 20px calc(env(safe-area-inset-bottom) + 24px);
     animation: none; /* the unfold below replaces the generic slide-up */
     clip-path: inset(0 round 20px 20px 0 0);
@@ -978,7 +986,7 @@
   .sheet.expanse textarea.ta-entry {
     background: none; border-radius: 0; padding: 8px 0 0;
     font-size: 17px; line-height: 1.55;
-    min-height: min(calc(var(--sheet-h, 98dvh) - 250px), calc(var(--vvh) - 250px));
+    min-height: min(calc(var(--sheet-h, 98dvh) - 250px), calc(var(--vvh) - var(--kbr) - 250px));
     max-height: none;
   }
   .sheet.expanse textarea.ta-entry::placeholder { color: #B4B4B9; }
@@ -2887,14 +2895,18 @@ function setOldestFirst(v) {
 }
 
 // ---------- composer unfold speed ----------
-// Five levels, as one multiplier over every duration in the unfold (--unfold-k, see :root).
-// Index 2 is the tuned default and the middle of the scale; the steps are geometric at ×1.4
-// per notch, so each one is a real change rather than a nudge. Level 5 is 0 — every duration
-// collapses to 0s AND the JS takes the same path prefers-reduced-motion takes, so the sheet
-// doesn't run the clip dance at zero length; it just appears.
-const UNFOLD_KEY = "weekly-deposits-unfold";
-const UNFOLD_STEPS = [1.96, 1.4, 1, 0.71, 0];
-const UNFOLD_DEFAULT = 2;
+// Four levels, as one multiplier over every duration in the unfold (--unfold-k, see :root).
+// The ladder was rebuilt on 31 Jul around the old level 4: it became level 2 and the default,
+// because nothing slower than the old default was ever wanted. So 1 is the old default (620ms),
+// 2 is the old level 4 (440ms), 3 is only slightly quicker again (372ms — a nudge, not a step,
+// which is what was asked for), and 4 is 0. The two slowest rungs of the old scale are gone.
+// Level 4 is not just 0s durations: unfoldStill() sends the JS down the same path
+// prefers-reduced-motion takes, so the sheet doesn't run a zero-length clip dance, it appears.
+// The key is versioned because the INDICES changed meaning — a stored 3 used to be 440ms and
+// would now be no-motion, so the old value has to be dropped rather than reinterpreted.
+const UNFOLD_KEY = "weekly-deposits-unfold-v2";
+const UNFOLD_STEPS = [1, 0.71, 0.6, 0];
+const UNFOLD_DEFAULT = 1;
 let unfoldLevel = UNFOLD_DEFAULT;
 try {
   const raw = parseInt(localStorage.getItem(UNFOLD_KEY), 10);
@@ -3512,10 +3524,60 @@ const vvp = window.visualViewport;
 // puts the caret back out of reach — the same trap setSheetHeight already clears by hand. One
 // at a time, dropped on close: build() makes a new textarea on every rebuild.
 let sheetViewportSync = null;
+
+// ---------- the keyboard's height, remembered ----------
+// iOS won't tell you how tall the keyboard is until it has already opened, so it can only be
+// learned from the last time. The FIRST composer on a fresh install still adjusts when the
+// keyboard lands; every one after that opens already sized for it. The 80px floor keeps
+// Safari's collapsing toolbar out of the number, and the 600 ceiling keeps a junk value from
+// swallowing the whole screen.
+const KB_KEY = "weekly-deposits-kb-h";
+let kbHeight = 0;
+try {
+  const v = parseInt(localStorage.getItem(KB_KEY), 10);
+  if (v > 80 && v < 600) kbHeight = v;
+} catch (e) {}
+
+// --kbr is the band held back for a keyboard that is on its way but hasn't arrived. The BACKDROP
+// still covers the whole visible viewport (--vvh) — reserving by shrinking --vvh instead would
+// leave the list showing unblurred under the sheet. Only the sheet's own ceiling is reduced.
+// --vvh shrinks and --kbr is handed back in the same frame, and the sheet is measured against
+// the difference, so the keyboard's arrival is a no-op instead of a jump.
+let kbReserve = 0, kbReserveTimer = null;
+function setKbReserve(px) {
+  kbReserve = Math.max(0, Math.round(px));
+  document.documentElement.style.setProperty("--kbr", kbReserve + "px");
+}
+function reserveForKeyboard() {
+  clearTimeout(kbReserveTimer);
+  if (!kbHeight) return;                                     // nothing learned yet
+  if (vvp && vvp.height < window.innerHeight - 80) return;    // already up: --vvh has it
+  setKbReserve(kbHeight);
+  // a hardware keyboard means it never comes, and a dismissed one means it left again — either
+  // way don't sit on the band forever, or the composer stays short for no reason
+  kbReserveTimer = setTimeout(() => setKbReserve(0), 1400);
+}
+function clearKeyboardReserve() {
+  clearTimeout(kbReserveTimer);
+  setKbReserve(0);
+}
+
 function syncViewportVars() {
   const s = document.documentElement.style;
-  s.setProperty("--vvh", Math.round(vvp ? vvp.height : window.innerHeight) + "px");
+  const h = Math.round(vvp ? vvp.height : window.innerHeight);
+  s.setProperty("--vvh", h + "px");
   s.setProperty("--vvt", Math.round(vvp ? vvp.offsetTop : 0) + "px");
+  // the keyboard is up: learn its height for next time, and give the reserved band back, since
+  // --vvh now accounts for the real thing. Trusting the measurement over the prediction is what
+  // self-corrects a stale cache — worst case one small adjustment, never the full-height jump.
+  const gap = Math.round(window.innerHeight - h);
+  if (gap > 80) {
+    if (gap !== kbHeight) {
+      kbHeight = gap;
+      try { localStorage.setItem(KB_KEY, String(gap)); } catch (e) {}
+    }
+    if (kbReserve) clearKeyboardReserve();
+  }
 }
 syncViewportVars();
 if (vvp) {
@@ -3618,7 +3680,7 @@ function openComposer(existing) {
 
   function close() {
     document.body.classList.remove("composing"); // let the list come back forward
-    bindFmtSelectionSync(null); sheetViewportSync = null;
+    bindFmtSelectionSync(null); sheetViewportSync = null; clearKeyboardReserve();
     sheetRoot.innerHTML = ""; unlockPageScroll();
   }
   // tapping away with unsaved work is an easy way to lose a thought — warn first. covers a
@@ -4528,6 +4590,13 @@ function openComposer(existing) {
   // unfold from the compose bar: clip the sheet to that grey rectangle's real measured box,
   // then release it so the clip opens outward into the full sheet. two frames because the
   // folded state has to be painted before the transition has anything to travel from.
+  // a new deposit types straight away; an existing one opens to be read, so no keyboard
+  const wantsFocus = !existing;
+  // Hold back the keyboard's band BEFORE the fold is measured, so the sheet's box is already
+  // its keyboard-up size and the clip insets are computed against the box it will actually
+  // settle into. This is what stops the one-off bounce: the caret is inside the visible area
+  // from the first frame, so iOS has no reason to scroll anything into view.
+  if (wantsFocus) reserveForKeyboard();
   const barEl = document.querySelector(".compose-bar");
   const still = unfoldStill(); // OS reduced-motion, or the rabbit end of the speed setting
   if (barEl && !still) {
@@ -4548,12 +4617,21 @@ function openComposer(existing) {
     requestAnimationFrame(release);
     setTimeout(release, 70);
   }
+  // iOS raises the keyboard for a programmatic focus() ONLY inside a real gesture's activation
+  // window, and a setTimeout is outside it — the field took focus and showed a caret while the
+  // keyboard stayed down, which is exactly the "tap Start typing, then tap Start typing again"
+  // she hit. This runs synchronously, still inside the click that opened the composer, so the
+  // activation is live. It must stay on `click`: pointerdown grants activation only when
+  // pointerType is "mouse", so moving it earlier would break it on touch for the same reason
+  // the photo button can't commit on pointerdown.
+  const taNow = sheet.querySelector("textarea");
+  if (taNow && wantsFocus) taNow.focus();
+  // belt and braces for anything that refused the synchronous focus (and for the caret when the
+  // unfold is animating). Guarded on activeElement so a focus that already took isn't repeated,
+  // which on iOS is another chance to trigger a scroll-into-view.
   setTimeout(() => {
     const ta = sheet.querySelector("textarea");
-    if (ta && !existing) ta.focus();
-    // let the unfold land before the keyboard comes up. 420 is 0.8 × the 520 the old 0.78s
-    // unfold wanted, and it has to track the speed setting or a slow unfold gets the keyboard
-    // over the top of it — and a fast one waits on nothing.
+    if (ta && wantsFocus && document.activeElement !== ta) ta.focus();
   }, still ? 120 : Math.round(420 * unfoldK()));
 }
 
