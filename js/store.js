@@ -23,8 +23,9 @@ const META_STORE = "meta";
 const LEGACY_ENTRIES_KEY = "weekly-deposits-entries";
 
 let db = null;
-const blobs = new Map();  // image id -> Blob: what gets uploaded, and the real bytes
-const urls = new Map();   // image id -> object URL: what the DOM renders
+const blobs = new Map();      // image id -> Blob: what gets uploaded, and the real bytes
+const urls = new Map();       // image id -> object URL: what the DOM renders
+const persisted = new Set();  // image ids already written to disk — see writeAll
 let onError = () => {};
 
 /** Report a failed write. The whole point of this module: a save that doesn't land says so. */
@@ -42,6 +43,7 @@ export async function putImage(id, blob) {
     const { store, done } = tx([IMAGE_STORE], "readwrite");
     store(IMAGE_STORE).put({ id, blob });
     await done;
+    persisted.add(id);
   }
   return url;
 }
@@ -101,12 +103,24 @@ function dataUrlToBlob(s) {
   return new Blob([buf], { type });
 }
 
+// One URL per photo per page load, and never revoked while the page lives. Revoking on
+// replacement looked tidy but the DOM may still be rendering the old one — and a revoked
+// URL renders as a broken-image glyph, which is exactly what it did.
 function urlFor(id, blob) {
   const prev = urls.get(id);
-  if (prev) URL.revokeObjectURL(prev);
+  if (prev) return prev;
   const u = URL.createObjectURL(blob);
   urls.set(id, u);
   return u;
+}
+
+/** The URL to render for a photo, or null if this device doesn't hold it yet. Everything
+ *  that displays a photo goes through here, so there is exactly one URL per id. */
+export function imageUrl(id) {
+  const existing = urls.get(id);
+  if (existing) return existing;
+  const b = blobs.get(id);
+  return b ? urlFor(id, b) : null;
 }
 
 /** Take whatever the composer produced for an image and settle it into a Blob we own. */
@@ -127,10 +141,15 @@ function adoptImage(id, value) {
 export async function loadEntries() {
   if (!db) return [];
   const { store, done } = tx([ENTRY_STORE, IMAGE_STORE], "readonly");
-  const rows = await reqDone(store(ENTRY_STORE).getAll());
-  const imgs = await reqDone(store(IMAGE_STORE).getAll());
+  // both requests are issued before either is awaited. Safari ends a transaction as soon as
+  // it has no pending requests, and awaiting the first one yields long enough for that to
+  // happen — the second call then throws TransactionInactiveError.
+  const rowsReq = store(ENTRY_STORE).getAll();
+  const imgsReq = store(IMAGE_STORE).getAll();
+  const rows = await reqDone(rowsReq);
+  const imgs = await reqDone(imgsReq);
   await done;
-  for (const rec of imgs) if (rec && rec.blob) blobs.set(rec.id, rec.blob);
+  for (const rec of imgs) if (rec && rec.blob) { blobs.set(rec.id, rec.blob); persisted.add(rec.id); }
   return rows.map(rec => {
     const e = { ...rec };
     const ids = e.imageIds || [];
@@ -194,23 +213,37 @@ async function writeAll(list) {
     if (e.images) {
       for (const [id, val] of Object.entries(e.images)) {
         const url = adoptImage(id, val);
-        if (url) { ids.add(id); if (blobs.has(id)) pendingImages.push(id); }
+        // only NEW blobs get written. Re-cloning every photo into IndexedDB on every save
+        // was 3.2MB a time — slow enough to fail outright on a phone, and it invalidated
+        // the object URLs the DOM was still rendering.
+        if (url) { ids.add(id); if (blobs.has(id) && !persisted.has(id)) pendingImages.push(id); }
       }
     }
     if (ids.size) rec.imageIds = [...ids]; else delete rec.imageIds;
     return rec;
   });
 
+  // Which ids are on disk, read in a transaction of its own. This used to be an await in
+  // the MIDDLE of the write transaction, which Safari treats as the end of it — every put
+  // and delete after the await then threw, and the save failed on iOS while passing
+  // everywhere else.
+  const rt = tx([ENTRY_STORE], "readonly");
+  const existing = await reqDone(rt.store(ENTRY_STORE).getAllKeys());
+  await rt.done;
+
+  const keep = new Set(records.map(r => r.id));
+  const drop = existing.filter(k => !keep.has(k)); // deleted since the last write
+
+  // From here to `await done` there is not a single await: the transaction stays alive
+  // because it always has a pending request.
   const { store, done } = tx([ENTRY_STORE, IMAGE_STORE], "readwrite");
   const es = store(ENTRY_STORE);
   const is = store(IMAGE_STORE);
-  const keep = new Set(records.map(r => r.id));
-  // entries deleted since the last write have to go, or a delete would never stick
-  const existing = await reqDone(es.getAllKeys());
-  for (const k of existing) if (!keep.has(k)) es.delete(k);
+  for (const k of drop) es.delete(k);
   for (const rec of records) es.put(rec);
   for (const id of pendingImages) is.put({ id, blob: blobs.get(id) });
   await done;
+  for (const id of pendingImages) persisted.add(id);
 }
 
 // ---------- migration off localStorage ----------
@@ -287,16 +320,23 @@ async function setMeta(k, v) {
 export async function storageReport() {
   const out = { entries: 0, images: 0, imageBytes: 0, quota: null, usage: null, legacyBytes: 0 };
   if (db) {
-    const { store, done } = tx([ENTRY_STORE, IMAGE_STORE], "readonly");
-    out.entries = await reqDone(store(ENTRY_STORE).count());
-    const imgs = await reqDone(store(IMAGE_STORE).getAll());
-    await done;
-    out.images = imgs.length;
-    out.imageBytes = imgs.reduce((n, r) => n + ((r.blob && r.blob.size) || 0), 0);
+    // count(), never getAll(). Reading every blob to sum their sizes pulled megabytes into
+    // memory to render one line of text, and on a phone it simply never came back.
+    const et = tx([ENTRY_STORE], "readonly");
+    out.entries = await reqDone(et.store(ENTRY_STORE).count());
+    await et.done;
+    const it = tx([IMAGE_STORE], "readonly");
+    out.images = await reqDone(it.store(IMAGE_STORE).count());
+    await it.done;
+    // sizes come from the copies already in memory — free, and accurate for everything loaded
+    for (const b of blobs.values()) out.imageBytes += b.size || 0;
   }
   try {
-    const est = await navigator.storage.estimate();
-    out.quota = est.quota; out.usage = est.usage;
+    const est = await Promise.race([
+      navigator.storage.estimate(),
+      new Promise(r => setTimeout(() => r(null), 3000))
+    ]);
+    if (est) { out.quota = est.quota; out.usage = est.usage; }
   } catch (e) {}
   try { out.legacyBytes = (localStorage.getItem(LEGACY_ENTRIES_KEY) || "").length; } catch (e) {}
   return out;
