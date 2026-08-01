@@ -23,8 +23,9 @@ const META_STORE = "meta";
 const LEGACY_ENTRIES_KEY = "weekly-deposits-entries";
 
 let db = null;
-const blobs = new Map();  // image id -> Blob: what gets uploaded, and the real bytes
-const urls = new Map();   // image id -> object URL: what the DOM renders
+const blobs = new Map();      // image id -> Blob: what gets uploaded, and the real bytes
+const urls = new Map();       // image id -> object URL: what the DOM renders
+const persisted = new Set();  // image ids already written to disk — see writeAll
 let onError = () => {};
 
 /** Report a failed write. The whole point of this module: a save that doesn't land says so. */
@@ -42,6 +43,7 @@ export async function putImage(id, blob) {
     const { store, done } = tx([IMAGE_STORE], "readwrite");
     store(IMAGE_STORE).put({ id, blob });
     await done;
+    persisted.add(id);
   }
   return url;
 }
@@ -101,12 +103,24 @@ function dataUrlToBlob(s) {
   return new Blob([buf], { type });
 }
 
+// One URL per photo per page load, and never revoked while the page lives. Revoking on
+// replacement looked tidy but the DOM may still be rendering the old one — and a revoked
+// URL renders as a broken-image glyph, which is exactly what it did.
 function urlFor(id, blob) {
   const prev = urls.get(id);
-  if (prev) URL.revokeObjectURL(prev);
+  if (prev) return prev;
   const u = URL.createObjectURL(blob);
   urls.set(id, u);
   return u;
+}
+
+/** The URL to render for a photo, or null if this device doesn't hold it yet. Everything
+ *  that displays a photo goes through here, so there is exactly one URL per id. */
+export function imageUrl(id) {
+  const existing = urls.get(id);
+  if (existing) return existing;
+  const b = blobs.get(id);
+  return b ? urlFor(id, b) : null;
 }
 
 /** Take whatever the composer produced for an image and settle it into a Blob we own. */
@@ -130,7 +144,7 @@ export async function loadEntries() {
   const rows = await reqDone(store(ENTRY_STORE).getAll());
   const imgs = await reqDone(store(IMAGE_STORE).getAll());
   await done;
-  for (const rec of imgs) if (rec && rec.blob) blobs.set(rec.id, rec.blob);
+  for (const rec of imgs) if (rec && rec.blob) { blobs.set(rec.id, rec.blob); persisted.add(rec.id); }
   return rows.map(rec => {
     const e = { ...rec };
     const ids = e.imageIds || [];
@@ -194,7 +208,10 @@ async function writeAll(list) {
     if (e.images) {
       for (const [id, val] of Object.entries(e.images)) {
         const url = adoptImage(id, val);
-        if (url) { ids.add(id); if (blobs.has(id)) pendingImages.push(id); }
+        // only NEW blobs get written. Re-cloning every photo into IndexedDB on every save
+        // was 3.2MB a time — slow enough to fail outright on a phone, and it invalidated
+        // the object URLs the DOM was still rendering.
+        if (url) { ids.add(id); if (blobs.has(id) && !persisted.has(id)) pendingImages.push(id); }
       }
     }
     if (ids.size) rec.imageIds = [...ids]; else delete rec.imageIds;
@@ -211,6 +228,7 @@ async function writeAll(list) {
   for (const rec of records) es.put(rec);
   for (const id of pendingImages) is.put({ id, blob: blobs.get(id) });
   await done;
+  for (const id of pendingImages) persisted.add(id);
 }
 
 // ---------- migration off localStorage ----------
@@ -287,12 +305,16 @@ async function setMeta(k, v) {
 export async function storageReport() {
   const out = { entries: 0, images: 0, imageBytes: 0, quota: null, usage: null, legacyBytes: 0 };
   if (db) {
-    const { store, done } = tx([ENTRY_STORE, IMAGE_STORE], "readonly");
-    out.entries = await reqDone(store(ENTRY_STORE).count());
-    const imgs = await reqDone(store(IMAGE_STORE).getAll());
-    await done;
-    out.images = imgs.length;
-    out.imageBytes = imgs.reduce((n, r) => n + ((r.blob && r.blob.size) || 0), 0);
+    // count(), never getAll(). Reading every blob to sum their sizes pulled megabytes into
+    // memory to render one line of text, and on a phone it simply never came back.
+    const et = tx([ENTRY_STORE], "readonly");
+    out.entries = await reqDone(et.store(ENTRY_STORE).count());
+    await et.done;
+    const it = tx([IMAGE_STORE], "readonly");
+    out.images = await reqDone(it.store(IMAGE_STORE).count());
+    await it.done;
+    // sizes come from the copies already in memory — free, and accurate for everything loaded
+    for (const b of blobs.values()) out.imageBytes += b.size || 0;
   }
   try {
     const est = await navigator.storage.estimate();

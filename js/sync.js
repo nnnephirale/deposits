@@ -34,10 +34,27 @@ function headers(extra) {
   return { authorization: "Bearer " + cfg.secret, ...(extra || {}) };
 }
 
-async function call(path, init) {
+// Every request gets a deadline. Without one, a phone that loses signal mid-request leaves
+// the promise pending forever — which is how the sync button sat on "syncing…" indefinitely
+// with nothing to report and no way back.
+const TIMEOUT_JSON = 20000;
+const TIMEOUT_BLOB = 60000;   // photos are bigger and phones are slower
+
+function deadline(ms) {
+  if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) return AbortSignal.timeout(ms);
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+}
+
+async function call(path, init, ms = TIMEOUT_JSON) {
   if (!cloudConfigured()) throw new Error("cloud not configured");
-  const res = await fetch(cfg.url + path, init);
-  return res;
+  try {
+    return await fetch(cfg.url + path, { ...init, signal: deadline(ms) });
+  } catch (e) {
+    if (e.name === "TimeoutError" || e.name === "AbortError") throw new Error("timed out after " + (ms / 1000) + "s");
+    throw e;
+  }
 }
 
 /** Reachable and the secret is right? Used by Settings to give a straight yes/no. */
@@ -48,7 +65,9 @@ export async function cloudCheck() {
     if (res.status === 401) return { ok: false, reason: "secret rejected" };
     if (!res.ok) return { ok: false, reason: "HTTP " + res.status };
     const body = await res.json();
-    return { ok: true, entries: (body.entries || []).length };
+    const rows = body.entries || [];
+    const live = rows.filter(e => !e.deletedAt).length;
+    return { ok: true, entries: live, deleted: rows.length - live };
   } catch (e) {
     return { ok: false, reason: e.message || "unreachable" };
   }
@@ -92,13 +111,13 @@ export async function uploadImage(id, blob) {
     method: "PUT",
     headers: headers({ "content-type": blob.type || "image/jpeg" }),
     body: blob
-  });
+  }, TIMEOUT_BLOB);
   if (!res.ok) throw new Error("upload failed: HTTP " + res.status);
   return res.json();
 }
 
 export async function downloadImage(id) {
-  const res = await call("/images/" + encodeURIComponent(id), { headers: headers() });
+  const res = await call("/images/" + encodeURIComponent(id), { headers: headers() }, TIMEOUT_BLOB);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error("download failed: HTTP " + res.status);
   return res.blob();
@@ -119,16 +138,17 @@ export async function pushImages(ids, getBlob) {
 
 /** Pull any photo this device is missing. Runs in the background after a sync — the entries
  *  are already on screen; the photos fill in. */
-export async function pullImages(ids, have, store) {
+export async function pullImages(ids, have, store, onProgress) {
   let got = 0, failed = 0;
-  for (const id of ids) {
-    if (have(id)) continue;
+  const todo = ids.filter(id => !have(id));
+  for (const id of todo) {
     try {
       const blob = await downloadImage(id);
       if (blob) { await store(id, blob); got++; }
     } catch (e) { failed++; console.warn("deposits: photo download failed", id, e); }
+    if (onProgress) onProgress(got + failed, todo.length);
   }
-  return { got, failed };
+  return { got, failed, total: todo.length };
 }
 
 /** Every photo id referenced by a list of entries. */

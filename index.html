@@ -89,7 +89,7 @@
 import {
   openStore, loadEntries, persistEntries, flushEntries, onStoreError,
   migrateFromLocalStorage, storageReport, requestPersistence,
-  imageBlob, hasImage, putImage
+  imageBlob, hasImage, putImage, imageUrl
 } from "./js/store.js";
 import {
   cloudConfig, cloudConfigured, setCloudConfig, cloudCheck,
@@ -863,7 +863,7 @@ function wireToEntry(w) {
   if (ids.length) {
     e.imageIds = ids;
     const m = {};
-    for (const id of ids) { const b = imageBlob(id); if (b) m[id] = URL.createObjectURL(b); }
+    for (const id of ids) { const u = imageUrl(id); if (u) m[id] = u; }
     if (Object.keys(m).length) e.images = m;
   }
   return e;
@@ -932,31 +932,44 @@ async function syncPull() {
   return changed;
 }
 
+// Photo transfer runs behind the entries and reports where it is, so a slow connection
+// looks like progress rather than a hang.
+let photoStatus = null;            // { done, total } while transferring, else null
+let onPhotoProgress = null;        // Settings subscribes to this while its sheet is open
+function photoProgress(done, total) {
+  photoStatus = done >= total ? null : { done, total };
+  if (onPhotoProgress) onPhotoProgress(photoStatus, done, total);
+}
+
 // Each photo is fetched at most once, ever, and then lives in IndexedDB. This is the whole
 // difference from the old backend, which re-downloaded all of them on every launch.
+// `force` re-fetches everything, for when local copies are there but unusable.
 let pullingImages = false;
-async function pullMissingImages() {
-  if (!syncActive() || pullingImages) return;
+async function pullMissingImages(force) {
+  if (!syncActive() || pullingImages) return { got: 0, failed: 0, total: 0 };
   pullingImages = true;
   try {
     const wanted = imageIdsIn(entries);
-    const missing = wanted.filter(id => !hasImage(id));
-    if (!missing.length) return;
-    const res = await pullImages(missing, hasImage, putImage);
+    const missing = force ? wanted : wanted.filter(id => !hasImage(id));
+    if (!missing.length) return { got: 0, failed: 0, total: 0 };
+    const res = await pullImages(missing, force ? () => false : hasImage, putImage, photoProgress);
     if (res.got) {
       entries = entries.map(e => {
         const ids = e.imageIds || (e.images ? Object.keys(e.images) : []);
         if (!ids.length) return e;
         const m = {};
-        for (const id of ids) { const b = imageBlob(id); if (b) m[id] = URL.createObjectURL(b); }
+        for (const id of ids) { const u = imageUrl(id); if (u) m[id] = u; }
         return Object.keys(m).length ? { ...e, images: m } : e;
       });
       render();
     }
+    return res;
   } catch (e) {
     console.warn("photo pull failed", e);
+    return { got: 0, failed: 0, total: 0 };
   } finally {
     pullingImages = false;
+    photoStatus = null;
   }
 }
 
@@ -988,9 +1001,11 @@ async function pushEntriesNow(retrying) {
       return pushEntriesNow(true);
     }
     cloudEtag = res.etag;
-    // photos after the text: the words are the thing that must not be lost, and a photo
-    // upload that fails shouldn't take the entry with it
-    await pushImages(imageIdsIn(entries), imageBlob);
+    // photos after the text, and NOT awaited: the words have landed, and a photo upload
+    // that stalls must not hold the caller (or the Settings button) open behind it
+    pushImages(imageIdsIn(entries), imageBlob)
+      .then(r => { if (r.failed) console.warn("deposits: " + r.failed + " photo upload(s) failed"); })
+      .catch(e => console.warn("deposits: photo push failed", e));
   } catch (e) {
     console.warn("sync push entries failed", e);
   }
@@ -4538,7 +4553,8 @@ function openSettings() {
         const r = await cloudCheck();
         testBtn.disabled = false; testBtn.textContent = "test connection";
         note.textContent = r.ok
-          ? "connected — " + r.entries + " entries in the cloud."
+          ? "connected — " + r.entries + " entries in the cloud" +
+            (r.deleted ? " (plus " + r.deleted + " deleted)." : ".")
           : "can't reach it: " + r.reason;
       } }, "test connection");
       sheet.appendChild(testBtn);
@@ -4574,6 +4590,30 @@ function openSettings() {
     sheet.appendChild(el("p", { class: "field-label", style: { marginTop: "26px" } }, "storage"));
     const storageNote = el("p", { class: "settings-note", style: { margin: "0" } }, "checking…");
     sheet.appendChild(storageNote);
+
+    // photos move in the background; show where they are rather than leaving the panel silent
+    const photoNote = el("p", { class: "settings-note", style: { margin: "4px 0 0" } });
+    photoNote.style.display = photoStatus ? "" : "none";
+    if (photoStatus) photoNote.textContent = "photos " + photoStatus.done + " of " + photoStatus.total + "…";
+    sheet.appendChild(photoNote);
+    onPhotoProgress = (st, done, total) => {
+      if (!photoNote.isConnected) { onPhotoProgress = null; return; }
+      photoNote.style.display = "";
+      photoNote.textContent = st ? "photos " + done + " of " + total + "…" : "photos up to date";
+    };
+
+    if (cloudConfig()) {
+      const fixBtn = el("button", { class: "lock-btn", onclick: async () => {
+        fixBtn.disabled = true; fixBtn.textContent = "re-downloading…";
+        const r = await pullMissingImages(true);
+        fixBtn.disabled = false; fixBtn.textContent = "re-download photos";
+        photoNote.style.display = "";
+        photoNote.textContent = r.got + " photo(s) restored" + (r.failed ? ", " + r.failed + " failed" : "");
+        render();
+      } }, "re-download photos");
+      sheet.appendChild(fixBtn);
+    }
+
     storageReport().then(r => {
       const mb = n => (n / 1048576).toFixed(1) + "MB";
       const pct = r.quota ? Math.round((r.usage / r.quota) * 100) : null;
