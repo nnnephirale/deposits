@@ -1,0 +1,1932 @@
+  :root {
+    --ink: #1C1C1E;
+    --subtle: #8A8A8E;
+    /* light neutral grey canvas, pure white blocks floating on it — the reference she
+       picked reads neutral, not the warm cream of the other one. --canvas-a is the same
+       colour with alpha, for the frosted header/dock/bottom fade. */
+    --canvas: #F0F0F1;
+    --canvas-a: rgba(240,240,241,0.82);
+    --canvas-0: rgba(240,240,241,0);
+    --card: #FFFFFF;
+    --hairline: rgba(0,0,0,0.055);
+    --field: #F4F4F6;
+    --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+    /* the label face — meta rows, pills, rail heads, stepper labels. It WAS 'SF Mono'; with
+       that declaration switched off in inspect the whole interface read better, so the labels
+       now share the body's sans and the only faces that differ anywhere are the day badge's
+       Lexend Exa and the weekly summary's serif. Kept as its own token so the label layer
+       stays one edit away from a face of its own again. */
+    --mono: var(--font);
+    --day: 'Lexend Exa', var(--mono);
+    /* Composer-unfold speed, as ONE multiplier over every duration in the gesture, set from
+       Settings (see UNFOLD_STEPS). 1 is the tuned default; 0 collapses every duration to 0s,
+       which is the "no animation" end of the scale. Because it multiplies rather than
+       replaces, the ratios between the four transitions survive any setting — which is the
+       whole reason they read as one move. */
+    --unfold-k: 1;
+    /* The VISUAL viewport — what she can actually see — published from JS (syncViewportVars).
+       iOS does not shrink the layout viewport for the keyboard: 100dvh stays exactly as it was,
+       and Safari instead scrolls the visual viewport up to chase the caret, dragging every
+       position:fixed overlay with it. These two are the only honest numbers while a keyboard is
+       open. The fallbacks are what desktop and any browser without visualViewport get. */
+    --vvh: 100dvh;
+    --vvt: 0px;
+    /* the raw, ungated version of the band below — see syncViewportVars. Anything that needs to
+       SIT ON TOP of the keyboard (rather than reserve space for it) wants this one. */
+    --vvb: 0px;
+    /* the keyboard's band, in two halves that are never both set: --kb is the LIVE one, measured
+       as innerHeight - (--vvh + --vvt), and --kbr is the one PREDICTED from last time while the
+       keyboard is still on its way (see reserveForKeyboard). Overlays run to the screen bottom
+       and lift their content by the sum, so the sum staying constant across the keyboard's
+       arrival is what keeps anything from moving. */
+    --kb: 0px;
+    --kbr: 0px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--canvas);
+    font-family: var(--font);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  button { font-family: var(--font); cursor: pointer; }
+
+  .wrap { max-width: 520px; margin: 0 auto; padding: 0 16px 150px; }
+
+  /* header */
+  .header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--canvas-a);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    /* the extra bottom padding is the breathing room between W31 and the first card */
+    padding: calc(env(safe-area-inset-top) + 28px) 0 52px;
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* scrolling down tucks the header away; any scroll up brings it back */
+  .header.hidden { transform: translateY(-100%); }
+  @media (prefers-reduced-motion: reduce) { .header { transition: none; } }
+  .header::after { /* frosted gradient hanging under the header instead of a hard edge */
+    content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 22px;
+    background: var(--canvas-a);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    -webkit-mask-image: linear-gradient(to bottom, black, transparent);
+    mask-image: linear-gradient(to bottom, black, transparent);
+    pointer-events: none;
+  }
+  /* nothing but the centred date line — anything flanking it crowded the row */
+  .header-top { display: flex; justify-content: center; align-items: center; min-height: 22px; }
+
+  /* ---------- the wrapped cue: one small 'v' under the period ----------
+     It replaced a magic wand that sat absolutely-positioned over the first card's top
+     right corner, where it read as a smudge on the entry rather than a control of its own.
+     Down here it belongs to the PERIOD — the thing the wrapped is actually about.
+
+     It is not sticky, on purpose. The header is (z-index 10), so this can never sit inside
+     the header's padding: it would be painted over by the frost. Instead the header gives
+     up most of its bottom padding whenever the cue is showing, and the cue takes that room. */
+  /* env() cannot be read from JS: an unregistered custom property is substituted as raw
+     tokens, so `--sat: env(safe-area-inset-top)` comes back out of getComputedStyle as the
+     literal string. A zero-size probe whose PADDING is the inset resolves to real pixels. */
+  #satProbe {
+    position: fixed; top: 0; left: 0; width: 0; height: 0;
+    padding-top: env(safe-area-inset-top);
+    visibility: hidden; pointer-events: none;
+  }
+
+  .wrapped-cue { display: flex; justify-content: center; padding: 0 0 18px; }
+  .wrapped-cue[hidden] { display: none; }
+  .wrap.has-cue > .header { padding-bottom: 12px; }
+  .wc-chev {
+    background: none; border: none; padding: 6px 26px; line-height: 0;
+    color: #C4C4C9;                 /* barely there, like the eye it replaces */
+    touch-action: none;             /* the drag is ours — don't let it scroll the list */
+    -webkit-tap-highlight-color: transparent;
+    transition: color 0.2s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .wc-chev svg { width: 22px; height: 22px; display: block; }
+  @media (hover: hover) { .wc-chev:hover { color: #8A8A8E; } }
+  /* while dragging, the chevron follows the finger a little and darkens with the pull —
+     the control itself is the progress indicator, so nothing extra has to appear */
+  .wc-chev.pulling { transition: none; }
+  /* the whole cue fades out as the list scrolls up under the header. Driven by --cue-o
+     from the scroll handler rather than by a class, so it's continuous, not a snap.
+     Deliberately NO transition: scroll already delivers a value every frame, so a
+     transition on top of it only makes the fade lag behind the finger. */
+  .wrapped-cue { opacity: var(--cue-o, 1); }
+
+  /* ---------- the heat bloom ----------
+     Her topics for this period, blurred into fields and grown from the chevron. Everything
+     is driven by ONE custom property, --p (0 → 1), set from JS each frame: during the drag
+     it tracks the finger, on release it's animated to 0 or 1. No CSS transition on --p —
+     an un-registered custom property can't interpolate anyway, and the scrub needs to be
+     able to reverse mid-flight, which a transition would fight. */
+  .heat {
+    position: fixed; inset: 0; z-index: 60; pointer-events: none;
+    visibility: hidden; --p: 0;
+    /* its own stacking + paint context: the fields multiply against THIS box's wash,
+       not against the entries showing through from underneath */
+    isolation: isolate;
+  }
+  .heat.live { visibility: visible; }
+  /* paper for the ink. It comes in first so the fields always have something to multiply
+     into — over the bare list they'd read as stains on the text. */
+  .heat-wash {
+    position: absolute; inset: 0; background: #FCFCFB;
+    opacity: calc(var(--p) * 1.35);   /* opaque by p≈0.74, before the fields are at full */
+  }
+  /* Each field is a soft radial falloff, NOT a hard disc, and it blends normally.
+     multiply was tried first and it is wrong here: six large fields all overlapping meant
+     every pixel was multiplied five or six times, and the whole top half collapsed into
+     grey-green mud — the opposite of "saturated". Alpha-blending soft-edged fields over a
+     near-white wash keeps each hue readable and lets overlaps average into a new colour
+     instead of darkening toward black. The gradient also removes the need for a big blur. */
+  .heat-field {
+    position: absolute; border-radius: 50%;
+    background: radial-gradient(circle closest-side, var(--c) 0%, color-mix(in oklab, var(--c) 55%, transparent) 46%, transparent 78%);
+    filter: blur(var(--blur, 26px));
+    /* --x/--y are where this field ends up, as a fraction of the viewport; the field starts
+       at the chevron (--ox/--oy) and travels out. Scale from ~0 so it BLOOMS rather than
+       slides in already-formed. */
+    left: 0; top: 0; width: var(--d); height: var(--d);
+    margin-left: calc(var(--d) / -2); margin-top: calc(var(--d) / -2);
+    transform:
+      translate(
+        calc(var(--ox) + (var(--x) - var(--ox)) * var(--p)),
+        calc(var(--oy) + (var(--y) - var(--oy)) * var(--p))
+      )
+      scale(calc(0.04 + 0.96 * var(--p)));
+    opacity: calc(var(--p) * var(--w));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wc-chev { transition: none; }
+  }
+
+  /* search sheet */
+  .sheet.search-sheet {
+    height: 76vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .search-results { flex: 1; overflow-y: auto; min-height: 0; margin-top: 14px; }
+  .search-snippet {
+    margin: 0; font-size: 15px; line-height: 1.5; white-space: normal;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  }
+  .hl { font-weight: 700; }
+  .rt-b.hl-b { text-decoration: underline; text-underline-offset: 2px; } /* match inside already-bold text */
+  .snip-mask { color: #C7C7CC; }
+  .search-input {
+    width: 100%; font-family: var(--font); font-size: 16px;
+    color: var(--ink); border: none; outline: none;
+    background: var(--field); border-radius: 12px; padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .search-count {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; color: var(--subtle); margin: 0 0 8px 4px;
+  }
+  .search-hint { font-size: 13px; color: var(--subtle); margin: 8px 4px; }
+
+  /* settings sheet (long-press title) */
+  .key-input {
+    width: 100%; font-family: var(--mono); font-size: 13px;
+    color: var(--ink); border: none; outline: none;
+    background: var(--field); border-radius: 12px; padding: 12px 14px;
+  }
+  .settings-note { font-size: 12px; color: var(--subtle); line-height: 1.5; margin: 10px 0 0; }
+
+  /* layout experiment toggles (temporary) */
+  .layout-btns { display: flex; gap: 12px; }
+  .layout-btns button {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+    text-transform: uppercase; color: var(--subtle);
+    background: none; border: none; padding: 4px 0;
+  }
+  .layout-btns button.on { color: var(--ink); font-weight: 700; }
+
+  /* the period row: arrows flanking the tabs, all on one centred line. the tabs are both
+     the app's identity and its view switcher — tap the inactive one to switch view, tap the
+     active one to open the picker. */
+  .period-row {
+    display: flex; align-items: center; justify-content: center;
+    gap: 35px; /* ~1.1x a button's width, so the arrows sit well clear of the tabs */
+    margin-top: 10px;
+  }
+  .period-nav { display: flex; align-items: baseline; gap: 8px; }
+  .period-tab {
+    font-family: var(--mono); font-size: 30px; font-weight: 700; letter-spacing: -0.5px;
+    background: none; border: none; padding: 0; color: #C9C9CC;
+    line-height: 1.05; transition: color 0.18s ease;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    touch-action: manipulation;
+  }
+  .period-tab.on { color: var(--ink); }
+  .period-sep { font-family: var(--mono); font-size: 19px; color: #D8D8DB; user-select: none; }
+
+  .stepper-btn {
+    flex: none;
+    font-size: 15px; color: #BFBFC4; background: var(--card);
+    border: none; border-radius: 12px;
+    width: 32px; height: 32px; line-height: 1;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 3px 10px rgba(0,0,0,0.04);
+  }
+  .stepper-center {
+    text-align: center;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  /* a flex row, not centred text, so the live dot below can opt out of the row's alignment
+     (`align-self`) and hang from the top of the line box. The dates keep normal baseline
+     alignment, and the row still centres as one unit under the stepper. */
+  .wk-range {
+    font-size: 13px; color: #A8A8AC;
+    display: flex; align-items: baseline; justify-content: center;
+  }
+  /* the live-week mark: the dates are the only thing on screen that can say "you're in this
+     one", since W31 looks the same whichever week you've stepped to. Same green and same
+     white ring as the sync dot in the rail — one meaning, one mark.
+     It rides like a DEGREE POINT, not on the baseline, and that position is measured rather
+     than eyeballed: a real "°" in this face at 13px has its ink from 4.70px to 8.94px above
+     the baseline, centred at 6.82px. Hung from the top of the 15px line box (whose baseline
+     sits 9.16px down) a 5.1px dot centres at 6.61px above the baseline — 0.21px off the real
+     glyph, so no nudge is worth carrying. `align-self` is flex-start, NOT baseline: an empty
+     flex item has no baseline of its own and the synthesised one put the dot BELOW the text
+     and stretched the row to 16.8px. If the label ever leaves 13px, re-measure. */
+  .wk-now {
+    flex: none; align-self: flex-start; margin-left: 7px;
+    width: 5.1px; height: 5.1px; border-radius: 50%;  /* 15% under the 6px sync dot */
+    background: #55A862; box-shadow: 0 0 0 2px var(--card);
+  }
+
+  /* groups — the topic label lives INSIDE the white block now, as its heading */
+  .group { margin-bottom: 18px; }
+  .group-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 18px 20px 2px;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    cursor: grab;
+  }
+  .group-dot { width: 8px; height: 8px; border-radius: 4px; display: inline-block; flex: none; }
+  /* a day bucket has no heading — its entries' badges name the day — so the card's first
+     entry needs the breathing room the heading used to provide */
+  .group-card > .entry:first-child { padding-top: 20px; }
+  .group-label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; font-weight: 600;
+  }
+  /* white block floating on the grey canvas: generous radius, soft layered shadow */
+  .group-card {
+    background: var(--card); border-radius: 24px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 6px 18px rgba(0,0,0,0.045);
+  }
+
+  /* an entry is a left gutter (the day badge, with a hairline threading between badges)
+     and a body. the divider between entries starts at the body, not the card edge. */
+  .entry {
+    position: relative; display: flex; gap: 16px;
+    padding: var(--entry-pad-y) 20px; cursor: pointer;
+    /* the measurements the badge / first line / first pill / elbow all key off.
+       --line-box is the body text's own line box: 15px × 1.5. */
+    --entry-pad-y: 15px;
+    --line-box: 22.5px;
+    --pill-h: 18px;
+    /* the breath between a mark and the thread leaving it. One number, so the badge→thread
+       gap and the elbow→dashes gap are the same by construction rather than by eye. */
+    --badge-gap: 5.75px;
+  }
+  .entry-gutter { position: relative; flex: none; width: 22px; }
+  /* the thread linking one day badge to the next — from under this badge to the next one.
+     suppressed on the last entry so it doesn't dangle into the card's bottom padding. */
+  .entry:not(:last-child) .entry-gutter::after {
+    content: ""; position: absolute; left: 50%; width: 1px;
+    /* badge bottom + the gap: (line-box + 22)/2 + 5.75 — the same 28px it always was, but
+       now stated as "below the badge" so the dashed variant can reuse the gap */
+    top: calc((var(--line-box) + 22px) / 2 + var(--badge-gap));
+    bottom: -32px; margin-left: -0.5px;
+    background: var(--hairline);
+  }
+
+  /* --- back-to-back repeats of the same day ---------------------------------------
+     A run of entries on one day states the day once. The thread then carries it forward:
+     where the next badge would have been it turns toward the text on a rounded elbow,
+     then continues dashed. Same hairline throughout, so it reads as the thread pausing
+     rather than as a second kind of rule. */
+  .entry:has(+ .entry.rep) .entry-gutter::after {
+    background: none;
+    width: 11px;      /* how far the elbow reaches toward the text */
+    /* The stub lands on the CENTRE OF THE REPEAT'S FIRST LINE — same axis as the badge it
+       stands in for. .entry-gutter is the entry's CONTENT box, so getting there means
+       clearing this row's padding-bottom AND the next row's padding-top before the half
+       line box; measuring from the border box instead leaves the elbow a full 30px high. */
+    bottom: calc(-1 * (var(--entry-pad-y) * 2 + var(--line-box) / 2));
+    border-left: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+    border-bottom-left-radius: 9px;
+  }
+  /* the repeat's own gutter: dashed through the space its badge would have occupied, and
+     on to the next entry. Replaces the solid thread rather than sitting on top of it. */
+  .entry.rep .entry-gutter::after { display: none; }
+  .entry.rep .entry-gutter::before {
+    content: ""; position: absolute; left: 50%; margin-left: -0.5px;
+    /* The dashes start the SAME distance below the elbow that a solid thread starts below
+       its badge (--badge-gap). The elbow's stub sits at half a line box into this gutter, so
+       that plus the gap is where the dashes begin — not the badge-relative 28px, which left
+       a gap twice the size because there is no 22px badge here to clear. */
+    top: calc(var(--line-box) / 2 + var(--badge-gap));
+    bottom: -32px;
+    border-left: 1px dashed var(--hairline);
+  }
+  /* ...and it keeps turning in. A run of three or more used to get exactly one elbow — the first
+     repeat's, drawn by the entry above it — and every repeat after that got a dashed line running
+     straight past, pointing at nothing. Each repeat that has another below it now draws the turn
+     into it as well.
+     Only the CORNER is drawn, not the whole vertical: the dashed thread above is already doing
+     that work, so this is a short solid lead-in plus the 9px curve, and the elbow reads as the
+     dashes turning solid to make the turn rather than as a second line beside them. The 14px is
+     that lead-in plus the radius; `top: auto` is required because an absolutely positioned box
+     with top, bottom AND height set ignores `bottom`, which would pin the corner to the top of
+     the gutter instead of the bottom. Beats `.entry.rep …::after { display: none }` above on
+     specificity (four classes to two), so order here is for reading, not for the cascade. */
+  .entry.rep:has(+ .entry.rep) .entry-gutter::after {
+    content: ""; display: block;
+    width: 11px;                /* the same reach toward the text as the solid elbow */
+    height: 14px; top: auto;
+    bottom: calc(-1 * (var(--entry-pad-y) * 2 + var(--line-box) / 2));
+    background: none;
+    border-left: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+    border-bottom-left-radius: 9px;
+  }
+  .entry.rep:last-child .entry-gutter::before { bottom: 16px; }
+  .day-badge {
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 7px;
+    background: #F1F1F3; color: #8E8E93;
+    font-family: var(--day); font-weight: 500; font-size: 9px; letter-spacing: 0;
+    user-select: none; -webkit-user-select: none;
+  }
+  .day-badge sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
+  /* centre the 22px badge on the 22.5px first line box — and in day view that first box is
+     the 22px topic row, so badge and pills land on the same axis without a second rule.
+     Scoped to the gutter so day view's group heading keeps its own alignment. */
+  .entry-gutter .day-badge { margin-top: calc((var(--line-box) - 22px) / 2); }
+  .entry-body { flex: 1; min-width: 0; }
+  .entry + .entry::before {
+    content: ""; position: absolute; top: 0; left: 58px; right: 20px;
+    height: 1px; background: var(--hairline);
+  }
+  .entry p { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+
+  /* inline formatting */
+  .rt-b { font-weight: 600; }
+  .rt-i { font-style: italic; }
+  .rt-u { text-decoration: underline; text-underline-offset: 2px; }
+  .rt-m {
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--field); padding: 1px 5px; border-radius: 5px;
+  }
+  /* line formatting: "- " lines render as bullets, leading two-space units as indent */
+  .rt-line { padding-left: calc(var(--ind, 0) * 16px); }
+  .rt-line:empty::before { content: "\00a0"; }
+  /* indented (non-bullet) lines read as a blockquote: a quiet warm bar down the left.
+     no vertical padding, so consecutive quoted lines share one continuous bar. the level
+     offsets the whole thing right, so a single bar nests instead of stacking. */
+  .rt-line.rt-quote {
+    margin-left: calc((var(--ind, 1) - 1) * 16px);
+    padding-left: 12px;
+    border-left: 2.5px solid #D8D4CC;
+    color: #5B5B60;
+  }
+  /* "---" divider: a quiet full-width warm rule, breathing room above and below */
+  .rt-hr {
+    border: none; border-top: 1.5px solid #E0DCD3;
+    margin: 12px 0; height: 0;
+  }
+  .rt-bullet { display: flex; gap: 7px; }
+  .rt-dot { flex: none; color: #C7C7CC; user-select: none; -webkit-user-select: none; }
+  .rt-body { flex: 1; min-width: 0; }
+  /* checklist item: a tappable circle in place of the bullet dot. checked = filled + struck.
+     roomier vertical rhythm than a plain paragraph — items want to breathe. */
+  .rt-check { display: flex; gap: 9px; align-items: flex-start; padding: 3px 0; }
+  .rt-box {
+    flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 50%;
+    border: 1.75px solid #C7C4BD; color: #fff; box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .rt-box.live { cursor: pointer; }
+  .rt-box.on { background: var(--ink); border-color: var(--ink); }
+  .rt-box svg { width: 12px; height: 12px; }
+  .rt-check.done .rt-body { color: var(--subtle); text-decoration: line-through; text-decoration-color: #C7C4BD; }
+  /* read-more: the pill that floats the folded entry in a centred modal */
+  .read-more {
+    display: inline-flex; align-items: center; margin-top: 8px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.4px;
+    color: var(--subtle); background: var(--field);
+    border: none; border-radius: 999px; padding: 5px 12px; cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .read-more:active { transform: scale(0.98); }
+  .read-more:hover { color: var(--ink); }
+  /* inline link — a tappable mono pill; label defaults to the domain, editable in raw text.
+     display:inline + box-decoration-break:clone so a long label wraps across lines and each
+     line fragment still gets the pill's padding/rounding, instead of overflowing/clipping. */
+  .rt-link {
+    display: inline;
+    -webkit-box-decoration-break: clone; box-decoration-break: clone;
+    font-family: var(--mono); font-size: 0.8em; letter-spacing: 0.2px;
+    background: var(--field); color: var(--ink); text-decoration: none;
+    padding: 1px 7px 1px 6px; border-radius: 6px;
+    vertical-align: 1px; overflow-wrap: anywhere; cursor: pointer;
+  }
+  .rt-link svg { opacity: 0.45; vertical-align: -1px; margin-right: 3px; }
+  /* pasted images — stored on the entry, referenced in text by a short ![photo:id] marker */
+  .rt-img {
+    display: block; max-width: 100%; border-radius: 12px; margin: 6px 0; cursor: zoom-in;
+    -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
+  }
+  /* photos added back to back: a scrollable row of equal rounded cards, so a burst of
+     images reads as a set instead of a stack that buries the text under it */
+  .rt-gallery {
+    position: relative;
+    display: flex; gap: 8px; margin: 8px 0;
+    overflow-x: auto; scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .rt-gallery::-webkit-scrollbar { display: none; }
+  /* the grab cursor only appears where there is actually somewhere to drag to: the wrapper
+     carries show-left/show-right from the same overflow measurement the edge fades use. It
+     overrides the images' own zoom-in, because at that moment the row is the thing you're
+     holding — a click without a drag still opens the preview. */
+  .rt-gal-wrap.show-left .rt-gallery, .rt-gal-wrap.show-right .rt-gallery,
+  .rt-gal-wrap.show-left .rt-gallery .rt-img, .rt-gal-wrap.show-right .rt-gallery .rt-img {
+    cursor: grab;
+  }
+  .rt-gallery.dragging, .rt-gallery.dragging .rt-img { cursor: grabbing !important; }
+  /* the fades live on a WRAPPER, not on the scroller. an absolutely positioned pseudo-element
+     inside an overflow container joins that container's scrollable content, so it drifts with
+     the images instead of staying pinned to the visible edge — which is why the right-hand
+     one only sometimes appeared to be in the right place. the wrapper doesn't scroll, so
+     these stay put. mask-image is what makes the BLUR fall off too; without it the
+     backdrop-filter would end on a hard vertical seam. */
+  .rt-gal-wrap { position: relative; }
+  .rt-gal-wrap::before, .rt-gal-wrap::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 46px; z-index: 2;
+    pointer-events: none; opacity: 0; transition: opacity 0.22s ease;
+    /* frosted rather than painted out: the photo stays legible through it, just softened.
+       saturate keeps the colour alive the way iOS materials do instead of going chalky. */
+    -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%);
+  }
+  .rt-gal-wrap::before {
+    left: 0;
+    background: linear-gradient(to left, rgba(255,255,255,0), rgba(255,255,255,0.5));
+    -webkit-mask-image: linear-gradient(to left, transparent, black);
+    mask-image: linear-gradient(to left, transparent, black);
+  }
+  .rt-gal-wrap::after {
+    right: 0;
+    background: linear-gradient(to right, rgba(255,255,255,0), rgba(255,255,255,0.5));
+    -webkit-mask-image: linear-gradient(to right, transparent, black);
+    mask-image: linear-gradient(to right, transparent, black);
+  }
+  .rt-gal-wrap.show-left::before, .rt-gal-wrap.show-right::after { opacity: 1; }
+  .rt-gallery .rt-img {
+    flex: none; width: 62%; max-width: 220px; aspect-ratio: 4 / 5;
+    object-fit: cover; margin: 0; border-radius: 14px; scroll-snap-align: start;
+  }
+  /* two fit the width exactly; three or more spill into a scroll */
+  .rt-gallery:not(.stacked):has(> :nth-child(2):last-child) .rt-img { width: calc(50% - 4px); max-width: none; }
+  .rt-gallery .rt-img {
+    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* pinched shut: a fanned deck. white ring so the cards still read as separate objects. */
+  .rt-gallery.stacked { overflow: visible; gap: 0; padding: 6px 0; }
+  .rt-gallery.stacked .rt-img {
+    width: 58%; max-width: 200px;
+    box-shadow: 0 0 0 3px var(--card), 0 6px 16px rgba(0,0,0,0.16);
+  }
+  .rt-gallery.stacked .rt-img + .rt-img { margin-left: -44%; }
+  .rt-gallery.stacked .rt-img:nth-child(1) { transform: rotate(-3deg); z-index: 4; }
+  .rt-gallery.stacked .rt-img:nth-child(2) { transform: rotate(2.2deg); z-index: 3; }
+  .rt-gallery.stacked .rt-img:nth-child(3) { transform: rotate(-1.4deg); z-index: 2; }
+  .rt-gallery.stacked .rt-img:nth-child(n+4) { transform: rotate(3deg); z-index: 1; }
+  @media (prefers-reduced-motion: reduce) { .rt-gallery .rt-img { transition: none; } }
+  /* display sizes chosen from the preview (3x = full width, the default above) */
+  .rt-img.sz-2x { max-width: 66%; }
+  .rt-img.sz-1x { max-width: 33%; }
+  .rt-img.sz-inline {
+    display: inline; height: 1.35em; width: auto; max-width: 100%;
+    margin: 0 3px; vertical-align: -0.28em; border-radius: 5px;
+  }
+
+  /* read-more reading modal — a centred float: dark blurred backdrop, white card.
+     Also the ⋮ menu's backdrop, which holds a search field — so it needs the visual-viewport
+     anchoring for the same reason .overlay does, or the keyboard drags the menu off the top. */
+  .read-back {
+    position: fixed; left: 0; right: 0; z-index: 88;
+    /* to the screen bottom so the frost covers the keyboard's region too (iOS paints its
+       accessory bar there), with the band as padding so `align-items: center` still centres
+       the card in the part she can actually see rather than behind the keyboard */
+    top: var(--vvt); bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    /* the page paints under the status bar now, so every full-screen overlay has to
+       keep its own content out from under the clock itself */
+    padding: calc(env(safe-area-inset-top) + 22px) 22px
+             calc(env(safe-area-inset-bottom) + 22px + var(--kb) + var(--kbr));
+    background: rgba(0,0,0,0.4);
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+    opacity: 0; transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .read-back.show { opacity: 1; }
+  .read-modal {
+    position: relative; width: 100%; max-width: 560px; max-height: 82vh; overflow: auto;
+    background: var(--card); border-radius: 20px; padding: 26px 24px 24px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.28), 0 8px 24px rgba(0,0,0,0.12);
+    transform: translateY(8px) scale(0.99); transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .read-back.show .read-modal { transform: none; }
+  .read-x {
+    position: absolute; top: 12px; right: 14px;
+    background: none; border: none; font-size: 22px; line-height: 1;
+    color: var(--subtle); cursor: pointer; padding: 4px;
+  }
+  .read-body { font-size: 15px; line-height: 1.55; white-space: pre-wrap; color: var(--ink); }
+  .read-body .rt-img { cursor: zoom-in; }
+
+  /* the menu: a centred floating modal. search sits at the top; typing turns the body below
+     it into results, and with the field empty it's the settings list instead. */
+  .menu-modal {
+    position: relative; width: 100%; max-width: 460px;
+    max-height: 78vh; display: flex; flex-direction: column; overflow: hidden;
+    background: var(--card); border-radius: 22px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.28), 0 8px 24px rgba(0,0,0,0.12);
+    transform: translateY(8px) scale(0.99); transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .read-back.show .menu-modal { transform: none; }
+  .menu-search {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 16px 18px; border-bottom: 1px solid var(--hairline);
+  }
+  .menu-search svg { flex: none; width: 17px; height: 17px; color: #B0B0B5; }
+  .menu-search input {
+    flex: 1; min-width: 0; border: none; outline: none; background: none;
+    font-family: var(--font); font-size: 16px; color: var(--ink);
+  }
+  .menu-search input::placeholder { color: #B4B4B9; }
+  .menu-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; }
+  .menu-row {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 13px 14px; border-radius: 14px;
+    background: none; border: none; text-align: left;
+    font-family: var(--font); font-size: 15px; color: var(--ink);
+  }
+  .menu-row:active { background: var(--field); }
+  .menu-row .mr-label { flex: 1; min-width: 0; }
+  .menu-row .mr-state { font-family: var(--mono); font-size: 11px; letter-spacing: 0.5px;
+    text-transform: uppercase; color: var(--subtle); }
+  .menu-row.on .mr-state { color: var(--ink); font-weight: 700; }
+  .menu-row svg { flex: none; width: 18px; height: 18px; color: #8A8A90; }
+  .menu-count { font-family: var(--mono); font-size: 11px; letter-spacing: 0.5px;
+    text-transform: uppercase; color: var(--subtle); padding: 8px 14px 4px; margin: 0; }
+  .menu-body .group-card { box-shadow: none; border-radius: 16px; background: var(--field); }
+
+  /* full-screen image preview — frosted, blurred backdrop with an optional size rail.
+     No text field of its own, but it can be opened from the composer with the keyboard already
+     up, so it takes the same visual-viewport anchoring rather than trusting 100dvh. */
+  .img-preview-back {
+    position: fixed; left: 0; right: 0; z-index: 90;
+    top: var(--vvt); bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: calc(env(safe-area-inset-top) + 20px) 20px
+             calc(env(safe-area-inset-bottom) + 20px + var(--kb) + var(--kbr));
+    background: rgba(28,28,30,0.34);
+    -webkit-backdrop-filter: blur(18px) saturate(1.1); backdrop-filter: blur(18px) saturate(1.1);
+    opacity: 0; transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .img-preview-back.show { opacity: 1; }
+  /* stage fills the backdrop, so the photo is measured against the room actually there —
+     88vh guessed, and a long screenshot spent the guess plus the size rail's share of it */
+  .img-preview-stage {
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    width: 100%; height: 100%; min-width: 0; min-height: 0;
+    transform: scale(0.985); transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .img-preview-back.show .img-preview-stage { transform: none; }
+  /* side-by-side: the photo is a direct flex item so it stays hugging the rail (a wrapper
+     box would reserve its untrimmed width and push the rail away). mobile stacks — below */
+  .img-preview-frame { display: contents; }
+  .img-preview-img {
+    flex: 0 1 auto; min-width: 0;
+    max-width: min(100%, 900px); max-height: 100%;
+    border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,0.4);
+    object-fit: contain;
+  }
+  .img-size-rail {
+    flex: none;
+    display: flex; flex-direction: column; gap: 6px;
+    background: rgba(255,255,255,0.9);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    padding: 12px 10px; border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.18);
+  }
+  .img-size-title {
+    font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+    color: var(--subtle); text-align: center; margin-bottom: 2px;
+  }
+  .img-size-btn {
+    border: none; background: var(--field); color: var(--ink);
+    font-size: 13px; font-family: var(--font);
+    padding: 8px 14px; border-radius: 10px; cursor: pointer;
+    transition: background 0.16s ease, transform 0.12s ease;
+  }
+  .img-size-btn:active { transform: scale(0.96); }
+  .img-size-btn.active { background: var(--ink); color: #fff; }
+  @media (max-width: 560px) {
+    .img-preview-stage { flex-direction: column; gap: 12px; }
+    /* stacked: the rail claims its row first and the photo shrinks into whatever height is
+       left, so the size buttons are always reachable however long the screenshot is */
+    .img-preview-frame {
+      display: flex; flex: 0 1 auto; min-height: 0; min-width: 0;
+      align-items: center; justify-content: center;
+    }
+    .img-size-rail { flex-direction: row; padding: 8px; }
+    .img-size-title { display: none; }
+  }
+  .redacted {
+    color: transparent; border-radius: 4px; cursor: pointer;
+    background:
+      repeating-linear-gradient(0deg, rgba(28,28,30,0.30) 0 2px, rgba(28,28,30,0.10) 2px 4px),
+      repeating-linear-gradient(90deg, rgba(28,28,30,0.26) 0 2px, rgba(28,28,30,0.08) 2px 4px);
+    background-size: 4px 4px;
+    animation: sparkle 0.9s steps(2) infinite;
+    transition: color 0.25s ease;
+    user-select: none; -webkit-user-select: none;
+  }
+  @keyframes sparkle {
+    0%   { background-position: 0 0, 0 0; }
+    50%  { background-position: 2px 1px, 1px 2px; }
+    100% { background-position: 0 0, 0 0; }
+  }
+  .redacted.revealed { color: inherit; background: var(--field); animation: none; }
+  @media (prefers-reduced-motion: reduce) { .redacted { animation: none; } }
+
+  /* the line-ops popover: one vertical list of labelled rows, so related controls collapse
+     into a single button instead of a wall of glyphs. floats above the format row. */
+  .line-pop {
+    position: absolute; left: 0; top: calc(100% + 8px); z-index: 8;
+    min-width: 196px; padding: 6px;
+    background: var(--card); border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 12px 34px rgba(0,0,0,0.16);
+    animation: lpDrop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes lpDrop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .line-pop { animation: none; } }
+  .line-pop-row {
+    display: flex; align-items: center; gap: 11px; width: 100%;
+    padding: 10px 11px; border-radius: 11px;
+    background: none; border: none; text-align: left;
+    font-family: var(--font); font-size: 14px; color: var(--ink);
+  }
+  .line-pop-row:active { background: var(--field); }
+  .line-pop-row .lp-icon { flex: none; line-height: 0; color: #6B6B70; }
+  .line-pop-row .lp-icon svg { width: 19px; height: 19px; }
+  .line-pop-row .lp-label { flex: 1; min-width: 0; }
+
+  /* format bar — line ops (bullet/indent) while just typing, span ops (B I U…) once
+     text is selected. one slim row either way; the contents swap, the row never grows.
+     Floated free of the sheet's own flow and docked to the keyboard, not slotted between the
+     head and the field: a row that scrolls with the text is a row you lose the moment you type
+     past the first screen, and re-finding it costs a scroll every time you want to select
+     something. --kb / --kbr are the same live/predicted keyboard-band pair the sheet's own
+     padding uses (see reserveForKeyboard) — reusing them means the bar arrives already docked
+     to wherever the keyboard actually is, with no separate measurement to keep in sync. Distance
+     above the keyboard is fixed (12px gap) rather than tracking the tick accessory bar the way
+     the sheet's content does: the accessory bar's own iOS chrome sits between them either way,
+     so closing that last gap wouldn't remove a visible seam, just an amount of hidden padding. */
+  .fmt-bar {
+    position: fixed; left: 0; right: 0; z-index: 55;
+    /* max(), NOT a sum — this is the whole of "the bar sits way too high". These three are
+       alternative descriptions of the same floor (how far up the screen bottom is obstructed),
+       not things to stack: --vvb is the measured obstruction, --kbr the predicted one before the
+       keyboard has landed, and the safe-area inset the home indicator when nothing else is there.
+       Adding them double-counts: measured on her iPhone the pill's bottom sat 424px up, which is
+       exactly 34 (inset) + 378 (band) + 12 — the inset is already inside the keyboard's region,
+       so it bought 34px of nothing. max() picks whichever floor is real and lands it at 390.
+       --vvb rather than --kb on purpose: --kb is gated (see syncViewportVars) and reads 0 whenever
+       a measurement falls outside those gates, which drops the bar to the bottom of the screen and
+       leaves it stranded under the keyboard on the next focus. */
+    bottom: calc(max(var(--vvb), var(--kbr), env(safe-area-inset-bottom)) + 12px);
+    display: none; justify-content: center;
+    padding: 0 20px; pointer-events: none; /* only the pill itself should catch taps */
+    /* Do NOT put a transition on `bottom` here. Measured in Chrome (31 Jul): with
+       `transition: bottom …` on this rule, changing --kb on :root leaves the computed bottom
+       stuck at its old value forever — 12px with --kb at 336px — so the bar silently stops
+       tracking the keyboard altogether. Removing the transition, or setting --kb directly on
+       this element instead of an ancestor, both resolve it correctly to 348px. A transitioned
+       property whose value comes from calc(var(…)) does not get re-resolved when that var
+       changes on an ancestor. Nothing is lost: --kb and --kbr are built so exactly one is ever
+       non-zero and the sum is the same across the keyboard's arrival, so there is no jump here
+       to smooth over in the first place. */
+  }
+  .fmt-bar.show { display: flex; }
+  /* the styling row stands down while the tag popover is open. It is fixed at z-index 55 and the
+     popover is inside the sheet, so the bar would otherwise float across the chips — and there is
+     nothing to format while picking tags anyway. */
+  .fmt-bar.show.tag-open { display: none; }
+  /* full width of the sheet's own column rather than shrink-wrapping the buttons: a pill sized to
+     its contents changes width every time the row swaps (4 line ops vs 6 span ops), which reads as
+     the toolbar twitching rather than as its contents changing. Fixed width, contents distributed. */
+  .fmt-bar-pill {
+    display: flex; gap: 2px; pointer-events: auto;
+    flex: 1; max-width: 520px; justify-content: space-around;
+    background: #fff; border-radius: 999px; padding: 6px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08), 0 10px 28px rgba(0,0,0,0.10);
+    border: 1px solid rgba(0,0,0,0.04);
+    overflow-x: auto; scrollbar-width: none;
+  }
+  .fmt-bar-pill::-webkit-scrollbar { width: 0; height: 0; }
+  /* the docked bar floats OVER the sheet rather than in it, so the sheet has to give back the
+     room it covers or the last line of text sits under the pill — reachable only by scrolling
+     it out from under, which is the thing a fixed bar is supposed to stop happening. --fmt-h is
+     the pill's own height plus its 12px gap, kept as one value used by both sides so the
+     clearance can't drift from the thing it is clearing. Only applied once the bar is actually
+     showing (.has-fmt), since before that there is nothing over the content. */
+  :root { --fmt-h: 60px; }
+  .sheet.expanse.has-fmt {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 28px + var(--kb) + var(--kbr) + var(--fmt-h));
+  }
+  .fmt-bar .sel-only, .fmt-bar .line-only { display: none; }
+  .fmt-bar.has-sel .sel-only { display: flex; }
+  .fmt-bar:not(.has-sel) .line-only { display: flex; }
+  /* No individual chip background any more — that was right for a row sitting loose on the
+     sheet, but this row now sits on ONE shared pill (.fmt-bar-pill), and a grey chip inside a
+     white pill reads as a second layer of chrome the screenshot doesn't have. Fixed width in
+     place of the old `flex: 1`: the row no longer spans full width to distribute evenly across,
+     and a single-glyph button ("I" is much narrower than "M") needs an explicit tap target or
+     the thin ones fall under the 40px-ish comfortable minimum. */
+  .fmt-btn {
+    flex: none; width: 38px; height: 36px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
+    background: none; color: var(--ink); border: none; border-radius: 10px;
+    padding: 0; align-items: center; justify-content: center;
+    user-select: none; -webkit-user-select: none;
+  }
+  .fmt-btn svg { display: block; }
+  /* line ops (bullet/indent/outdent): the muted grey of the topic chips below, same as before */
+  .fmt-btn.line-only { color: #6B6B70; }
+  .fmt-btn.line-only:active { color: #fff; } /* keep the press invert (specificity beats the rest colour) */
+  .fmt-btn.line-only svg { width: 16.5px; height: 16.5px; }
+  .fmt-btn:active { background: var(--ink); color: #fff; }
+  .fmt-b { font-weight: 700; }
+  .fmt-i { font-style: italic; }
+  .fmt-u { text-decoration: underline; text-underline-offset: 2px; }
+  /* redact and link replace what used to be bare "R"/"L" letters (see LINK_ICON / REDACT_ICON) —
+     redact keeps the old letter's muted weight since a mask action reads as secondary next to
+     B/I/U; link stays full ink, matching how it reads in the screenshot. */
+  .fmt-btn.fmt-icon svg { width: 18px; height: 18px; }
+  .fmt-r { color: var(--subtle); }
+  .fmt-r:active { color: #fff; }
+  .entry-meta {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center;
+  }
+  .pill {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 3px 8px; border-radius: 999px; font-weight: 600;
+  }
+  .pill.mode {
+    border: 1px solid var(--hairline); color: var(--subtle); font-weight: 400;
+  }
+  /* day view: the topics ride on the entry's own first row, in line with the day badge —
+     [badge] [TOPIC] [TOPIC…] — and the text starts underneath at its FULL width. They used
+     to stand in a third column at the right, which was a clean edge bought at the cost of
+     94px off every line, so a day-view entry wrapped where the same text in topic view
+     didn't. The row costs one line's height once; the column cost width on every line. */
+  .entry-tags {
+    display: flex; gap: 5px; margin-bottom: 7px;
+    /* the badge sits at the top of the gutter, so matching its 22px box here puts pill and
+       badge on one axis with no per-element nudging */
+    min-height: 22px; align-items: center;
+  }
+  /* the fixed 78px is kept from the old side column: a short label like WORK measures the
+     same as a long one, so a run of pills reads as a row of equal marks rather than ragged
+     labels. Fixed height + matching line-height centres the text without flex, which would
+     break the ellipsis. */
+  .entry-tags .pill {
+    flex: none; width: 78px; height: var(--pill-h); line-height: var(--pill-h);
+    padding: 0 8px; text-align: center;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .entry-day { font-family: var(--mono); font-size: 11px; color: #A9A9AD; } /* 15% darker than #C7C7CC — readable on a phone */
+  .group.dense { margin-bottom: 12px; }
+
+  .empty {
+    text-align: center; color: var(--subtle); font-size: 14px;
+    padding: 64px 24px; line-height: 1.6;
+  }
+
+  /* weekly AI summary — a different voice, so a different face (serif italic) */
+  .wsum { position: relative; margin: 0 0 22px; padding: 2px 30px 0 4px; min-height: 18px; }
+  .wsum.collapsed { margin: 0; padding: 0; min-height: 0; } /* hidden: no reserved space — eye rides the next row down */
+  .wsum.collapsed .wsum-eye { top: -5px; } /* nudged to align with the group-head row's vertical center */
+  .wsum-text {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-style: normal; font-size: 22px; line-height: 1.4;
+    margin: 0; cursor: pointer;
+  }
+  .wsum-text.pending { color: var(--subtle); }
+  /* provenance pill: MINE (hand-written) / V1 (first AI take) / V2… (re-summarized).
+     when a week holds several takes, all show — active one filled, tap another to switch. */
+  .wsum-pill {
+    position: relative; /* anchors the invisible hit-slop below */
+    display: inline-block; font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.6px; text-transform: uppercase; color: var(--subtle);
+    background: var(--field); border-radius: 5px; padding: 2px 6px;
+    line-height: 1; margin: 0 0 6px; cursor: pointer;
+  }
+  /* the visible pill stays tiny; this transparent overlay makes it a ~36px-tall thumb
+     target. horizontal slop is kept small so adjacent pills' zones don't overlap. */
+  .wsum-pill::after { content: ""; position: absolute; inset: -12px -2px -10px; }
+  .wsum-pill + .wsum-pill { margin-left: 6px; }
+  .wsum-pill.on { background: var(--ink); color: #fff; }
+  /* faint invitation to hand-write a summary when none exists / AI won't auto-generate */
+  .wsum-add {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
+    text-transform: uppercase; color: #C7C7CC; cursor: pointer;
+    background: none; border: none; padding: 0;
+  }
+  .wsum-eye {
+    position: absolute; top: 0; right: 0;
+    background: none; border: none; padding: 4px; line-height: 0;
+    color: #D6D6DB; /* barely there by design */
+  }
+  .wsum-eye svg { width: 15px; height: 15px; }
+  /* magic wand: the summary offer once 3 days are filled — a touch more present than the eye */
+
+  /* subtle frost at the bottom edge — content softly fades behind the fab zone */
+  /* a white fade the list scrolls up into, so the compose bar always sits on clean ground */
+  .bottom-frost {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    height: calc(env(safe-area-inset-bottom) + 162px);
+    /* less blur, more white — a second step along the same axis. At 22px, then even at 14px,
+       text behind it went hazy enough to look broken. The white is what should do the hiding;
+       the blur just softens the edge of it, so the solid end holds longer and higher and the
+       radius comes down again to match. */
+    background: linear-gradient(to top, rgba(255,255,255,0.98) 34%, rgba(255,255,255,0.72) 66%, rgba(255,255,255,0));
+    -webkit-backdrop-filter: blur(11px) saturate(180%); backdrop-filter: blur(11px) saturate(180%);
+    /* the mask fades the BLUR out with the white; without it the blur stops on a hard line */
+    -webkit-mask-image: linear-gradient(to top, black 55%, transparent);
+    mask-image: linear-gradient(to top, black 55%, transparent);
+    pointer-events: none; z-index: 30;
+  }
+
+  /* the compose bar: a resting grey field that says "Start typing…". tapping it opens the
+     composer, which unfolds from this same bar into a full flat-white expanse. */
+  .compose-dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    padding: 0 16px calc(env(safe-area-inset-bottom) + 18px);
+    max-width: 520px; margin: 0 auto;
+    transition: opacity 0.2s ease;
+  }
+  .compose-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    width: 100%; min-height: 44px; padding: 8px 10px 8px 20px;
+    background: #E8E8EA; border: none; border-radius: 18px;
+    font-family: var(--font); font-size: 15px; color: #9A9A9F; text-align: left;
+    cursor: text; -webkit-tap-highlight-color: transparent;
+    transition: background 0.18s ease, transform 0.12s ease;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  .compose-bar:active { transform: scale(0.995); background: #E2E2E5; }
+  .compose-bar.copied { background: #2E7D3A; color: #fff; }
+  .compose-hint { display: flex; align-items: center; min-width: 0; }
+  .compose-hint svg { width: 18px; height: 18px; }
+  /* a slow light sweeps across the placeholder — the bar reads as waiting for her rather
+     than as a dead label. only on the plain hint: the export/copied states put an svg in
+     here, and background-clip:text needs color:transparent, which would erase it. */
+  .shimmer {
+    background: linear-gradient(100deg, #A6A6AB 34%, #E4E4E8 50%, #A6A6AB 66%);
+    background-size: 300% 100%;
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+    animation: hintShimmer 3.6s linear infinite;
+  }
+  @keyframes hintShimmer { from { background-position: 150% 0; } to { background-position: -150% 0; } }
+  /* held still while anything is scrolling: an animated gradient competing with moving content
+     is noise, and paused (not cancelled) means it resumes from where it was, never restarts. */
+  .shimmer.paused { animation-play-state: paused; }
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer { animation: none; background: none; color: #9A9A9F; }
+  }
+
+  /* the composer's own hint, laid over the empty field. font and offset track the textarea's
+     so the two are indistinguishable until she types. */
+  .ta-wrap { position: relative; }
+  .ta-ghost {
+    position: absolute; left: 0; top: 8px; pointer-events: none;
+    font-family: var(--font); font-size: 17px; line-height: 1.55;
+    transition: opacity 0.15s ease;
+  }
+  .ta-ghost.gone { opacity: 0; animation-play-state: paused; } /* don't animate what isn't visible */
+  /* the bar's trailing controls: + to write, and a lozenge of three dots for the menu
+     (which is where search and day view now live). each its own tap target, so neither
+     opens the composer by accident. */
+  .compose-actions { flex: none; display: flex; align-items: center; gap: 4px; }
+  /* a hairline fence: the menu on its far side reads as its own thing, not part of typing */
+  .compose-divider { flex: none; width: 1px; height: 20px; background: rgba(0,0,0,0.11); }
+  .compose-icon {
+    flex: none; width: 34px; height: 34px; border-radius: 999px;
+    background: none; border: none; color: #8A8A90;
+    display: flex; align-items: center; justify-content: center; line-height: 0;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .compose-icon svg { width: 19px; height: 19px; }
+  .compose-icon:active { background: rgba(0,0,0,0.06); color: var(--ink); }
+  /* three bare dots — no container, so nothing about it suggests a typing affordance.
+     Sizing note: matching the + SVG's 19px BOX was the old mistake — the drawn glyph inside
+     it spans only 13 of 24 viewBox units, i.e. 13/24 × 19 ≈ 10.3px, so a 19px dot stack read
+     nearly twice the height of the + beside it. 2.6px dots + two 1.3px gaps = 10.4px, which
+     matches the ink. The 34px button boxes still match, so the pair is one row of controls. */
+  .compose-lozenge {
+    flex: none; width: 34px; height: 34px; border-radius: 999px;
+    background: none; border: none;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.3px;
+    transition: background 0.15s ease;
+  }
+  .compose-lozenge span { width: 2.6px; height: 2.6px; border-radius: 50%; background: #8A8A90; }
+  .compose-lozenge:active { background: rgba(0,0,0,0.07); }
+  .compose-bar.copied .compose-actions { display: none; }
+  /* a translucent overlay would show the bar as a smudge underneath — take it out of frame,
+     fading in step with the backdrop. */
+  body:has(.img-preview-back) .compose-dock,
+  body:has(.read-back) .compose-dock { opacity: 0; pointer-events: none; }
+
+  /* sheet */
+  /* Top pinned to the VISUAL viewport, bottom to the SCREEN. A fixed element is positioned
+     against the layout viewport, and when the keyboard opens iOS scrolls that out from under it
+     — so an overlay at `top: 0` ends up above the top of what she can see, hence `--vvt`.
+     But the BOTTOM must stay at `0`, not at the visual viewport's bottom edge: the visual
+     viewport ends where the keyboard's region begins, and iOS draws its own accessory bar
+     (the ^ ⌄ ✓ row) in that region. An overlay that stopped there left the accessory bar
+     sitting on a see-through strip with the entry list showing behind it. Running to the screen
+     bottom means the backdrop — and the sheet inside it — carry on underneath. */
+  .overlay {
+    position: fixed; left: 0; right: 0; z-index: 50;
+    top: var(--vvt); bottom: 0;
+    background: rgba(0,0,0,0.4);
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  /* The sheet's BOX runs to the bottom of the screen, under the keyboard and its accessory bar,
+     so its white is continuous with no strip showing through. Only its CONTENT is lifted clear,
+     by carrying the keyboard's band in padding-bottom. --kb is the live band and --kbr the one
+     predicted before it lands; exactly one of them is ever non-zero, so the sum is the band
+     either way and nothing shifts when the real keyboard arrives. */
+  .sheet {
+    background: var(--card); width: 100%; max-width: 520px;
+    border-radius: 20px 20px 0 0;
+    padding: 12px 20px calc(env(safe-area-inset-bottom) + 28px + var(--kb) + var(--kbr));
+    max-height: 88vh; overflow-y: auto;
+    box-shadow: 0 -8px 40px rgba(0,0,0,0.12);
+    animation: slideUp 0.22s ease;
+  }
+  @keyframes slideUp { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+
+  /* while the composer is unfolding, the list behind it recedes — a small shrink and fade,
+     so the sheet reads as coming forward rather than sliding over. timed to the unfold, and
+     the backdrop stays light enough that the recede is actually visible through it.
+     0.62s is the old 0.78 run 20% quicker — the unfold's own number, so the recede and the
+     clip still land together. Every duration in the open/close move is scaled by that same
+     0.8, so nothing needs re-timing against anything else. */
+  .wrap, .compose-dock {
+    transform-origin: top center;
+    transition: transform calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1),
+                opacity calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1);
+  }
+  body.composing .wrap { transform: scale(0.93); opacity: 0.4; }
+  body.composing .compose-dock { opacity: 0; }
+  body.composing .overlay {
+    background: rgba(0,0,0,0.18);
+    -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wrap, .compose-dock { transition: none; }
+  }
+
+  /* the composer: an unfolding of the compose bar rather than a panel over it. it opens at
+     the bar's grey and rounding and settles into a tall flat white expanse — the field IS
+     the surface, no inset box, so there's nothing to make the writing feel small. */
+  .sheet.expanse {
+    /* --sheet-h is what the notch drags. The ceiling has to leave the status bar alone:
+       100dvh now includes it, so a bare 98dvh slid the grabber up under the clock.
+       The ceiling runs to the SCREEN bottom (100dvh) less the visible top (--vvt), NOT to the
+       visual viewport's bottom: the box has to carry on under the keyboard's region or its white
+       stops short and iOS's accessory bar sits on a see-through strip. The keyboard is kept off
+       the content by padding-bottom (inherited from .sheet) rather than by shortening the box —
+       which also means the box never resizes when the keyboard lands, so there is nothing for
+       Safari to scroll the caret into view *from*. --sheet-h is left alone, so her chosen height
+       comes straight back when the keyboard goes away.
+
+       The default opens at 85% of that ceiling, not at it. It used to ask for 98dvh, which on a
+       notched phone the ceiling clamped straight back down to itself — the composer opened at its
+       absolute maximum, so the notch could only ever make it SHORTER and a drag upward was a
+       silent no-op. Measured on a 812px notched viewport: default and ceiling were both 743px,
+       zero headroom. 85% leaves ~110px to grow into, which is what makes the notch read as a
+       two-way control; the height she settles on is remembered, so opening shorter is a one-time
+       cost rather than a permanent one. */
+    --sheet-ceil: calc(100dvh - var(--vvt) - env(safe-area-inset-top) - 10px);
+    --sheet-default: calc(var(--sheet-ceil) * 0.85);
+    height: var(--sheet-h, var(--sheet-default));
+    max-height: var(--sheet-ceil);
+    padding: 12px 20px calc(env(safe-area-inset-bottom) + 24px + var(--kb) + var(--kbr));
+    animation: none; /* the unfold below replaces the generic slide-up */
+    clip-path: inset(0 round 20px 20px 0 0);
+    /* the toe matters: a deliberate hold of visible growth off the bar, THEN a decisive run
+       out to full size. first control point low (slow start), second high and early (fast
+       finish) — a pronounced S-curve, not an ease-out.
+       Strengthened 40% from `0.62, 0.01, 0.13, 1` (31 Jul): each control point moved 40% of
+       its remaining distance toward the extreme that deepens the S — x1 toward 1, x2 toward 0
+       — so the toe holds longer and the run-out is harder. Deliberately NOT done by pushing
+       y1 negative, which is the other way to read "stronger": that adds anticipation, and a
+       clip-path box that shrinks before it grows reads as a glitch, not as ease. Shared by all
+       four transitions in the gesture (list recede, clip, grey→white, desktop deck) — they
+       have to move on one curve or the composer stops arriving as a single thing. */
+    transition: clip-path calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1),
+                background-color calc(0.53s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1);
+  }
+  /* the folded state: the sheet clipped to the compose bar's exact rectangle, in its grey.
+     --mt/--mr/--mb/--ml are measured from the real bar on open, so the two are the same
+     box — releasing the class opens the clip outward and the grey turns white. */
+  .sheet.expanse.folded {
+    clip-path: inset(var(--mt) var(--mr) var(--mb) var(--ml) round 18px);
+    background-color: #E8E8EA;
+  }
+  /* the folded box has to be PAINTED before the transition is armed — otherwise adding
+     .folded just animates into it and the unfold has nowhere to travel from. */
+  .sheet.expanse.no-anim, .sheet.expanse.no-anim > * { transition: none; }
+  .sheet.expanse > * { transition: opacity calc(0.27s * var(--unfold-k)) ease calc(0.16s * var(--unfold-k)); }
+  .sheet.expanse.folded > * { opacity: 0; transition-delay: 0s; }
+  @media (prefers-reduced-motion: reduce) {
+    .sheet.expanse, .sheet.expanse > * { transition: none; }
+  }
+  /* the writing surface tracks whatever height the notch has set, less the chrome above it —
+     but never past the VISIBLE area, or a field taller than the room above the keyboard puts
+     its own scroll back in play and the caret goes right back out of view. `--vvh - --kbr` is
+     that room in both directions: with the keyboard up --vvh already excludes it and --kbr is 0;
+     while it's still on its way --vvh is full and --kbr is the band. Never both, so the number
+     is the same across the arrival — which is why the field doesn't resize either. */
+  .sheet.expanse textarea.ta-entry {
+    background: none; border-radius: 0; padding: 8px 0 0;
+    font-size: 17px; line-height: 1.55;
+    min-height: min(calc(var(--sheet-h, var(--sheet-default)) - 250px), calc(var(--vvh) - var(--kbr) - 250px));
+    max-height: none;
+  }
+  .sheet.expanse textarea.ta-entry::placeholder { color: #B4B4B9; }
+  /* the bar used to ride in-flow under the head; now it's position: fixed and docked to the
+     keyboard (see .fmt-bar), so there's nothing here to offset any more. Left as a marker so a
+     future margin added here isn't a surprise: a fixed box with only `bottom` set still honours
+     margin, which would just silently open a gap on top of the one --kb/--kbr already give it. */
+
+  /* the notch doubles as a resize handle for the composer: drag it to set the height */
+  .grabber {
+    width: 48px; height: 5px; border-radius: 3px;
+    background: var(--hairline); background-clip: content-box; box-sizing: content-box;
+    padding: 9px 22px; margin: -5px auto 3px;
+    cursor: ns-resize; touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  .sheet-head {
+    position: relative;
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+  }
+  .sheet-head .title {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    font-size: 15px; font-weight: 600; pointer-events: none; white-space: nowrap;
+  }
+  .save {
+    font-size: 15px; background: none; border: none; padding: 4px;
+    color: var(--ink); font-weight: 600;
+  }
+  .save:disabled { color: #C7C7CC; cursor: default; }
+
+  /* day and week read as ONE pill split by a hairline, each half the same width so the two
+     tokens sit centred in their own half rather than drifting with their label length */
+  .head-pills {
+    display: inline-flex; align-items: center;
+    background: var(--field); border-radius: 999px;
+  }
+  .day-pill {
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    background: none; border: none; border-radius: 999px;
+    padding: 8px 0; min-width: 58px; text-align: center; color: var(--ink);
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  .scope-div { flex: none; width: 1px; height: 15px; background: rgba(0,0,0,0.13); }
+  /* ---- head: tag lozenge on the left of the pills, commit/dismiss pair on the right ---- */
+  /* the tag button is its own lozenge rather than a third segment inside .head-pills: day and week
+     are one scope split by a hairline, and dropping an unrelated control into that pill would make
+     it read as a third part of the same date. */
+  .head-left { display: flex; align-items: center; min-width: 0; }
+  /* --head-h is the head row's one height: the day/week lozenge sets it, and the tag lozenge and
+     both ring buttons take it from here. Previously each was sized by its own padding and they
+     came out 31 / 32 / 34, which reads as three not-quite-aligned controls on one row. */
+  :root { --head-h: 31px; }
+  .head-tag {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: var(--head-h); box-sizing: border-box;
+    background: var(--field); border: none; border-radius: 999px;
+    padding: 0 11px; margin-left: 8px; color: var(--subtle);
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    user-select: none; -webkit-user-select: none;
+  }
+  .head-tag svg { width: 16px; height: 16px; display: block; }
+  /* carrying tags is the notable state, so it takes the ink; empty stays quiet */
+  .head-tag.has-tags { background: var(--ink); color: #fff; }
+  .head-tag .ht-count { line-height: 1; }
+  /* the two ring buttons. The ring is here, not in the SVGs, so both are the same circle and only
+     their glyph differs — and so the disabled/active states have one thing to restyle. */
+  /* the commit/dismiss pair. One light grey does all the work: it FILLS the tick and OUTLINES
+     the cross, including the cross's own stroke, so the two read as a matched pair at the same
+     quiet weight. The tick previously carried a near-black ring, which made a 31px circle the
+     loudest thing on the row — louder than the entry itself. A muted grey fill is the house
+     treatment for a primary action anyway; the tick reads because it is filled, not because it
+     is dark, so its glyph can stay ink without the surround shouting. */
+  :root { --act-grey: #DCDCE2; }
+  .head-acts { display: flex; align-items: center; gap: 8px; }
+  .head-act {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: var(--head-h); height: var(--head-h); padding: 0; flex: none;
+    box-sizing: border-box;
+    background: none; border: 1.5px solid transparent; border-radius: 50%;
+  }
+  .head-act svg { width: 16px; height: 16px; }
+  .head-act.act-save { background: var(--act-grey); color: var(--ink); }
+  .head-act.act-save:not(:disabled):active { background: #C9C9D1; }
+  .head-act.act-close { border-color: var(--act-grey); color: var(--act-grey); }
+  .head-act.act-close:active { background: var(--field); }
+  /* nothing to save reads as a fainter fill rather than a missing button — the control stays
+     where it is so the row never reflows as text comes and goes. */
+  .head-act.act-save:disabled { background: var(--field); color: #C7C7CC; }
+
+  /* the topic/mode chips, folded away behind the tag lozenge */
+  .tag-pop {
+    position: absolute; left: 0; top: calc(100% + 10px); z-index: 8;
+    width: min(320px, calc(100vw - 56px)); padding: 12px 14px 14px;
+    background: var(--card); border-radius: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 12px 34px rgba(0,0,0,0.16);
+    /* against --vvh, not vh: the list has to stop at the top of the KEYBOARD, and vh knows
+       nothing about it — a 50vh cap runs the last few chips underneath it where they can't be
+       tapped. 170px covers the head above the popover plus a margin below it. */
+    max-height: min(380px, calc(var(--vvh) - 170px)); overflow-y: auto; overscroll-behavior: contain;
+    animation: lpDrop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @media (prefers-reduced-motion: reduce) { .tag-pop { animation: none; } }
+  .tag-pop .field-label:first-child { margin-top: 0; }
+
+  .day-strip {
+    position: absolute; left: 0; right: 0; top: calc(100% + 10px);
+    display: flex; background: var(--field); border-radius: 14px; padding: 4px;
+    z-index: 6; touch-action: none;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+  } /* 14px radius + 10px drop = the row reads as the typing field's twin, top edges flush */
+  .day-strip span {
+    flex: 1; text-align: center; font-family: var(--mono); font-size: 13px;
+    padding: 9px 0; border-radius: 999px; color: var(--subtle);
+    user-select: none; -webkit-user-select: none; cursor: pointer;
+  }
+  .day-strip span.hot { background: var(--ink); color: #fff; font-weight: 600; }
+  .day-strip span.today::after {
+    content: ""; display: inline-block; width: 4px; height: 4px;
+    margin-left: 3px; border-radius: 50%; background: #FF3B30; vertical-align: middle;
+  }
+
+  /* inline week/date picker — slides down from the W pill; liquid, but sleek.
+     same grey surface as the day strip so the two pickers read as one family;
+     the current week row lifts to white, the chosen date is the black pill. */
+  .cal-pop {
+    position: absolute; left: 0; right: 0; top: calc(100% + 10px); /* flush with the typing field's top edge, like the day strip */
+    background: var(--field); border-radius: 16px; padding: 6px 10px 10px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+    z-index: 7; transform-origin: top center;
+    animation: calDrop 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .cal-pop .cal-row.wk-row.current { background: var(--card); }
+  @keyframes calDrop { from { opacity: 0; transform: translateY(-12px) scale(0.97); } to { opacity: 1; transform: none; } }
+  .cal-pop.closing { animation: calRise 0.18s cubic-bezier(0.4, 0, 1, 1) forwards; pointer-events: none; }
+  @keyframes calRise { to { opacity: 0; transform: translateY(-10px) scale(0.97); } }
+  @media (prefers-reduced-motion: reduce) { .cal-pop, .cal-pop.closing { animation: none; } }
+  .cal-sel { background: var(--ink); color: #fff !important; border-radius: 8px; font-weight: 700; }
+
+  .sheet textarea {
+    width: 100%; font-family: var(--font); font-size: 16px; line-height: 1.5;
+    color: var(--ink); border: none; outline: none; resize: none;
+    background: var(--field); border-radius: 14px; padding: 14px 16px;
+    min-height: 144px; max-height: 32vh; overflow-y: auto;
+  }
+  /* desktop: the composer opens tall from the start — a real thinking surface.
+     scoped to the entry field so the week-summary editor keeps its compact size. */
+  @media (min-width: 700px) {
+    .sheet textarea.ta-entry { min-height: max(300px, 40vh); max-height: 52vh; }
+  }
+  .field-label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; color: var(--subtle); margin: 18px 0 8px;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; line-height: 1;
+    padding: 9px 12px; border-radius: 999px;
+    border: 1px solid transparent; background: var(--field); color: #6B6B70;
+    transition: all 0.15s ease; white-space: nowrap;
+  }
+  .chip.mode { background: transparent; color: var(--subtle); border-color: var(--hairline); }
+  .chip.mode.on { background: var(--ink); color: #fff; border-color: var(--ink); font-weight: 600; }
+
+  .back-link {
+    font-size: 13px; color: var(--subtle); background: none; border: none;
+    margin-top: 8px; padding: 0; text-decoration: underline;
+  }
+  /* segmentation: a long ramble can be broken into separate deposits. the offer link
+     lives under the format bar; the preview shows the proposed cuts as entry-like
+     blocks, each with its suggested topic pill and a JOIN control on the divider. */
+  .seg-offer {
+    display: block; font-size: 13px; color: var(--subtle); background: none; border: none;
+    margin-top: 10px; padding: 0; text-decoration: underline;
+  }
+  .seg-offer.pending { text-decoration: none; animation: segPulse 1.6s ease-in-out infinite; }
+  @keyframes segPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  .seg-note { font-size: 13px; color: var(--subtle); margin: 10px 0 0; }
+  .seg-list { margin-top: 2px; }
+  .seg-block { padding: 13px 16px; }
+  .seg-block p { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+  .seg-join { position: relative; height: 0; border-top: 1px solid var(--hairline); }
+  .seg-join button {
+    position: absolute; left: 50%; top: -9px; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.6px; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px; line-height: 1;
+    border: 1px solid var(--hairline); background: var(--card); color: var(--subtle);
+  }
+  .seg-join button::after { content: ""; position: absolute; inset: -10px -8px; } /* forgiving tap zone */
+  button.pill { border: none; padding: 3px 8px; cursor: pointer; }
+  .ramble-text { margin: 0 0 8px; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+  .delete-btn {
+    display: block; width: 100%; margin-top: 22px; font-size: 15px;
+    color: #C43C36; background: #FBE3E1; border: none; border-radius: 12px;
+    padding: 12px 0;
+  }
+  .lock-btn {
+    display: block; width: 100%; margin-top: 22px; font-size: 15px;
+    color: var(--ink); background: var(--field); border: none; border-radius: 12px;
+    padding: 12px 0;
+  }
+  /* composer-speed scale: five cells, 1–4 then the rabbit. A segmented control rather than a
+     slider — five discrete notches is not a value worth scrubbing, and the active cell IS the
+     state so nothing else has to report it. Cells share the width so the scale reads as a
+     scale; the ink fill for the active one is the same one the mode chips and provenance
+     pills already use. */
+  .speed-seg { display: flex; gap: 6px; }
+  .speed-cell {
+    flex: 1; height: 38px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 10px; background: var(--field); color: #6B6B70;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .speed-cell.on { background: var(--ink); color: #fff; }
+  .speed-cell svg { width: 18px; height: 18px; }
+  @media (hover: hover) {
+    .speed-cell:not(.on):hover { background: #E9E9EC; color: var(--ink); }
+  }
+
+  /* sign-in code row: code input + compact verify button side by side */
+  .code-row { display: flex; gap: 8px; margin-top: 10px; }
+  .code-input {
+    flex: 1; min-width: 0; font-family: var(--mono); font-size: 15px; letter-spacing: 2px;
+    text-align: center; color: var(--ink); border: none; outline: none;
+    background: var(--field); border-radius: 12px; padding: 12px 0;
+  }
+  .verify-btn {
+    flex: none; font-size: 15px; color: #fff; background: var(--ink);
+    border: none; border-radius: 12px; padding: 12px 18px;
+  }
+  .lock-btn + .delete-btn { margin-top: 10px; }
+  .entry-lock { display: inline-flex; align-items: center; }
+  .entry-lock svg { display: block; }
+
+  /* calendar picker */
+  .cal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .cal-title {
+    font-family: var(--mono); font-size: 15px; font-weight: 700;
+    background: none; border: none; color: var(--ink); padding: 6px 10px;
+  }
+  .cal-row { display: flex; align-items: center; padding: 7px 4px; border-radius: 10px; }
+  .cal-row span { flex: 1; text-align: center; font-family: var(--mono); font-size: 13px; }
+  .cal-row .cal-wk { flex: 0 0 44px; font-size: 11px; color: var(--subtle); text-align: left; padding-left: 4px; }
+  .cal-dow span { font-size: 10px; color: #C7C7CC; }
+  .cal-row.wk-row { cursor: pointer; }
+  .cal-row.wk-row.current { background: var(--field); }
+  .cal-out { color: #C7C7CC; }
+  .cal-today {
+    color: #FF3B30; font-weight: 700;
+  }
+
+  /* confirm dialog */
+  .confirm-overlay {
+    position: fixed; inset: 0; z-index: 60;
+    background: rgba(0,0,0,0.35);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .confirm-box {
+    background: var(--card); border-radius: 16px; padding: 20px;
+    width: min(300px, 80vw); box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+  }
+  .confirm-box p { margin: 0 0 16px; font-size: 15px; line-height: 1.4; text-align: center; }
+  .confirm-actions { display: flex; gap: 10px; }
+  .confirm-actions button { flex: 1; padding: 10px 0; border-radius: 10px; border: none; font-size: 15px; }
+  .confirm-cancel { background: var(--field); color: var(--ink); }
+  .confirm-ok { background: var(--ink); color: #fff; font-weight: 600; }
+
+  /* ---------- monthly recap: a full-screen reveal, not a sheet ----------
+     the one surface in the app allowed to take a beat. alive background
+     (slow warm blobs + faint grain), text arrives after the card, spectacle
+     reserved for at most two "earned" moments. */
+  .recap {
+    position: fixed; inset: 0; z-index: 70;
+    background: var(--canvas); overflow: hidden;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  /* opened by dragging the chevron: the bloom that drag built stays as the deck's own sky,
+     so there is nothing to cut to. The deck's stock blobs stand down and its opaque canvas
+     goes transparent — .heat is the layer directly beneath (z 60 vs 70). The veil and grain
+     stay, and are what keep the text legible over her more saturated colours. */
+  .recap.on-heat { background: transparent; }
+  .recap.on-heat .recap-blob { display: none; }
+
+  .recap-blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.55; }
+  .recap-blob.b1 { width: 60vmax; height: 60vmax; top: -25vmax; left: -18vmax; background: #EDE4D8; animation: blobDrift1 52s ease-in-out infinite alternate; }
+  .recap-blob.b2 { width: 50vmax; height: 50vmax; bottom: -20vmax; right: -15vmax; background: #DFE7EA; animation: blobDrift2 64s ease-in-out infinite alternate; }
+  .recap-blob.b3 { width: 36vmax; height: 36vmax; top: 30%; left: 55%; background: #EAE0EA; animation: blobDrift3 47s ease-in-out infinite alternate; }
+  @keyframes blobDrift1 { to { transform: translate(9vmax, 7vmax) scale(1.12); } }
+  @keyframes blobDrift2 { to { transform: translate(-8vmax, -6vmax) scale(1.08); } }
+  @keyframes blobDrift3 { to { transform: translate(-10vmax, 5vmax) scale(0.92); } }
+  /* the veil keeps the blobs a whisper; an earned card brightens the whole world instead of animating the text */
+  .recap-veil { position: absolute; inset: 0; background: rgba(242,242,247,0.55); transition: background 2.2s ease; }
+  .recap.lit .recap-veil { background: rgba(250,250,252,0.22); }
+  .recap-grain {
+    position: absolute; inset: 0; opacity: 0.05; pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  }
+  @media (prefers-reduced-motion: reduce) { .recap-blob { animation: none; } .recap-veil { transition: none; } }
+
+  .recap-top {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: calc(env(safe-area-inset-top) + 16px) 20px 0;
+  }
+  .recap-month { font-family: var(--mono); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--subtle); }
+  .recap-dashes { display: flex; gap: 5px; }
+  .recap-dashes span { width: 13px; height: 2px; border-radius: 1px; background: rgba(28,28,30,0.13); transition: background 0.4s ease; }
+  .recap-dashes span.on { background: rgba(28,28,30,0.5); }
+  .recap-x { background: none; border: none; padding: 0 6px; font-size: 22px; font-weight: 300; line-height: 1; color: var(--subtle); }
+
+  /* The stage scrolls when a card is taller than the screen. A long AI summary used to
+     overflow both edges with no way to reach either end — the reading was simply cut off.
+
+     Vertical centring is done with `margin: auto` on the CARD, not `align-items: center` on
+     the stage. That is the whole trick: in a scrolling flex container, `align-items: center`
+     centres an oversized item too, which pushes its top out through the container's start
+     edge where scrolling can never reach it. Auto margins resolve to 0 once the item is
+     bigger than the box, so a short card sits centred and a long one starts at the top and
+     scrolls — which is exactly the behaviour wanted, from one declaration. */
+  .recap-stage {
+    position: absolute; inset: 0; z-index: 1;
+    display: flex; justify-content: center;
+    overflow-y: auto; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: calc(env(safe-area-inset-top) + 84px) 30px calc(env(safe-area-inset-bottom) + 84px);
+    cursor: pointer;
+  }
+  .recap-stage { scrollbar-width: none; }
+  .recap-stage::-webkit-scrollbar { width: 0; height: 0; }
+  .recap-card { max-width: 460px; width: 100%; margin: auto 0; }
+  .recap.scrolled .recap-top::after { opacity: 1; }
+  /* text that scrolls up has to pass UNDER the label/dashes/×, not through them.
+     A masked white wash, not the grey canvas one: over the bloom a grey would read as
+     exactly the band at the top of the screen this app is trying not to have. And it is
+     only there while something is actually scrolling under it — at rest even a soft haze
+     is one more thing across the top of a screen that is supposed to be uninterrupted. */
+  .recap-top::after {
+    content: ""; position: absolute; inset: 0 0 auto; height: calc(env(safe-area-inset-top) + 54px);
+    opacity: 0; transition: opacity 0.2s ease;
+    background: linear-gradient(to bottom, rgba(255,255,255,0.5), rgba(255,255,255,0));
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent);
+    mask-image: linear-gradient(to bottom, black 55%, transparent);
+    pointer-events: none; z-index: -1;
+  }
+  .recap-head {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-size: 32px; line-height: 1.22; color: var(--ink); margin: 0;
+    animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .recap-sub {
+    font-size: 15px; line-height: 1.65; color: #55555A; margin: 18px 0 0;
+    white-space: pre-wrap;
+    animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.55s both;
+  }
+  .recap-meta { margin-top: 26px; animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 1.15s both; }
+  @keyframes recapRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  .recap-card.out { animation: recapSink 0.35s ease forwards; pointer-events: none; position: absolute; max-width: 460px; }
+  @keyframes recapSink { to { opacity: 0; transform: translateY(-10px) scale(0.97); } }
+  @media (prefers-reduced-motion: reduce) {
+    .recap-head, .recap-sub, .recap-meta { animation: none; }
+    .recap-card.out { animation: none; opacity: 0; }
+  }
+  .recap-ev-btn {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+    background: none; border: none; padding: 4px 0; color: #A9A9AD; display: block;
+  }
+  .recap-ev { margin: 10px 0 4px; }
+  .recap-ev p {
+    margin: 0 0 8px; font-size: 13px; line-height: 1.55; color: #6B6B70;
+    padding-left: 12px; border-left: 2px solid rgba(28,28,30,0.10);
+  }
+  .recap-verdicts { display: flex; gap: 8px; margin-top: 16px; }
+  .recap-verdicts button {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+    padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(28,28,30,0.12);
+    background: transparent; color: var(--subtle); transition: all 0.15s ease;
+  }
+  .recap-verdicts button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  /* dust catching sunlight — reserved for earned cards, never confetti */
+  .recap-dust {
+    position: absolute; width: 3px; height: 3px; border-radius: 50%;
+    background: rgba(28,28,30,0.35); pointer-events: none;
+    animation: dust 1.9s ease-out forwards;
+  }
+  @keyframes dust {
+    from { opacity: 0; }
+    15%  { opacity: 1; }
+    to   { opacity: 0; transform: translate(var(--dx), var(--dy)); }
+  }
+
+  /* ---------- weekly reveal: the monthly recap's lighter sibling ----------
+     a polaroid developing in the hand, not a feature film. reuses the .recap shell
+     with two quieter blobs and a handful of week-only faces. */
+  .recap.week .recap-blob.b3 { display: none; }
+  .recap.week .recap-blob { opacity: 0.42; }
+  .wk-count {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-size: 88px; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .wk-count-label {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--subtle); margin-top: 10px;
+  }
+  .wk-days { display: flex; gap: 12px; margin-top: 34px; }
+  .wk-days span {
+    font-family: var(--mono); font-size: 14px; color: rgba(28,28,30,0.14);
+    opacity: 0.55; transition: color 0.55s ease, opacity 0.55s ease;
+  }
+  .wk-days span.on { color: var(--ink); opacity: 1; }
+  .wk-chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; align-items: center; }
+  .wk-chip {
+    font-family: var(--mono); font-size: 13px; border-radius: 999px; padding: 8px 16px;
+    animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .wk-chip.lead { font-size: 17px; padding: 11px 22px; }
+  /* the keepable still — a quiet frame you'd want to screenshot */
+  .wk-still {
+    border-radius: 20px; padding: 26px 24px;
+    background: rgba(255,255,255,0.55); border: 1px solid rgba(0,0,0,0.04);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.06);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .wk-still-num {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-size: 40px; line-height: 1; color: var(--ink); margin: 0;
+  }
+  .wk-still-range {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--subtle); margin: 6px 0 0;
+  }
+  .wk-still-stat { font-family: var(--mono); font-size: 12px; color: #55555A; margin: 16px 0 0; }
+  .wk-still-dots { display: flex; gap: 6px; margin-top: 14px; }
+  .wk-still-dots i { width: 9px; height: 9px; border-radius: 50%; display: block; }
+  .wk-still-line {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-size: 19px; line-height: 1.4; color: var(--ink); margin: 16px 0 0;
+  }
+
+  .export-area {
+    width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.5;
+    background: var(--field); border: none; border-radius: 12px; padding: 12px;
+    resize: none;
+  }
+  .export-note { font-size: 13px; color: var(--subtle); margin: 0 0 10px; }
+
+  /* ============================================================================
+     DESKTOP — icon rail · mat · topics
+     ----------------------------------------------------------------------------
+     Below the breakpoint .deck and .deck-main are `display: contents`: they leave
+     the box tree entirely, so .wrap / .bottom-frost / .compose-dock lay out as the
+     body children they used to be. Nothing above this block is touched.
+
+     There is no window frame. The deck is a bare transparent grid; the one painted
+     surface is the centre MAT, a rounded card floating on the canvas wash. Both
+     rails sit directly on that wash and paint nothing of their own.
+
+     Three greys, darkest outward: the wash the rails sit on, then the mat, then the
+     white cards on top of it. On the phone the cards are white on grey and that
+     reads; a white mat left them invisible, so the mat steps down to --mat and the
+     wash steps down again below it. Every value stays in the --canvas family —
+     lightness only, no hue introduced, and no text colour that mobile doesn't have.
+     ============================================================================ */
+  .deck, .deck-main { display: contents; }
+  .rail { display: none; }
+
+  @media (min-width: 1080px) {
+    :root {
+      --rail-i: 64px;    /* icon rail — one 38px glyph plus its gutters, at every state:
+                            the hover label is a pill that overflows it, not a wider rail */
+      --rail-t: 248px;   /* topics rail */
+      --deck-x: 20px;    /* viewport inset */
+      --deck-cap: 1400px;
+      /* no vertical inset: the mat takes the deck's full height and only steps in from the
+         rails. Compared with the 14px it had, floor-to-ceiling is the one that reads as a
+         window — the inset just made the wash above and below look like a missed edge. */
+      --mat-y: 0px; --mat-x: 12px;
+      /* the middle grey. Far enough under #FFF that a card has an edge without the
+         mat itself reading as a tinted panel. The frosts over it are tinted to match.
+         Every value below is its first cut with 20% of its distance from #FFF taken
+         back out — the three steps still read, they just sit closer together. */
+      --mat: #F4F4F5;
+      --mat-a: rgba(244,244,245,0.88);
+      --mat-0: rgba(244,244,245,0);
+    }
+    html, body { height: 100%; overflow: hidden; }
+    /* the wash, one step below the mat everywhere including its own highlights, so the
+       rails always read as the deepest surface no matter which corner you look at */
+    body {
+      background:
+        radial-gradient(115% 85% at 8% -8%,   #EEEEF0 0%, rgba(238,238,240,0) 60%),
+        radial-gradient(95% 75%  at 96% 4%,   #EDEDEE 0%, rgba(237,237,238,0) 55%),
+        radial-gradient(90% 75%  at 84% 108%, #DFDFE2 0%, rgba(223,223,226,0) 64%),
+        radial-gradient(75% 65%  at -4% 96%,  #E3E3E6 0%, rgba(227,227,230,0) 60%),
+        #E9E9EC;
+    }
+
+    /* the scroll affordance is the content moving; a grey bar in each pane is three
+       vertical lines the design doesn't have anywhere else — and the centre one was
+       stealing 15px off the reading column's right, knocking it off axis */
+    .wrap, .rail-scroll { scrollbar-width: none; }
+    .wrap::-webkit-scrollbar, .rail-scroll::-webkit-scrollbar { width: 0; height: 0; }
+
+    .deck {
+      display: grid;
+      grid-template-columns: var(--rail-i) minmax(0, 1fr) var(--rail-t);
+      /* the implicit row defaults to auto = max-content, which any tall rail blows
+         straight past; pin it to the deck's own height so the panes scroll internally */
+      grid-template-rows: minmax(0, 1fr);
+      /* capped and centred rather than edge-to-edge: past the cap the extra width
+         becomes field the mat floats on, instead of white margin growing around a
+         fixed reading column — which is the problem the rails were meant to solve. */
+      position: fixed; inset: var(--deck-x); z-index: 1;
+      max-width: var(--deck-cap); margin: 0 auto;
+      /* NO background, NO shadow, NO overflow clip. The deck is pure layout: the mat
+         carries the elevation, and the icon rail has to be able to expand over it. */
+      transform-origin: center center;
+      transition: transform calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1),
+                  opacity calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1);
+    }
+    /* everything recedes behind the composer together — mat and both rails */
+    body.composing .deck { transform: scale(0.965); opacity: 0.4; }
+    body.composing .wrap { transform: none; opacity: 1; }
+    @media (prefers-reduced-motion: reduce) { .deck { transition: none; } }
+
+    /* ---- the mat: the one painted surface, floating on the wash ---- */
+    .deck-main {
+      display: block; position: relative; min-width: 0; min-height: 0;
+      margin: var(--mat-y) var(--mat-x);
+      background: var(--mat);
+      border-radius: 24px; overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 6px 18px rgba(0,0,0,0.045),
+                  0 24px 56px rgba(0,0,0,0.05);
+    }
+    /* the scroller. the page itself no longer scrolls, so the frost and the compose
+       bar can be absolute siblings that simply don't move. */
+    .wrap {
+      position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain;
+      max-width: none; margin: 0; padding: 0 24px 176px;
+    }
+    /* the reading column. 600 is the measure; the compose bar below matches it exactly so
+       the bar's edges line up with the cards' — change one, change the other. */
+    .wrap > .header, .wrapped-cue, #entriesRoot { max-width: 600px; margin: 0 auto; }
+    .wrap > .header { padding: 34px 0 44px; }
+    .wrap.has-cue > .header { padding-bottom: 10px; }
+    /* the frost is tinted to the surface it sits on, or it reads as a band: on the phone
+       that's the canvas, here it's the mat */
+    .header, .header::after {
+      background: var(--mat-a);
+      -webkit-backdrop-filter: blur(14px) saturate(150%);
+      backdrop-filter: blur(14px) saturate(150%);
+    }
+    .header.hidden { transform: none; } /* hide-on-scroll is a phone pattern */
+    /* white, like the cards — --field is #F4F4F6 and the mat is #F4F4F5, i.e. the same
+       colour, so anything --field that sits DIRECTLY on the mat disappears into it. The
+       stepper arrows and the week summary's provenance pills are the two that do; every
+       other --field surface lives inside a white card or sheet and is unaffected. */
+    .stepper-btn {
+      background: var(--card);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 2px 6px rgba(0,0,0,0.035);
+    }
+    .wsum-pill:not(.on) { background: var(--card); }
+
+    .bottom-frost, .compose-dock { position: absolute; }
+    /* inside the mat there is nothing behind this worth seeing through — on the phone the
+       0.94 base let the grey canvas glow through, here it just let entries peek out under
+       the compose bar. Same recipe, opaque at the base. */
+    .bottom-frost {
+      height: 172px;
+      background: linear-gradient(to top, var(--mat) 30%, var(--mat-a) 66%, var(--mat-0));
+    }
+    .compose-dock { left: 24px; right: 24px; max-width: 600px; padding: 0 0 22px; }
+    /* the ⋮ menu held search, day view, export and settings — all four now have a visible
+       home in the rails, so the button is a second route to nothing. + is the whole bar. */
+    .compose-lozenge, .compose-divider { display: none; }
+
+    /* ---- rails: no surface of their own, they sit straight on the wash ---- */
+    .rail {
+      display: flex; flex-direction: column; min-width: 0; min-height: 0;
+      background: none;
+    }
+
+    /* ---- left: the icon rail ----
+       A column of glyphs on the wash. On hover (or when tabbed into) the row under the
+       pointer names itself. The bar is ABSOLUTELY positioned so the name is an overlay,
+       never a reflow — anything that widened in the grid would re-wrap every line of
+       every entry as the pointer crossed it. */
+    .rail-l { position: relative; overflow: visible; }
+    /* No panel. The bar is just a column of glyphs on the wash; the row under the pointer
+       names itself with a white pill beside the glyph, and nothing else moves. Opening a
+       whole panel to answer one question meant four blank rows came along for the ride. */
+    .iconbar {
+      position: absolute; left: 0; top: var(--mat-y);
+      width: var(--rail-i); z-index: 5;
+      display: flex; flex-direction: column; gap: 2px;
+      padding: 8px 0;
+      overflow: visible;  /* the hovered label pill extends past the rail, over the mat */
+    }
+    /* the row never changes size or paints anything: it stays exactly the rail's width and
+       lets the label pill overflow it to the right. Nothing reflows, and the pill's shadow
+       isn't clipped the way an overflow:hidden lozenge would clip it. */
+    .ico-row {
+      /* 2px, not a gap: the pill reads as sitting against the circle. It can't be 0 —
+         on an active row the circle is white too, and flush they merge back into the
+         one-piece lozenge this replaced. */
+      flex: none; display: flex; align-items: center; gap: 2px;
+      width: var(--rail-i); padding: 0 13px; height: 42px;
+      background: none; border: none; text-align: left;
+      border-radius: 999px; overflow: visible; white-space: nowrap;
+    }
+    .ico-glyph {
+      position: relative; flex: none;
+      width: 38px; height: 38px; border-radius: 999px;
+      display: flex; align-items: center; justify-content: center; line-height: 0;
+      color: #B0B0B6;
+      transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .ico-glyph svg { width: 18px; height: 18px; }
+    /* the label IS the pill: a white lozenge the height of the glyph's circle, cut to the
+       length of the word. Decoration only — pointer-events off, so the 64px row stays the
+       hit target and the pill never sits over the mat catching clicks meant for a card. */
+    .ico-label {
+      flex: none; white-space: nowrap;
+      height: 38px; padding: 0 15px; border-radius: 999px;
+      display: flex; align-items: center;
+      font-size: 13px; color: var(--subtle);
+      background: var(--card);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.035), 0 4px 14px rgba(0,0,0,0.06);
+      pointer-events: none;
+      /* 4px of travel, not 6: any further and the pill starts at rest *underneath* the
+         circle it sits 2px from, and slides out over its edge */
+      opacity: 0; transform: translateX(-4px);
+      transition: opacity 0.16s ease,
+                  transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @media (prefers-reduced-motion: reduce) { .ico-label { transition: none; transform: none; } }
+    .ico-row.on .ico-glyph {
+      background: var(--card); color: var(--ink);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .ico-row.on .ico-label { color: var(--ink); font-weight: 600; }
+    .ico-div { flex: none; height: 1px; margin: 7px 21px; background: var(--hairline); }
+    /* sync state, on the control that already owns it — one route, state still visible */
+    .ico-dot {
+      position: absolute; top: 6px; right: 6px;
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #CFCFD4; box-shadow: 0 0 0 2px var(--card);
+    }
+    .ico-dot.live { background: #55A862; }
+
+    .ico-row:hover .ico-label, .ico-row:focus-visible .ico-label {
+      opacity: 1; transform: none; transition-delay: 0.04s;
+    }
+    /* under the pointer the glyph takes a soft grey circle of its own; an active glyph keeps
+       its white one — there's no white lozenge behind it any more to hide against */
+    .ico-row:hover .ico-glyph, .ico-row:focus-visible .ico-glyph {
+      color: var(--ink); background: rgba(0,0,0,0.05); box-shadow: none;
+    }
+    .ico-row.on:hover .ico-glyph, .ico-row.on:focus-visible .ico-glyph {
+      background: var(--card);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.04);
+    }
+
+    /* ---- right: topics ---- */
+    .rail-r { padding: var(--mat-y) 0 16px; }
+    .rail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
+    /* the room above TOPICS is the point: the search sits at the top edge, and the
+       list starts well down the rail so it reads as its own thing, not a second row */
+    .rail-r .rail-scroll { padding-top: 58px; }
+    .rail-head {
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+      text-transform: uppercase; color: var(--subtle);
+      margin: 0 0 10px; padding: 0 22px;
+    }
+
+    .rail-row {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; text-align: left; background: none; border: none;
+      padding: 7px 22px; font-family: var(--font); font-size: 13px;
+      color: var(--subtle); line-height: 1.3;
+      transition: color 0.15s ease, background 0.15s ease;
+    }
+    .rail-row .rr-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rail-row .rr-count { flex: none; margin-left: auto; font-family: var(--mono); font-size: 11px; color: #C2C2C7; }
+    .rail-row.on { color: var(--ink); font-weight: 600; }
+    .rail-row.on .rr-count { color: var(--ink); }
+    /* the topic pill, truncating rather than pushing the count off the rail */
+    .rail-row > .pill { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* a filter is on: the chosen pill keeps its colour, the rest step back */
+    .rail-scroll:has(.rail-row.on) .rail-row:not(.on) > .pill { opacity: 0.45; }
+    .rail-row > .pill { transition: opacity 0.18s ease; }
+    .rr-mark { flex: none; width: 5px; height: 5px; border-radius: 50%; background: #D4D4D9; }
+
+    .rail-search {
+      display: flex; align-items: center; gap: 8px;
+      margin: 0 14px; padding: 9px 12px;
+      /* on the wash rather than on a panel, so it needs its own lift to read as a field */
+      background: rgba(255,255,255,0.72); border-radius: 12px;
+      color: var(--subtle);
+      transition: background 0.15s ease;
+    }
+    .rail-search svg { width: 14px; height: 14px; flex: none; }
+    .rail-search input {
+      flex: 1; min-width: 0; border: none; outline: none; background: none;
+      font-family: var(--font); font-size: 13px; color: var(--ink);
+    }
+    /* ghost input: reads as label until she's in it */
+    .rail-search input::placeholder { color: var(--subtle); }
+    .rail-search:focus-within { background: rgba(255,255,255,0.95); }
+    /* the scope flips week → month → all. It names itself in the app's own tokens (W31 / 7月)
+       rather than in words, so it reads as the same object as the header's identity. */
+    .rail-scope {
+      flex: none; font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+      background: rgba(0,0,0,0.055); border: none; border-radius: 999px;
+      padding: 3px 7px; color: var(--subtle); line-height: 1.35;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .rail-scope:active { transform: scale(0.96); }
+    .rail-scope.open { background: var(--ink); color: #fff; }
+
+    /* the pull-down. grid-template-rows 0fr→1fr is the one way to transition to a content
+       height without measuring it, so TOPICS below is pushed down by the real height of the
+       list rather than by a guessed max-height that would ease at the wrong rate. */
+    .rail-scope-wrap {
+      display: grid; grid-template-rows: 0fr;
+      transition: grid-template-rows 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .rail-scope-wrap.open { grid-template-rows: 1fr; }
+    .rail-scope-inner { overflow: hidden; min-height: 0; }
+    .rail-scope-list { padding: 6px 14px 0; }
+    .rail-scope-opt {
+      display: flex; align-items: center; gap: 8px;
+      width: 100%; text-align: left; background: none; border: none;
+      padding: 7px 8px; border-radius: 10px;
+      font-family: var(--font); font-size: 13px; color: var(--subtle);
+      /* the rows arrive a beat after the box starts opening, so it reads as unfolding
+         rather than as a block appearing at full strength */
+      opacity: 0; transform: translateY(-4px);
+      transition: opacity 0.28s ease 0.08s, transform 0.28s cubic-bezier(0.16, 1, 0.3, 1) 0.08s,
+                  background 0.15s ease, color 0.15s ease;
+    }
+    .rail-scope-wrap.open .rail-scope-opt { opacity: 1; transform: none; }
+    .rail-scope-opt .so-key {
+      flex: none; font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+      min-width: 34px; color: #C2C2C7;
+    }
+    .rail-scope-opt.on { color: var(--ink); font-weight: 600; }
+    .rail-scope-opt.on .so-key { color: var(--ink); }
+    @media (prefers-reduced-motion: reduce) {
+      .rail-scope-wrap, .rail-scope-opt { transition: none; }
+    }
+    .rail-empty { font-size: 12px; color: #C2C2C7; padding: 2px 22px 0; margin: 0; }
+
+    /* ---- hover, finally: the invisible interface has something to be invisible in ---- */
+    @media (hover: hover) {
+      .rail-row:hover { color: var(--ink); background: rgba(0,0,0,0.028); }
+      .rail-scope:hover { color: var(--ink); background: rgba(0,0,0,0.085); }
+      .rail-scope.open:hover { color: #fff; background: var(--ink); }
+      .rail-scope-opt:hover { color: var(--ink); background: rgba(0,0,0,0.032); }
+      .entry:hover { background: rgba(0,0,0,0.016); }
+      .stepper-btn:hover { background: #EAEAED; color: var(--ink); }
+      .compose-bar:hover { background: #E4E4E7; }
+      .compose-icon:hover, .compose-lozenge:hover { background: rgba(0,0,0,0.05); }
+      .compose-icon:hover { color: var(--ink); }
+    }
+    .entry { transition: background 0.15s ease; }
+
+    /* ---- composer ----
+       The sheet is a VIEWPORT-level overlay but the compose bar now lives in the mat,
+       which is off-centre (64px rail one side, 248px the other). Pad the overlay by the
+       real gutters so `justify-content: center` lands the sheet on the mat's axis —
+       otherwise the unfold opens lopsided. --deck-x here is the deck's own left edge,
+       which is the inset until the cap kicks in and starts centring it. */
+    .overlay {
+      --gutter: max(var(--deck-x), (100vw - var(--deck-cap)) / 2);
+      padding-left: calc(var(--gutter) + var(--rail-i));
+      padding-right: calc(var(--gutter) + var(--rail-t));
+      padding-bottom: calc(var(--deck-x) + var(--mat-y));
+    }
+    /* wider than the 600px compose bar ON PURPOSE. The unfold clips the sheet to the bar's
+       measured rect, and inset() can't go negative — a bar wider than the sheet clamps
+       --ml/--mr to 0 and the box only opens vertically. 680 leaves 40px of travel a side. */
+    .sheet { border-radius: 20px; max-width: 680px; }
+    .sheet.expanse {
+      /* top and bottom both land on the mat's edges. --sheet-ceil is redefined rather than just
+         max-height, so the 85% default is 85% of THIS ceiling — otherwise the desktop deck would
+         size itself off the phone's safe-area formula and land somewhere arbitrary. Desktop had
+         the same no-headroom problem in miniature: 828px default against an 860px cap. */
+      --sheet-ceil: calc(100dvh - (var(--deck-x) + var(--mat-y)) * 2);
+      max-height: var(--sheet-ceil);
+      clip-path: inset(0 round 20px);
+    }
+    /* No keyboard-docked pill on desktop: there is no soft keyboard to dock to (SOFT_KB gates
+       --kb/--kbr off entirely, so they are permanently 0), and the composer here is a centred
+       window rather than a phone sheet. Straight back to the in-flow row it has always been —
+       the pill's own chrome is unwound too, so the buttons get their grey chips back instead of
+       floating on a white capsule that would now be sitting on white. The bar is also RE-HOMED
+       in the DOM at this breakpoint (see attachFmtBar): in-flow means it has to be inside the
+       sheet, not parked in sheetRoot. */
+    .fmt-bar {
+      position: static; z-index: auto; bottom: auto;
+      padding: 0; pointer-events: auto; transition: none;
+      margin: 2px 0 6px;
+    }
+    .fmt-bar-pill {
+      background: none; box-shadow: none; border: none; border-radius: 0;
+      padding: 0; gap: 8px; width: 100%; overflow: visible;
+    }
+    .fmt-btn { flex: 1; width: auto; height: 31px; background: var(--field); border-radius: 999px; }
+    /* and no clearance to reserve, since nothing is floating over the content any more */
+    .sheet.expanse.has-fmt { padding-bottom: calc(env(safe-area-inset-bottom) + 28px + var(--kb) + var(--kbr)); }
+    .sheet { scrollbar-width: none; }
+    .sheet::-webkit-scrollbar { width: 0; height: 0; }
+    .sheet.expanse.folded { clip-path: inset(var(--mt) var(--mr) var(--mb) var(--ml) round 18px); }
+    .sheet.expanse textarea.ta-entry { min-height: calc(var(--sheet-h, var(--sheet-default)) - 250px); }
+  }
+
+  /* between the phone column and the three-pane window, just let the column breathe */
+  @media (min-width: 700px) and (max-width: 1079px) {
+    .wrap { max-width: 600px; }
+    .compose-dock { max-width: 600px; }
+  }
+
+/* ---------- the save alert ----------
+   A failed write used to be silent: the entry stayed on screen, looked saved, and was gone
+   at the next reload. This is deliberately not a toast — it does not time out, because the
+   thing it is reporting does not resolve on its own. */
+.save-alert {
+  position: fixed; left: 12px; right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+  z-index: 9000;
+  display: none; flex-direction: column; gap: 3px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #B3261E; color: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.18);
+  font-size: 13px; line-height: 1.35;
+}
+.save-alert.show { display: flex; }
+.save-alert strong { font-size: 13px; font-weight: 600; }
+.save-alert span { opacity: .92; }
+@media (min-width: 1080px) {
+  .save-alert { left: auto; right: 24px; bottom: 24px; max-width: 340px; }
+}
