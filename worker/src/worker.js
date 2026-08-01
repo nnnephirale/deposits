@@ -24,16 +24,34 @@ export default {
     if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }), env);
     if (path === "/health") return cors(json({ ok: true }), env);
 
-    if (!authorized(request, env)) {
-      return cors(json({ error: "unauthorized" }, 401), env);
-    }
-
     try {
       if (path === "/entries") {
+        if (!authorized(request, env)) return cors(json({ error: "unauthorized" }, 401), env);
         if (request.method === "GET") return cors(await getEntries(env), env);
         if (request.method === "PUT") return cors(await putEntries(request, env), env);
       }
+      // ---- SSaved ----
+      // Reads are public so share links keep working for people who do not have the secret;
+      // writes need it. That is strictly better than what SSaved has today, where the bucket
+      // is public and the tables have no row-level security, so anyone holding a share link
+      // can also delete the collection.
+      const ss = path.match(/^\/s\/([A-Za-z0-9_-]{1,64})(?:\/img\/([A-Za-z0-9._-]{1,128}))?$/);
+      if (ss) {
+        const [, collection, image] = ss;
+        if (image) {
+          if (request.method === "GET") return cors(await getObject(`ssaved/images/${collection}/${image}`, env, true), env);
+          if (!authorized(request, env)) return cors(json({ error: "unauthorized" }, 401), env);
+          if (request.method === "PUT") return cors(await putSsavedImage(collection, image, request, env), env);
+        } else {
+          if (request.method === "GET") return cors(await getObject(`ssaved/${collection}/data.json`, env), env);
+          if (!authorized(request, env)) return cors(json({ error: "unauthorized" }, 401), env);
+          if (request.method === "PUT") return cors(await putSsavedData(collection, request, env), env);
+        }
+        return cors(json({ error: "method not allowed" }, 405), env);
+      }
+
       if (path.startsWith("/images/")) {
+        if (!authorized(request, env)) return cors(json({ error: "unauthorized" }, 401), env);
         const id = decodeURIComponent(path.slice("/images/".length));
         if (!/^[A-Za-z0-9._-]{1,128}$/.test(id)) return cors(json({ error: "bad image id" }, 400), env);
         if (request.method === "GET") return cors(await getImage(id, env), env);
@@ -147,6 +165,62 @@ async function headImage(id, env) {
   const obj = await env.BUCKET.head("images/" + id);
   if (!obj) return new Response(null, { status: 404 });
   return new Response(null, { status: 200, headers: { "content-length": String(obj.size) } });
+}
+
+// ---------- SSaved storage ----------
+// One JSON document per collection, and one object per screenshot. Same shape as deposits:
+// the document carries no image bytes, so opening a collection costs a few KB rather than
+// re-serving every screenshot. Exceeding cached egress on the previous host is what took
+// SSaved down; on R2 downloads are not charged at all.
+
+async function getObject(key, env, isImage) {
+  const obj = await env.BUCKET.get(key);
+  if (!obj) return json(isImage ? { error: "not found" } : { folders: [], cards: [], etag: null }, isImage ? 404 : 200);
+  if (isImage) {
+    const headers = new Headers();
+    obj.writeHttpMetadata(headers);
+    headers.set("etag", obj.httpEtag);
+    headers.set("cache-control", "public, max-age=31536000, immutable"); // keys are timestamped, never rewritten
+    return new Response(obj.body, { headers });
+  }
+  const body = await obj.json();
+  return new Response(JSON.stringify({ ...body, etag: obj.etag }), {
+    headers: { ...JSON_HEADERS, etag: obj.etag }
+  });
+}
+
+async function putSsavedData(collection, request, env) {
+  const payload = await request.json();
+  if (!payload || !Array.isArray(payload.cards)) {
+    return json({ error: "expected { cards: [...], folders: [...] }" }, 400);
+  }
+  const body = JSON.stringify({
+    cards: payload.cards,
+    folders: payload.folders || [],
+    writtenAt: new Date().toISOString()
+  });
+  const expected = request.headers.get("if-match");
+  const opts = { httpMetadata: { contentType: "application/json" } };
+  if (expected && expected !== "*") opts.onlyIf = { etagMatches: expected };
+
+  const put = await env.BUCKET.put(`ssaved/${collection}/data.json`, body, opts);
+  if (put === null) {
+    const current = await env.BUCKET.head(`ssaved/${collection}/data.json`);
+    return json({ error: "conflict", etag: current ? current.etag : null }, 412);
+  }
+  return json({ ok: true, etag: put.etag, cards: payload.cards.length });
+}
+
+async function putSsavedImage(collection, image, request, env) {
+  const key = `ssaved/images/${collection}/${image}`;
+  const existing = await env.BUCKET.head(key);
+  if (existing) return json({ ok: true, skipped: true, size: existing.size });
+  const body = await request.arrayBuffer();
+  if (!body.byteLength) return json({ error: "empty body" }, 400);
+  await env.BUCKET.put(key, body, {
+    httpMetadata: { contentType: request.headers.get("content-type") || "image/png" }
+  });
+  return json({ ok: true, size: body.byteLength });
 }
 
 // ---------- SSaved keep-alive ----------
