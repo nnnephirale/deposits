@@ -32,6 +32,19 @@ export function onStoreError(fn) { onError = fn; }
 
 export function imageBlob(id) { return blobs.get(id); }
 export function imageIds() { return [...blobs.keys()]; }
+export function hasImage(id) { return blobs.has(id); }
+
+/** Take a photo pulled down from the cloud into local storage, and hand back a URL for it. */
+export async function putImage(id, blob) {
+  blobs.set(id, blob);
+  const url = urlFor(id, blob);
+  if (db) {
+    const { store, done } = tx([IMAGE_STORE], "readwrite");
+    store(IMAGE_STORE).put({ id, blob });
+    await done;
+  }
+  return url;
+}
 
 // ---------- open ----------
 
@@ -175,14 +188,16 @@ async function writeAll(list) {
   const records = list.map(e => {
     const rec = { ...e };
     delete rec.images;
-    const ids = [];
+    // Union with any ids already on the entry: a photo synced from another device but not
+    // downloaded here yet has an id and no blob, and must keep its place in the list.
+    const ids = new Set(e.imageIds || []);
     if (e.images) {
       for (const [id, val] of Object.entries(e.images)) {
         const url = adoptImage(id, val);
-        if (url) { ids.push(id); if (blobs.has(id)) pendingImages.push(id); }
+        if (url) { ids.add(id); if (blobs.has(id)) pendingImages.push(id); }
       }
     }
-    if (ids.length) rec.imageIds = ids;
+    if (ids.size) rec.imageIds = [...ids]; else delete rec.imageIds;
     return rec;
   });
 

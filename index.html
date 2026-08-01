@@ -17,8 +17,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
-<!-- supabase client for optional cloud sync; app stays fully functional (local-only) if this fails to load -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Lexend Exa Medium: the day letter in the badge. one weight, one use. -->
@@ -90,8 +88,13 @@
 // the bottom is the deliberate way in from the console.
 import {
   openStore, loadEntries, persistEntries, flushEntries, onStoreError,
-  migrateFromLocalStorage, storageReport, requestPersistence, imageBlob
+  migrateFromLocalStorage, storageReport, requestPersistence,
+  imageBlob, hasImage, putImage
 } from "./js/store.js";
+import {
+  cloudConfig, cloudConfigured, setCloudConfig, cloudCheck,
+  fetchState, pushState, pushImages, pullImages, imageIdsIn
+} from "./js/sync.js";
 
 // The status bar's height in real pixels. The page paints under it (black-translucent), so
 // anything that measures against the viewport has to subtract it — window.innerHeight now
@@ -809,19 +812,22 @@ function saveWeekSummaries() {
 }
 function weekKey(year, week) { return year + "-" + pad2(week); }
 
-// ---------- cloud sync (Supabase, optional) ----------
-// local-first: localStorage stays the source of truth for instant/offline capture.
-// when a session exists, changes push up and remote changes merge down (last-write-wins
-// on updated_at). every path here no-ops cleanly when logged out or the SDK/network is
-// unavailable — the app never depends on it. anon key is public by design; RLS gates data.
-const SUPABASE_URL = "https://uauqqdaalnddedgjdgcg.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdXFxZGFhbG5kZGVkZ2pkZ2NnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3OTQ2NDIsImV4cCI6MjA4MzM3MDY0Mn0.afUxr9uKdSamnbFQmOt7DDRvEJYLEz3-c8u5P3zZcnE";
-const sb = (window.supabase && window.supabase.createClient)
-  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY,
-      { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } })
-  : null;
-let session = null;
-function syncActive() { return !!(sb && session); }
+// ---------- cloud sync (Cloudflare R2, optional) ----------
+// local-first: IndexedDB stays the source of truth for instant/offline capture. When a
+// Worker URL and secret are set, changes push up and remote changes merge down (last-write-
+// wins on updatedAt). Every path no-ops cleanly when unconfigured or offline — the app never
+// depends on it.
+//
+// Photos never travel in this payload. They are separate objects in the bucket, uploaded
+// once and pulled once per device into IndexedDB. The previous backend kept them as base64
+// inside the rows and refetched every one on every launch, which is what exhausted a shared
+// free tier and paused the project.
+
+function syncActive() { return cloudConfigured(); }
+
+// the etag of the bucket object we last read: sent back on write so a device that wrote in
+// between gets a 412 instead of being flattened.
+let cloudEtag = null;
 
 // tombstones: ids/keys deleted locally, retained so the deletion still propagates on the
 // next push (survives being offline at delete time).
@@ -837,162 +843,166 @@ function saveTombstones() {
 function tombstoneEntry(id) { tombstones[id] = new Date().toISOString(); saveTombstones(); }
 function tombstoneSummary(k) { summaryTombstones[k] = new Date().toISOString(); saveTombstones(); }
 
-function entryToRow(e) {
-  return {
-    id: e.id, user_id: session.user.id,
-    text: e.text || "", tags: e.tags || [],
-    year: e.year ?? null, week: e.week ?? null, day: ("day" in e ? e.day : null),
-    month: e.month ?? null,
-    locked: !!e.locked, source_id: e.sourceId || null, segmented: !!e.segmented,
-    images: e.images || null,
-    created_at: e.createdAt, updated_at: e.updatedAt || e.createdAt,
-    deleted_at: null
-  };
+// The wire shape: the entry as the app holds it, with the photo map replaced by bare ids.
+// The bytes live in the bucket under those ids.
+// The union matters: a device that hasn't downloaded a photo yet still holds its id, and
+// pushing without it would delete that photo's reference for every other device too.
+function entryToWire(e) {
+  const w = { ...e };
+  delete w.images;
+  const ids = new Set([...(e.imageIds || []), ...(e.images ? Object.keys(e.images) : [])]);
+  if (ids.size) w.imageIds = [...ids]; else delete w.imageIds;
+  return w;
 }
-function rowToEntry(r) {
-  const e = {
-    id: r.id, text: r.text || "", tags: r.tags || [],
-    year: r.year, week: r.week, day: r.day, locked: !!r.locked,
-    sourceId: r.source_id || null, segmented: !!r.segmented,
-    createdAt: r.created_at, updatedAt: r.updated_at
-  };
-  if (r.month != null) e.month = r.month; // month-scoped entry (week/day are null)
-  if (r.images && Object.keys(r.images).length) e.images = r.images;
+// Rebuild the photo map from whatever this device already holds locally, keeping the id list
+// either way. Photos not here yet are filled in by the background pull, so an entry renders
+// immediately with its text rather than waiting on its images.
+function wireToEntry(w) {
+  const e = { ...w };
+  const ids = w.imageIds || [];
+  if (ids.length) {
+    e.imageIds = ids;
+    const m = {};
+    for (const id of ids) { const b = imageBlob(id); if (b) m[id] = URL.createObjectURL(b); }
+    if (Object.keys(m).length) e.images = m;
+  }
   return e;
 }
 function summaryUpdatedAt(rec) { return rec.updatedAt || rec.createdAt || new Date(0).toISOString(); }
 
-// pull remote rows and merge into local state (last-write-wins). returns true if local changed.
+// pull remote state and merge into local (last-write-wins). returns true if local changed.
 async function syncPull() {
   if (!syncActive()) return false;
   let changed = false;
+  let remote;
   try {
-    const { data: rows, error } = await sb.from("deposits_entries").select("*");
-    if (error) throw error;
-    const byId = new Map(entries.map(e => [e.id, e]));
-    for (const r of rows) {
-      if (r.deleted_at) {
-        if (byId.delete(r.id)) changed = true;
-        tombstones[r.id] = r.deleted_at;
-        continue;
-      }
-      if (tombstones[r.id] && new Date(tombstones[r.id]) >= new Date(r.updated_at)) continue; // local delete wins
-      const local = byId.get(r.id);
-      if (!local || new Date(r.updated_at) >= new Date(local.updatedAt || local.createdAt)) {
-        const ne = rowToEntry(r);
-        // the cloud row carries no images until the `images jsonb` migration is run (push
-        // strips them). don't let that image-less copy clobber images we still hold locally
-        // for markers the text references — otherwise a synced upload renders as raw ![photo:id].
-        if (!ne.images && local && local.images) {
-          const keep = imagesUsedIn(ne.text, local.images);
-          if (Object.keys(keep).length) ne.images = keep;
-        }
-        byId.set(r.id, ne); changed = true;
-      }
-    }
-    entries = [...byId.values()];
-  } catch (e) { console.warn("sync pull entries failed", e); }
+    remote = await fetchState();
+    cloudEtag = remote.etag;
+  } catch (e) {
+    console.warn("sync pull failed", e);
+    return false;   // never fall through to a push on a failed pull — see pushEntriesNow
+  }
 
-  try {
-    const { data: rows, error } = await sb.from("deposits_week_summaries").select("*");
-    if (error) throw error;
-    for (const r of rows) {
-      const k = r.week_key;
-      if (r.deleted_at) {
-        if (weekSummaries[k]) { delete weekSummaries[k]; changed = true; }
-        if (weekSummaryVersions[k]) { delete weekSummaryVersions[k]; saveWeekSummaryVersions(); } // remote clear = start over
-        summaryTombstones[k] = r.deleted_at;
-        continue;
-      }
-      if (summaryTombstones[k] && new Date(summaryTombstones[k]) >= new Date(r.updated_at)) continue;
-      const local = weekSummaries[k];
-      if (!local || new Date(r.updated_at) >= new Date(summaryUpdatedAt(local))) {
-        weekSummaries[k] = { text: r.text, origin: r.origin, version: r.version,
-          edited: r.edited, createdAt: r.created_at, updatedAt: r.updated_at };
-        changed = true;
-      }
+  const byId = new Map(entries.map(e => [e.id, e]));
+  for (const w of remote.entries) {
+    if (w.deletedAt) {
+      if (byId.delete(w.id)) changed = true;
+      tombstones[w.id] = w.deletedAt;
+      continue;
     }
-  } catch (e) { console.warn("sync pull summaries failed", e); }
+    if (tombstones[w.id] && new Date(tombstones[w.id]) >= new Date(w.updatedAt)) continue; // local delete wins
+    const local = byId.get(w.id);
+    if (!local || new Date(w.updatedAt) >= new Date(local.updatedAt || local.createdAt)) {
+      const ne = wireToEntry(w);
+      // don't let a copy whose photos this device hasn't downloaded yet drop images we
+      // already hold for markers the text still references
+      if (local && local.images) {
+        const keep = imagesUsedIn(ne.text, local.images);
+        ne.images = { ...keep, ...(ne.images || {}) };
+        if (!Object.keys(ne.images).length) delete ne.images;
+      }
+      byId.set(w.id, ne); changed = true;
+    }
+  }
+  entries = [...byId.values()];
+
+  // remote deletions of summaries, then remote summaries themselves
+  for (const [k, ts] of Object.entries(remote.tombstones || {})) {
+    if (!tombstones[k] || new Date(ts) > new Date(tombstones[k])) tombstones[k] = ts;
+  }
+  for (const [k, r] of Object.entries(remote.summaries || {})) {
+    if (r && r.deletedAt) {
+      if (weekSummaries[k]) { delete weekSummaries[k]; changed = true; }
+      if (weekSummaryVersions[k]) { delete weekSummaryVersions[k]; saveWeekSummaryVersions(); }
+      summaryTombstones[k] = r.deletedAt;
+      continue;
+    }
+    if (summaryTombstones[k] && new Date(summaryTombstones[k]) >= new Date(summaryUpdatedAt(r))) continue;
+    const local = weekSummaries[k];
+    if (!local || new Date(summaryUpdatedAt(r)) >= new Date(summaryUpdatedAt(local))) {
+      weekSummaries[k] = r; changed = true;
+    }
+  }
 
   saveTombstones();
-  if (changed) { saveEntries(entries); saveWeekSummaries(); } // persists + schedules push of any local-only rows
+  if (changed) { saveEntries(entries); saveWeekSummaries(); }
+
+  // photos this device is missing, fetched in the background — the entries are already up
+  pullMissingImages();
   return changed;
+}
+
+// Each photo is fetched at most once, ever, and then lives in IndexedDB. This is the whole
+// difference from the old backend, which re-downloaded all of them on every launch.
+let pullingImages = false;
+async function pullMissingImages() {
+  if (!syncActive() || pullingImages) return;
+  pullingImages = true;
+  try {
+    const wanted = imageIdsIn(entries);
+    const missing = wanted.filter(id => !hasImage(id));
+    if (!missing.length) return;
+    const res = await pullImages(missing, hasImage, putImage);
+    if (res.got) {
+      entries = entries.map(e => {
+        const ids = e.imageIds || (e.images ? Object.keys(e.images) : []);
+        if (!ids.length) return e;
+        const m = {};
+        for (const id of ids) { const b = imageBlob(id); if (b) m[id] = URL.createObjectURL(b); }
+        return Object.keys(m).length ? { ...e, images: m } : e;
+      });
+      render();
+    }
+  } catch (e) {
+    console.warn("photo pull failed", e);
+  } finally {
+    pullingImages = false;
+  }
 }
 
 let entryPushT = null, summaryPushT = null;
 function syncPushEntries() { if (!syncActive()) return; clearTimeout(entryPushT); entryPushT = setTimeout(pushEntriesNow, 1200); }
 function syncPushSummaries() { if (!syncActive()) return; clearTimeout(summaryPushT); summaryPushT = setTimeout(pushSummariesNow, 1200); }
 
-async function pushEntriesNow() {
+// One object holds entries, tombstones and summaries together, so there is one writer and
+// one conflict check rather than three racing each other.
+async function pushEntriesNow(retrying) {
   if (!syncActive()) return;
   try {
-    const rows = entries.map(entryToRow);
-    for (const [id, ts] of Object.entries(tombstones)) {
-      rows.push({ id, user_id: session.user.id, text: "", tags: [], year: null, week: null,
-        day: null, month: null, locked: false, source_id: null, segmented: false, images: null,
-        created_at: ts, updated_at: ts, deleted_at: ts });
+    const state = {
+      entries: entries.map(entryToWire).concat(
+        Object.entries(tombstones).map(([id, ts]) => ({ id, deletedAt: ts, updatedAt: ts }))),
+      tombstones: {},
+      summaries: {
+        ...weekSummaries,
+        ...Object.fromEntries(Object.entries(summaryTombstones).map(([k, ts]) => [k, { deletedAt: ts, updatedAt: ts }]))
+      }
+    };
+    const res = await pushState(state, cloudEtag || undefined);
+    if (res.conflict) {
+      // the other device wrote while we were composing this. Re-read, re-merge, then write
+      // once more — never twice, so a genuine disagreement can't spin.
+      if (retrying) { console.warn("sync push: still conflicting, leaving it for the next save"); return; }
+      cloudEtag = res.etag;
+      await syncPull();
+      return pushEntriesNow(true);
     }
-    if (rows.length) {
-      const { error } = await sb.from("deposits_entries").upsert(rows, { onConflict: "id" });
-      if (error && (error.code === "PGRST204" || /column/i.test(error.message || ""))) {
-        // newer-column migration not run yet — push without the new columns so sync never stalls.
-        // run in supabase: alter table deposits_entries add column if not exists source_id text;
-        //                  alter table deposits_entries add column if not exists segmented boolean not null default false;
-        //                  alter table deposits_entries add column if not exists images jsonb;
-        //                  alter table deposits_entries add column if not exists month int;
-        console.warn("deposits: newer columns missing in cloud — run the migration; pushing without them");
-        const stripped = rows.map(({ source_id, segmented, images, month, ...rest }) => rest);
-        const { error: e2 } = await sb.from("deposits_entries").upsert(stripped, { onConflict: "id" });
-        if (e2) throw e2;
-      } else if (error) throw error;
-    }
-  } catch (e) { console.warn("sync push entries failed", e); }
+    cloudEtag = res.etag;
+    // photos after the text: the words are the thing that must not be lost, and a photo
+    // upload that fails shouldn't take the entry with it
+    await pushImages(imageIdsIn(entries), imageBlob);
+  } catch (e) {
+    console.warn("sync push entries failed", e);
+  }
 }
-
-async function pushSummariesNow() {
-  if (!syncActive()) return;
-  try {
-    const rows = Object.entries(weekSummaries).map(([k, r]) => ({
-      user_id: session.user.id, week_key: k, text: r.text || "",
-      origin: r.origin || "ai", version: r.version || 1, edited: !!r.edited,
-      created_at: r.createdAt || new Date().toISOString(), updated_at: summaryUpdatedAt(r), deleted_at: null
-    }));
-    for (const [k, ts] of Object.entries(summaryTombstones)) {
-      rows.push({ user_id: session.user.id, week_key: k, text: "", origin: "ai",
-        version: 1, edited: false, created_at: ts, updated_at: ts, deleted_at: ts });
-    }
-    if (rows.length) {
-      const { error } = await sb.from("deposits_week_summaries").upsert(rows, { onConflict: "user_id,week_key" });
-      if (error) throw error;
-    }
-  } catch (e) { console.warn("sync push summaries failed", e); }
-}
-
-// code, not a link: tapping a link from Mail always opens Safari on iOS, even when the
-// request came from the home-screen web app — iOS has no way to route it back into that
-// app's own (separate) storage. typing a code back into whichever surface asked for it
-// avoids the redirect entirely, so it works identically on iOS Safari, the home-screen
-// app, and desktop.
-async function sendSignInCode(email) {
-  if (!sb) return { error: { message: "sync unavailable — SDK didn't load" } };
-  return await sb.auth.signInWithOtp({ email });
-}
-async function verifySignInCode(email, code) {
-  if (!sb) return { error: { message: "sync unavailable — SDK didn't load" } };
-  return await sb.auth.verifyOtp({ email, token: code.trim(), type: "email" });
-}
-async function signOutSync() { if (sb) { try { await sb.auth.signOut(); } catch (e) {} } session = null; }
+// summaries ride along with the entries object, so this is the same write
+async function pushSummariesNow() { return pushEntriesNow(); }
 
 async function initSync() {
-  if (!sb) return;
-  try { const { data } = await sb.auth.getSession(); session = data.session || null; } catch (e) { session = null; }
-  if (session) { await syncPull(); render(); syncPushEntries(); syncPushSummaries(); }
-  sb.auth.onAuthStateChange(async (evt, s) => {
-    const had = !!session; session = s || null;
-    if (session && !had && evt !== "TOKEN_REFRESHED") { // fresh sign-in elsewhere (e.g. another tab)
-      await syncPull(); render(); syncPushEntries(); syncPushSummaries();
-    }
-  });
+  if (!syncActive()) return;
+  await syncPull();
+  render();
+  syncPushEntries();
 }
 
 // ---------- anthropic ----------
@@ -1614,7 +1624,7 @@ function renderIconRail() {
     () => setLayout(layout === "day" ? "topic" : "day")));
   bar.appendChild(icoRow("Export markdown", ICO_EXPORT, false, () => doExport()));
   bar.appendChild(icoRow("Settings", ICO_SETTINGS, false, () => openSettings(),
-    el("span", { class: "ico-dot" + (session ? " live" : "") })));
+    el("span", { class: "ico-dot" + (cloudConfigured() ? " live" : "") })));
 
   railL.appendChild(bar);
 }
@@ -4506,74 +4516,72 @@ function openSettings() {
     sheet.appendChild(el("div", { class: "sheet-head" },
       el("span", { class: "title" }, "Settings"), el("span")));
 
-    // ---- cloud sync / account ----
+    // ---- cloud sync ----
+    // A Worker URL and a secret, typed in once per device. No accounts and no sign-in
+    // round-trip: the previous backend's session token lived in localStorage alongside the
+    // photos, so when that filled up the token couldn't be refreshed and both devices were
+    // quietly signed out. Two fields that never expire can't do that.
     sheet.appendChild(el("p", { class: "field-label" }, "cloud sync"));
-    if (!sb) {
-      sheet.appendChild(el("p", { class: "settings-note", style: { margin: "0" } },
-        "sync unavailable — the supabase library didn't load (offline?). the app still works fully on this device."));
-    } else if (session) {
-      const who = (session.user && session.user.email) || "your account";
-      sheet.appendChild(el("p", { class: "settings-note", style: { margin: "0" } },
-        "signed in as " + who + " — entries and summaries sync across your devices and back up to the cloud."));
+    const cc = cloudConfig();
+    if (cc) {
+      const note = el("p", { class: "settings-note", style: { margin: "0" } },
+        "backing up to " + cc.url.replace(/^https?:\/\//, "") + " — entries and photos sync across your devices.");
+      sheet.appendChild(note);
       const syncBtn = el("button", { class: "lock-btn", onclick: async () => {
         syncBtn.disabled = true; syncBtn.textContent = "syncing…";
-        await syncPull(); await pushEntriesNow(); await pushSummariesNow();
+        await syncPull(); await pushEntriesNow();
         syncBtn.disabled = false; syncBtn.textContent = "sync now"; render();
       } }, "sync now");
       sheet.appendChild(syncBtn);
-      sheet.appendChild(el("button", { class: "lock-btn", onclick: async () => {
-        await signOutSync(); build(); render();
-      } }, "sign out"));
+      const testBtn = el("button", { class: "lock-btn", onclick: async () => {
+        testBtn.disabled = true; testBtn.textContent = "checking…";
+        const r = await cloudCheck();
+        testBtn.disabled = false; testBtn.textContent = "test connection";
+        note.textContent = r.ok
+          ? "connected — " + r.entries + " entries in the cloud."
+          : "can't reach it: " + r.reason;
+      } }, "test connection");
+      sheet.appendChild(testBtn);
+      sheet.appendChild(el("button", { class: "lock-btn", onclick: () => {
+        setCloudConfig(null); build();   // local entries are untouched; only the link goes
+      } }, "disconnect"));
     } else {
-      const email = el("input", { class: "key-input", type: "email", placeholder: "you@email.com", autocomplete: "email" });
-      sheet.appendChild(email);
+      const urlIn = el("input", { class: "key-input", type: "url", placeholder: "https://deposits.<you>.workers.dev", autocomplete: "off" });
+      const secretIn = el("input", { class: "key-input", type: "password", placeholder: "worker secret", autocomplete: "off" });
       const status = el("p", { class: "settings-note" },
-        "sign in to sync across devices and back up. request a code and type it in right here — " +
-        "works the same on ios safari, the home-screen app, or desktop, since nothing has to leave this screen.");
-
-      const codeRow = el("div", { class: "code-row", style: { display: "none" } });
-      // OTP length is a Supabase project setting, not something this app controls (hers sends
-      // 8 digits) — don't hardcode a length, just accept whatever arrives.
-      const codeInput = el("input", {
-        class: "code-input", type: "text", inputmode: "numeric", pattern: "[0-9]*",
-        autocomplete: "one-time-code", placeholder: "code"
-      });
-      const verifyBtn = el("button", {
-        class: "verify-btn",
-        onclick: async () => {
-          const addr = email.value.trim(), code = codeInput.value.trim();
-          if (!addr || !code) return;
-          verifyBtn.disabled = true; verifyBtn.textContent = "…";
-          const { data, error } = await verifySignInCode(addr, code);
-          verifyBtn.disabled = false; verifyBtn.textContent = "verify";
-          if (error) { status.textContent = "couldn't verify: " + error.message; return; }
-          session = data.session; // set directly rather than waiting on the auth-state event
-          await syncPull(); render(); syncPushEntries(); syncPushSummaries();
-          build(); // re-render settings as signed-in
-        }
-      }, "verify");
-      codeRow.appendChild(codeInput);
-      codeRow.appendChild(verifyBtn);
-
-      const sendBtn = el("button", {
-        class: "lock-btn",
-        onclick: async () => {
-          const addr = email.value.trim();
-          if (!addr) return;
-          sendBtn.disabled = true; sendBtn.textContent = "sending…";
-          const { error } = await sendSignInCode(addr);
-          sendBtn.disabled = false;
-          if (error) { status.textContent = "couldn't send: " + error.message; return; }
-          sendBtn.textContent = "resend code";
-          status.textContent = "code sent to " + addr + " — enter it below.";
-          codeRow.style.display = "flex";
-          codeInput.focus();
-        }
-      }, "email me a sign-in code");
-      sheet.appendChild(sendBtn);
-      sheet.appendChild(codeRow);
+        "paste the Worker's address and its secret. entries back up as one small file; " +
+        "photos go up once each and are only ever downloaded once per device.");
+      const connect = el("button", { class: "lock-btn", onclick: async () => {
+        const url = urlIn.value.trim(), secret = secretIn.value.trim();
+        if (!url || !secret) return;
+        connect.disabled = true; connect.textContent = "connecting…";
+        setCloudConfig({ url, secret });
+        const r = await cloudCheck();
+        connect.disabled = false; connect.textContent = "connect";
+        if (!r.ok) { setCloudConfig(null); status.textContent = "couldn't connect: " + r.reason; return; }
+        await syncPull(); render(); syncPushEntries();
+        build();
+      } }, "connect");
+      sheet.appendChild(urlIn);
+      sheet.appendChild(secretIn);
+      sheet.appendChild(connect);
       sheet.appendChild(status);
     }
+
+    // ---- storage ----
+    // Real numbers, on the device that has the problem. Diagnosing the last outage meant
+    // plugging a phone into a Mac to reach a console; it shouldn't have.
+    sheet.appendChild(el("p", { class: "field-label", style: { marginTop: "26px" } }, "storage"));
+    const storageNote = el("p", { class: "settings-note", style: { margin: "0" } }, "checking…");
+    sheet.appendChild(storageNote);
+    storageReport().then(r => {
+      const mb = n => (n / 1048576).toFixed(1) + "MB";
+      const pct = r.quota ? Math.round((r.usage / r.quota) * 100) : null;
+      storageNote.textContent =
+        r.entries + " entries · " + r.images + " photos (" + mb(r.imageBytes) + ")" +
+        (r.quota ? " · using " + mb(r.usage) + " of " + mb(r.quota) + " available (" + pct + "%)" : "") +
+        (r.legacyBytes > 100000 ? " · " + mb(r.legacyBytes) + " still in the old store" : "");
+    }).catch(() => { storageNote.textContent = "couldn't read storage stats"; });
 
     // ---- composer speed ----
     // One sheet serves both viewports: the desktop rail's Settings glyph and the mobile ⋮
@@ -5112,7 +5120,10 @@ window.__deposits = {
   report: storageReport,
   imageBlob,
   flush: flushEntries,
-  export: () => toMarkdown(activeEntries(), exportHeading())
+  export: () => toMarkdown(activeEntries(), exportHeading()),
+  cloud: cloudConfig,
+  connect: cfg => { setCloudConfig(cfg); return cloudCheck(); },
+  sync: async () => { await syncPull(); await pushEntriesNow(); render(); }
 };
 </script>
 </body>

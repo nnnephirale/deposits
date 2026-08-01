@@ -1,0 +1,26 @@
+name = "deposits"
+main = "src/worker.js"
+compatibility_date = "2026-01-15"
+
+# The private bucket holding entries.json and images/<id>. Create it once:
+#   npx wrangler r2 bucket create deposits
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "deposits"
+
+[vars]
+# The page allowed to call this Worker. Set it to wherever the app is served from —
+# "*" works but means the secret is the only thing standing in the way.
+ALLOWED_ORIGIN = "https://nnnephirale.github.io"
+
+# Keeps the shared Supabase project awake for SSaved, which has no local copy of its cards
+# and is simply down whenever that project pauses. Every 4 days.
+SUPABASE_PING_URL = "https://uauqqdaalnddedgjdgcg.supabase.co/rest/v1/collections?select=id&limit=1"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdXFxZGFhbG5kZGVkZ2pkZ2NnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3OTQ2NDIsImV4cCI6MjA4MzM3MDY0Mn0.afUxr9uKdSamnbFQmOt7DDRvEJYLEz3-c8u5P3zZcnE"
+
+[triggers]
+crons = ["23 7 */4 * *"]
+
+# DEPOSITS_SECRET is NOT here — it is the key to everything in the bucket and this file is
+# committed. Set it once, and it stays encrypted at Cloudflare:
+#   npx wrangler secret put DEPOSITS_SECRET
