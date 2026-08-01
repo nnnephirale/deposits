@@ -141,8 +141,13 @@ function adoptImage(id, value) {
 export async function loadEntries() {
   if (!db) return [];
   const { store, done } = tx([ENTRY_STORE, IMAGE_STORE], "readonly");
-  const rows = await reqDone(store(ENTRY_STORE).getAll());
-  const imgs = await reqDone(store(IMAGE_STORE).getAll());
+  // both requests are issued before either is awaited. Safari ends a transaction as soon as
+  // it has no pending requests, and awaiting the first one yields long enough for that to
+  // happen — the second call then throws TransactionInactiveError.
+  const rowsReq = store(ENTRY_STORE).getAll();
+  const imgsReq = store(IMAGE_STORE).getAll();
+  const rows = await reqDone(rowsReq);
+  const imgs = await reqDone(imgsReq);
   await done;
   for (const rec of imgs) if (rec && rec.blob) { blobs.set(rec.id, rec.blob); persisted.add(rec.id); }
   return rows.map(rec => {
@@ -218,13 +223,23 @@ async function writeAll(list) {
     return rec;
   });
 
+  // Which ids are on disk, read in a transaction of its own. This used to be an await in
+  // the MIDDLE of the write transaction, which Safari treats as the end of it — every put
+  // and delete after the await then threw, and the save failed on iOS while passing
+  // everywhere else.
+  const rt = tx([ENTRY_STORE], "readonly");
+  const existing = await reqDone(rt.store(ENTRY_STORE).getAllKeys());
+  await rt.done;
+
+  const keep = new Set(records.map(r => r.id));
+  const drop = existing.filter(k => !keep.has(k)); // deleted since the last write
+
+  // From here to `await done` there is not a single await: the transaction stays alive
+  // because it always has a pending request.
   const { store, done } = tx([ENTRY_STORE, IMAGE_STORE], "readwrite");
   const es = store(ENTRY_STORE);
   const is = store(IMAGE_STORE);
-  const keep = new Set(records.map(r => r.id));
-  // entries deleted since the last write have to go, or a delete would never stick
-  const existing = await reqDone(es.getAllKeys());
-  for (const k of existing) if (!keep.has(k)) es.delete(k);
+  for (const k of drop) es.delete(k);
   for (const rec of records) es.put(rec);
   for (const id of pendingImages) is.put({ id, blob: blobs.get(id) });
   await done;
@@ -317,8 +332,11 @@ export async function storageReport() {
     for (const b of blobs.values()) out.imageBytes += b.size || 0;
   }
   try {
-    const est = await navigator.storage.estimate();
-    out.quota = est.quota; out.usage = est.usage;
+    const est = await Promise.race([
+      navigator.storage.estimate(),
+      new Promise(r => setTimeout(() => r(null), 3000))
+    ]);
+    if (est) { out.quota = est.quota; out.usage = est.usage; }
   } catch (e) {}
   try { out.legacyBytes = (localStorage.getItem(LEGACY_ENTRIES_KEY) || "").length; } catch (e) {}
   return out;
