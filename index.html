@@ -92,7 +92,7 @@ import {
   imageBlob, hasImage, putImage, imageUrl
 } from "./js/store.js";
 import {
-  cloudConfig, cloudConfigured, setCloudConfig, cloudCheck,
+  cloudConfig, cloudConfigured, setCloudConfig, cloudCheck, setupLink,
   fetchState, pushState, pushImages, pullImages, imageIdsIn
 } from "./js/sync.js";
 
@@ -4558,7 +4558,19 @@ function openSettings() {
           : "can't reach it: " + r.reason;
       } }, "test connection");
       sheet.appendChild(testBtn);
-      sheet.appendChild(el("button", { class: "lock-btn", onclick: () => {
+      // Setting a device up by retyping a 48-character key is how keys end up mistyped.
+      // This copies a link that carries it — open it on the other device and it is done.
+      const linkBtn = el("button", { class: "lock-btn", onclick: async () => {
+        const url = setupLink();
+        if (!url) return;
+        try { await navigator.clipboard.writeText(url); linkBtn.textContent = "copied — open it on the other device"; }
+        catch (e) { note.textContent = url; linkBtn.textContent = "copy failed — the link is above"; }
+        setTimeout(() => { linkBtn.textContent = "copy setup link"; }, 4000);
+      } }, "copy setup link");
+      sheet.appendChild(linkBtn);
+      sheet.appendChild(el("p", { class: "settings-note", style: { margin: "2px 0 0" } },
+        "the link contains your key — treat it like a password, and it only needs to travel once."));
+      sheet.appendChild(el("button", { class: "lock-btn", style: { marginTop: "10px" }, onclick: () => {
         setCloudConfig(null); build();   // local entries are untouched; only the link goes
       } }, "disconnect"));
     } else {

@@ -13,21 +13,70 @@
 
 const CONFIG_KEY = "weekly-deposits-cloud";
 
+// Shared with SSaved. Both apps are served from the same origin and talk to the same Worker,
+// so they can share one stored credential — enter it in either and the other already has it.
+// Kept separate from CONFIG_KEY so an older install's config still loads.
+const SHARED_KEY = "cf-worker";
+
+function readShared() {
+  try {
+    const v = JSON.parse(localStorage.getItem(SHARED_KEY));
+    return v && v.secret ? v : null;
+  } catch (e) { return null; }
+}
+
+// A one-time setup link carries the key in the URL fragment: #k=<secret>. A fragment is never
+// sent to a server and never appears in access logs, and it is stripped from the address bar
+// the moment it is read, so it does not linger in history or in a shared screenshot.
+function readSetupLink() {
+  try {
+    const h = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+    const secret = h.get("k");
+    if (!secret) return null;
+    const url = h.get("w") || (readShared() || {}).url || null;
+    history.replaceState(null, "", location.pathname + location.search);
+    return url ? { url, secret } : null;
+  } catch (e) { return null; }
+}
+
 let cfg = null;
 try { cfg = JSON.parse(localStorage.getItem(CONFIG_KEY)) || null; } catch (e) {}
+if (!cfg || !cfg.secret) cfg = readShared() || cfg;
 
 export function cloudConfig() { return cfg; }
 export function cloudConfigured() { return !!(cfg && cfg.url && cfg.secret); }
+
+/** A link that sets this device up in one tap. The key rides in the fragment. */
+export function setupLink() {
+  if (!cloudConfigured()) return null;
+  return location.origin + location.pathname +
+    "#w=" + encodeURIComponent(cfg.url) + "&k=" + encodeURIComponent(cfg.secret);
+}
 
 export function setCloudConfig(next) {
   cfg = next && next.url && next.secret
     ? { url: String(next.url).replace(/\/+$/, ""), secret: String(next.secret) }
     : null;
   try {
-    if (cfg) localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
-    else localStorage.removeItem(CONFIG_KEY);
+    if (cfg) {
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+      localStorage.setItem(SHARED_KEY, JSON.stringify(cfg)); // SSaved reads this one
+    } else {
+      localStorage.removeItem(CONFIG_KEY);
+      localStorage.removeItem(SHARED_KEY);
+    }
   } catch (e) {}
   return cfg;
+}
+
+// a setup link wins over whatever is stored: it is the newer, deliberate instruction
+const fromLink = readSetupLink();
+if (fromLink) {
+  cfg = fromLink;
+  try {
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+    localStorage.setItem(SHARED_KEY, JSON.stringify(cfg));
+  } catch (e) {}
 }
 
 function headers(extra) {
