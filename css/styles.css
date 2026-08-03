@@ -491,6 +491,36 @@
     mask-image: linear-gradient(to right, transparent, black);
   }
   .rt-gal-wrap.show-left::before, .rt-gal-wrap.show-right::after { opacity: 1; }
+  /* page buttons: desktop only, and only once the pointer is over the set. Touch has the drag
+     and the snap already, and a permanent pair of chevrons over someone's photos is chrome the
+     phone layout does not need. Hidden by default so the mobile build never has to opt out. */
+  .rt-gal-nav { display: none; }
+  @media (min-width: 1080px) and (hover: hover) {
+    .rt-gal-nav {
+      display: flex; align-items: center; justify-content: center;
+      position: absolute; top: 50%; transform: translateY(-50%) scale(0.94);
+      width: 34px; height: 34px; padding: 0; z-index: 3;
+      border: none; border-radius: 50%; color: var(--ink);
+      background: rgba(255,255,255,0.82);
+      -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 6px 18px rgba(0,0,0,0.12);
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .rt-gal-nav svg { width: 17px; height: 17px; display: block; }
+    .gn-prev { left: 8px; }
+    .gn-next { right: 8px; }
+    /* each arrow rides its own side's fade: the same show-left/show-right the fades use, so an
+       arrow is only ever offered when that direction actually has somewhere to go. */
+    .rt-gal-wrap:hover.show-left .gn-prev,
+    .rt-gal-wrap:hover.show-right .gn-next {
+      opacity: 1; pointer-events: auto; transform: translateY(-50%) scale(1);
+    }
+    .rt-gal-nav:active { transform: translateY(-50%) scale(0.92); background: #fff; }
+    /* a fanned deck isn't a scroller — nothing to page through */
+    .rt-gallery.stacked ~ .rt-gal-nav { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .rt-gal-nav { transition: opacity 0.18s ease; } }
   .rt-gallery .rt-img {
     flex: none; width: 62%; max-width: 220px; aspect-ratio: 4 / 5;
     object-fit: cover; margin: 0; border-radius: 14px; scroll-snap-align: start;
@@ -674,13 +704,24 @@
 
   /* the line-ops popover: one vertical list of labelled rows, so related controls collapse
      into a single button instead of a wall of glyphs. floats above the format row. */
+  /* Opens UPWARD, off the pill. Downward was wrong at BOTH breakpoints, for the same reason:
+     `position: absolute` resolves against the nearest POSITIONED ancestor, and the pill was not
+     one. On the phone that meant it resolved against .fmt-bar (position: fixed) and `top: 100%`
+     dropped it 8px below a bar that is already docked to the keyboard — i.e. behind the keyboard.
+     On desktop .fmt-bar is `position: static`, so it walked all the way up to .overlay and
+     `top: 100%` put it a full viewport height down, off-screen entirely — the "missing on
+     desktop" report. The pill is now the containing block at both sizes (see .fmt-bar-pill), and
+     the row it belongs to sits at the bottom of the screen, so up is the only direction with
+     anywhere to go. */
   .line-pop {
-    position: absolute; left: 0; top: calc(100% + 8px); z-index: 8;
+    position: absolute; left: 0; bottom: calc(100% + 8px); top: auto; z-index: 8;
     min-width: 196px; padding: 6px;
     background: var(--card); border-radius: 16px;
     box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 12px 34px rgba(0,0,0,0.16);
-    animation: lpDrop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: lpRise 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   }
+  /* each direction travels FROM the side it opens from, so the motion agrees with the placement */
+  @keyframes lpRise { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
   @keyframes lpDrop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .line-pop { animation: none; } }
   .line-pop-row {
@@ -738,15 +779,22 @@
   /* full width of the sheet's own column rather than shrink-wrapping the buttons: a pill sized to
      its contents changes width every time the row swaps (4 line ops vs 6 span ops), which reads as
      the toolbar twitching rather than as its contents changing. Fixed width, contents distributed. */
+  /* position: relative so the line-ops popover has something to hang off that is the same box at
+     both breakpoints — without it the popover's containing block silently changes with the
+     .fmt-bar override below, which is what put it off-screen on desktop.
+     overflow is deliberately VISIBLE, not the auto it used to be: `overflow-x: auto` makes the
+     pill a scroll container, and per spec an `auto` on one axis forces the other off `visible`
+     too — so it clipped the popover on both axes. Six 38px buttons come to 228px inside a pill
+     that is never narrower than ~310px, so there was nothing to scroll anyway. */
   .fmt-bar-pill {
+    position: relative;
     display: flex; gap: 2px; pointer-events: auto;
     flex: 1; max-width: 520px; justify-content: space-around;
     background: #fff; border-radius: 999px; padding: 6px;
     box-shadow: 0 2px 10px rgba(0,0,0,0.08), 0 10px 28px rgba(0,0,0,0.10);
     border: 1px solid rgba(0,0,0,0.04);
-    overflow-x: auto; scrollbar-width: none;
+    overflow: visible;
   }
-  .fmt-bar-pill::-webkit-scrollbar { width: 0; height: 0; }
   /* the docked bar floats OVER the sheet rather than in it, so the sheet has to give back the
      room it covers or the last line of text sits under the pill — reachable only by scrolling
      it out from under, which is the thing a fixed bar is supposed to stop happening. --fmt-h is
@@ -1893,8 +1941,13 @@
     .fmt-bar-pill {
       background: none; box-shadow: none; border: none; border-radius: 0;
       padding: 0; gap: 8px; width: 100%; overflow: visible;
+      position: relative; /* keep it the popover's containing block here too — see .line-pop */
     }
     .fmt-btn { flex: 1; width: auto; height: 31px; background: var(--field); border-radius: 999px; }
+    /* and the popover goes back to opening DOWNWARD here. Up is right on the phone, where the row
+       is docked to the keyboard at the bottom of the screen; on desktop the same row sits directly
+       under the head at the TOP of the composer, so opening up would run it off the top edge. */
+    .line-pop { top: calc(100% + 8px); bottom: auto; animation-name: lpDrop; }
     /* and no clearance to reserve, since nothing is floating over the content any more */
     .sheet.expanse.has-fmt { padding-bottom: calc(env(safe-area-inset-bottom) + 28px + var(--kb) + var(--kbr)); }
     .sheet { scrollbar-width: none; }

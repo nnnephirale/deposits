@@ -497,6 +497,10 @@ function renderRichBlocks(text, images, onResize, onCheck) {
         const galWrap = el("div", { class: "rt-gal-wrap" }, gal);
         attachGalleryFade(galWrap, gal);
         attachGalleryDrag(gal);
+        // three or more is where the row stops fitting and starts scrolling (two are sized to
+        // fill the width exactly — see .rt-gallery:has(> :nth-child(2):last-child)). Below that
+        // there is nothing to page through, so the arrows would be decoration.
+        if (run.length >= 3) attachGalleryNav(galWrap, gal);
         frag.appendChild(galWrap);
         continue;
       }
@@ -623,6 +627,33 @@ function attachGalleryDrag(gal) {
   gal.addEventListener("click", ev => {
     if (gal.classList.contains("swallow-click")) { ev.stopPropagation(); ev.preventDefault(); }
   }, true);
+}
+
+// Desktop-only page buttons for a gallery that scrolls. There is no measurement of its own here:
+// the wrapper already carries show-left/show-right, kept in step with the scroll position by
+// attachGalleryFade for the edge fades, so an arrow simply follows the fade on its side. That
+// also means an arrow can never point somewhere there is nothing to scroll to.
+const GAL_CHEV = d => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+  + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'
+  + (d < 0 ? "M15 5 8 12l7 7" : "M9 5l7 7-7 7") + '"/></svg>';
+function attachGalleryNav(wrap, gal) {
+  const step = dir => {
+    // one image plus the row's gap, so a press lands the next image where the last one was
+    const img = gal.querySelector(".rt-img");
+    const w = img ? img.getBoundingClientRect().width + 8 : Math.round(gal.clientWidth * 0.7);
+    gal.scrollBy({ left: dir * w, behavior: "smooth" });
+  };
+  for (const dir of [-1, 1]) {
+    const b = el("button", {
+      class: "rt-gal-nav " + (dir < 0 ? "gn-prev" : "gn-next"),
+      "aria-label": dir < 0 ? "Previous photos" : "Next photos"
+    });
+    b.innerHTML = GAL_CHEV(dir);
+    // the gallery's images open a lightbox on click, and the buttons sit on top of them —
+    // without this a page press opens the photo underneath as well.
+    b.addEventListener("click", ev => { ev.preventDefault(); ev.stopPropagation(); step(dir); });
+    wrap.appendChild(b);
+  }
 }
 
 function attachGalleryFade(wrap, gal) {
