@@ -22,7 +22,11 @@ export default {
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
     if (request.method === "OPTIONS") return cors(new Response(null, { status: 204 }), env);
-    if (path === "/health") return cors(json({ ok: true }), env);
+    // `configured` says whether a secret exists at all, without revealing anything about it.
+    // That is the difference between "wrangler secret put never reached this Worker" and
+    // "it did, and the value does not match" — two problems with entirely different fixes,
+    // and indistinguishable from a 401 alone.
+    if (path === "/health") return cors(json({ ok: true, configured: !!env.DEPOSITS_SECRET }), env);
 
     try {
       if (path === "/entries") {
@@ -80,7 +84,10 @@ function authorized(request, env) {
   if (!secret) return false;
   const header = request.headers.get("authorization") || "";
   const presented = header.startsWith("Bearer ") ? header.slice(7) : "";
-  return timingSafeEqual(presented, secret);
+  // Trim both sides. Pasting a key into an interactive prompt very easily carries a trailing
+  // newline, and a stored "abc\n" against a sent "abc" is a mismatch that looks exactly like
+  // a wrong key while being invisible in every place you would go to check it.
+  return timingSafeEqual(presented.trim(), String(secret).trim());
 }
 
 // Compare without leaking length or position through timing. Cheap here, and the alternative
