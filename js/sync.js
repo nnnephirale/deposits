@@ -39,9 +39,14 @@ function readSetupLink() {
   } catch (e) { return null; }
 }
 
-let cfg = null;
-try { cfg = JSON.parse(localStorage.getItem(CONFIG_KEY)) || null; } catch (e) {}
-if (!cfg || !cfg.secret) cfg = readShared() || cfg;
+// The shared entry wins. Both are written together whenever a key is set, so they only
+// diverge when one is stale — and the stale one is always this app's own older copy, from
+// before the shared entry existed. Reading the private one first meant a key rotated in the
+// other app was ignored here forever, reported as "secret rejected" with no way to see why.
+let cfg = readShared();
+if (!cfg || !cfg.secret) {
+  try { cfg = JSON.parse(localStorage.getItem(CONFIG_KEY)) || null; } catch (e) { cfg = null; }
+}
 
 export function cloudConfig() { return cfg; }
 export function cloudConfigured() { return !!(cfg && cfg.url && cfg.secret); }
