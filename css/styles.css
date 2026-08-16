@@ -1144,7 +1144,9 @@
     --sheet-default: calc(var(--sheet-ceil) * 0.85);
     height: var(--sheet-h, var(--sheet-default));
     max-height: var(--sheet-ceil);
-    padding: 12px 20px calc(env(safe-area-inset-bottom) + 24px + var(--kb) + var(--kbr));
+    /* padding-top is 0 and lives on .composer-top instead — the sticky head has to own that band
+       or it pins below it and the text shows through the gap. See .composer-top. */
+    padding: 0 20px calc(env(safe-area-inset-bottom) + 24px + var(--kb) + var(--kbr));
     animation: none; /* the unfold below replaces the generic slide-up */
     clip-path: inset(0 round 20px 20px 0 0);
     /* the toe matters: a deliberate hold of visible growth off the bar, THEN a decisive run
@@ -1202,17 +1204,22 @@
   }
   /* ---- the composer's pinned head ---- */
   /* Grabber and control row in one sticky block, so a long entry can't scroll its own controls
-     away. The negative margins pull it out of the sheet's 20px gutters and its own padding puts
-     the spacing back inside — without that the fade underneath would stop 20px short of each
-     edge and leave two columns of text running past it unfaded. The -12px top does the same for
-     the sheet's padding-top: it makes that band part of the sticky block, so `top: 0` lands the
-     row where it already sat instead of 12px higher the instant it sticks.
-     Those margins are exactly the sheet's own padding, so the block spans the scrollport and not
-     a pixel more — .sheet has overflow-y: auto, which forces overflow-x to auto as well, and
-     anything wider than this would put a horizontal scrollbar on the composer. */
+     away. The negative side margins pull it out of the sheet's 20px gutters and its own padding
+     puts the spacing back inside — without that the fade underneath would stop 20px short of
+     each edge and leave two columns of text running past it unfaded. They are exactly the
+     sheet's own padding, so the block spans the scrollport and not a pixel more: .sheet has
+     overflow-y: auto, which forces overflow-x to auto as well, and anything wider would put a
+     horizontal scrollbar on the composer.
+
+     The TOP band is padding on this block rather than on the sheet (see .sheet.expanse, whose
+     padding-top is 0 for exactly this reason). A negative top margin was the first attempt and
+     it leaks: sticky pins the MARGIN box, so `margin-top: -12px` with `top: 0` holds the margin
+     box at the scrollport edge and leaves the visible bar 12px below it — a 12px slot with the
+     text scrolling through it, right above the pills. Owning the padding instead means the
+     block's margin box and its white start at the same y, and there is no gap to leak through. */
   .composer-top {
     position: sticky; top: 0; z-index: 6;
-    margin: -12px -20px 0; padding: 12px 20px 0;
+    margin: 0 -20px; padding: 12px 20px 0;
     background: var(--card);
   }
   /* the fade: the text doesn't slide under a hard edge, it dissolves into the white just below
