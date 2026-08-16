@@ -132,6 +132,9 @@ export async function fetchState() {
     entries: body.entries || [],
     tombstones: body.tombstones || {},
     summaries: body.summaries || {},
+    // absent by design on a bucket written by an older Worker — left undefined rather than
+    // defaulted to an empty doc, so the app can tell "no taxonomy up there" from "no tags".
+    taxonomy: body.taxonomy || null,
     etag: body.etag || res.headers.get("etag") || null
   };
 }

@@ -105,7 +105,7 @@ function safeTop() { return parseFloat(getComputedStyle(satProbeEl).paddingTop) 
 // ---------- taxonomy ----------
 // bg/fg/dot are the pills as they appear in the list. `heat` is the same topic turned up
 // for the wrapped bloom — see HARMONY below for why it isn't just `dot` at more saturation.
-const TOPICS = [
+const DEFAULT_TOPICS = [
   { id: "work", label: "work", bg: "#E3EDFB", fg: "#2B5FA8", dot: "#4A82D0", heat: "#70A6F2" },
   { id: "eats", label: "notable eats", bg: "#FBEBDD", fg: "#A85B22", dot: "#D98B4A", heat: "#E78B39" },
   { id: "health", label: "health & fitness", bg: "#E2F2E4", fg: "#2E7D3A", dot: "#55A862", heat: "#41C25D" },
@@ -130,13 +130,156 @@ const TOPICS = [
 // Two notes for anyone changing this: `discovered` and `home` land 5° apart in hue and are
 // indistinguishable once blurred (harmless — they blend), and the fields paint with
 // mix-blend-mode: multiply, so overlaps deepen like ink rather than washing out to grey.
-const MODES = [
+const DEFAULT_MODES = [
   { id: "remember", label: "i want to remember" },
   { id: "rundown", label: "weekly rundown" },
   { id: "learned", label: "what i've learned" },
 ];
-const topicById = Object.fromEntries(TOPICS.map(t => [t.id, t]));
-const modeById = Object.fromEntries(MODES.map(m => [m.id, m]));
+
+// ---------- the taxonomy, as she has edited it ----------
+// The eleven topics above are the SEED, not the truth: Settings can rename them, add her own
+// and drop the ones she never files under. So TOPICS/MODES are live bindings — every reader in
+// the app already looks them up inside a function, so replacing the array is enough and nothing
+// needs re-wiring. Only the two id maps are derived, and reindexTaxonomy rebuilds those.
+//
+// Entries store tag IDs, never labels, so a rename is invisible to every deposit already filed
+// under it. Removing a tag leaves those ids sitting on the entries untouched — they simply stop
+// resolving and the deposits read as untagged — which is what makes the removal recoverable
+// rather than destructive (see the undo in openSettings).
+const TAX_KEY = "weekly-deposits-taxonomy";
+let TOPICS = DEFAULT_TOPICS.map(t => ({ ...t }));
+let MODES = DEFAULT_MODES.map(m => ({ ...m }));
+// Removed tags aren't thrown away, they're retired: kept aside with their id and their old
+// position, so restoring one puts every deposit filed under it straight back where it was.
+// A restore that had to re-create the tag would mint a NEW id and leave those deposits
+// untagged forever, which is what would make "remove" a decision rather than a try.
+// The last six, because these are undo affordances and not an archive.
+const RETIRED_MAX = 6;
+let RETIRED = [];
+// null until she has actually changed something. That is also the push gate: a device still on
+// the defaults must never send them, or merely opening the app on the iPad would roll back a
+// rename made on the phone.
+let taxonomyUpdatedAt = null;
+let topicById = {}, modeById = {};
+function reindexTaxonomy() {
+  topicById = Object.fromEntries(TOPICS.map(t => [t.id, t]));
+  modeById = Object.fromEntries(MODES.map(m => [m.id, m]));
+}
+// Adopt a stored/remote taxonomy. The shape is what's checked, not the contents: `topics` has
+// to BE an array, but it is allowed to be an empty one. Rejecting empty was the first cut and it
+// was wrong in the one case that matters — replacing all eleven seeded topics with her own means
+// passing through zero topics, and a reload at that moment would have handed the seed straight
+// back. Nothing can reach here with an accidental empty anyway: the only writer is a deliberate
+// edit, and syncPull ignores any remote doc that isn't stamped.
+// Missing colours are re-derived rather than left undefined, so a hand-edited or part-migrated
+// doc can't render a pill with `background: undefined`.
+function applyTaxonomy(tax) {
+  if (!tax || !Array.isArray(tax.topics)) return false;
+  TOPICS = tax.topics.filter(t => t && t.id).map(t => ({
+    ...topicColours(t.hue != null ? t.hue : hexHue(t.dot || "#4A82D0")),
+    ...t,
+    label: String(t.label == null ? t.id : t.label)
+  }));
+  if (Array.isArray(tax.modes)) {
+    MODES = tax.modes.filter(m => m && m.id)
+      .map(m => ({ id: m.id, label: String(m.label == null ? m.id : m.label) }));
+  }
+  if (Array.isArray(tax.retired)) RETIRED = tax.retired.filter(r => r && r.id).slice(-RETIRED_MAX);
+  if (tax.updatedAt) taxonomyUpdatedAt = tax.updatedAt;
+  reindexTaxonomy();
+  return true;
+}
+function taxonomyDoc() {
+  return { topics: TOPICS, modes: MODES, retired: RETIRED, updatedAt: taxonomyUpdatedAt };
+}
+// Every edit lands here: stamp it, write it, re-index, and let the debounced entry push carry it
+// to the other devices on the same trip as everything else.
+function saveTaxonomy() {
+  taxonomyUpdatedAt = new Date().toISOString();
+  reindexTaxonomy();
+  try { localStorage.setItem(TAX_KEY, JSON.stringify(taxonomyDoc())); } catch (e) {}
+  syncPushEntries();
+}
+
+// ---------- deriving a new topic's colours ----------
+// A tag she adds has to land in the same family as the eleven seeded above, and HARMONY is
+// already the rule they follow. Read back off those eleven, each role sits at one shared
+// lightness with the hue doing all the distinguishing:
+//   bg  L 0.943 C 0.025   fg  L 0.525 C 0.130   dot L 0.665 C 0.130
+//   heat L 0.720, chroma at 85% of that hue's own sRGB maximum (HARMONY's rule, unchanged)
+// So a new hue needs nothing but those numbers converted, with every chroma pulled back to what
+// the hue can actually hold — the sRGB ceiling is ~0.27 at magenta and ~0.12 at teal, and asking
+// for 0.130 at teal would clip to a colour that isn't the one requested.
+function oklchLinear(L, C, H) {
+  const h = H * Math.PI / 180, a = C * Math.cos(h), b = C * Math.sin(h);
+  const l = Math.pow(L + 0.3963377774 * a + 0.2158037573 * b, 3);
+  const m = Math.pow(L - 0.1055613458 * a - 0.0638541728 * b, 3);
+  const s = Math.pow(L - 0.0894841775 * a - 1.2914855480 * b, 3);
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+  ];
+}
+function oklchToHex(L, C, H) {
+  const enc = v => {
+    const c = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(Math.max(0, v), 1 / 2.4) - 0.055;
+    return Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, "0");
+  };
+  return ("#" + oklchLinear(L, C, H).map(enc).join("")).toUpperCase();
+}
+// bisection rather than an analytic solve: the sRGB boundary in OKLCH has no closed form worth
+// carrying, and 22 halvings land inside a thousandth of a chroma unit — far finer than 8-bit.
+function maxChroma(L, H) {
+  let lo = 0, hi = 0.4;
+  for (let i = 0; i < 22; i++) {
+    const mid = (lo + hi) / 2;
+    if (oklchLinear(L, mid, H).every(v => v >= -0.0002 && v <= 1.0002)) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+function topicColours(hue) {
+  const cap = (L, C) => Math.min(C, maxChroma(L, hue));
+  return {
+    hue: Math.round(hue),
+    bg: oklchToHex(0.943, cap(0.943, 0.025), hue),
+    fg: oklchToHex(0.525, cap(0.525, 0.130), hue),
+    dot: oklchToHex(0.665, cap(0.665, 0.130), hue),
+    heat: oklchToHex(0.720, maxChroma(0.720, hue) * 0.85, hue)
+  };
+}
+// the other direction, for the seeded topics: they carry hex, not a hue, and the colour cycler
+// in Settings has to know where on the wheel one of them currently sits.
+function hexHue(hex) {
+  const n = parseInt(String(hex).replace("#", ""), 16);
+  if (!isFinite(n)) return 257;
+  const lin = c => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+  const r = lin(((n >> 16) & 255) / 255), g = lin(((n >> 8) & 255) / 255), b = lin((n & 255) / 255);
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+  const B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+  const H = Math.atan2(B, A) * 180 / Math.PI;
+  return H < 0 ? H + 360 : H;
+}
+// The hue for a new topic: the middle of the widest gap left on the wheel. With eleven colours
+// already placed, picking at random is picking a near-duplicate of one of them about half the
+// time — this is the one choice that reliably reads as a NEW colour.
+function nextFreeHue(taken) {
+  const hs = (taken || TOPICS.map(t => t.hue != null ? t.hue : hexHue(t.dot)))
+    .map(h => ((h % 360) + 360) % 360).sort((a, b) => a - b);
+  if (!hs.length) return 257;
+  let best = (hs[0] + 180) % 360, gap = -1;
+  for (let i = 0; i < hs.length; i++) {
+    const a = hs[i], b = i + 1 < hs.length ? hs[i + 1] : hs[0] + 360;
+    if (b - a > gap) { gap = b - a; best = (a + (b - a) / 2) % 360; }
+  }
+  return best;
+}
+
+try { applyTaxonomy(JSON.parse(localStorage.getItem(TAX_KEY))); } catch (e) {}
+reindexTaxonomy();
 
 const DAY_TOKENS = ["M", "T\u00B9", "W", "T\u00B2", "F", "S\u00B9", "S\u00B2"];
 
@@ -955,6 +1098,19 @@ async function syncPull() {
     }
   }
 
+  // her tag names, colours and the ones she's added — last-write-wins on the taxonomy's own
+  // stamp, independent of the entries. Two guards, both about not mistaking silence for a
+  // deletion: a doc with no taxonomy key at all (an older Worker drops it, see putEntries) and
+  // one with no stamp are both left alone rather than read as "she cleared her tags".
+  const rtax = remote.taxonomy;
+  if (rtax && rtax.updatedAt &&
+      (!taxonomyUpdatedAt || new Date(rtax.updatedAt) > new Date(taxonomyUpdatedAt))) {
+    if (applyTaxonomy(rtax)) {
+      try { localStorage.setItem(TAX_KEY, JSON.stringify(taxonomyDoc())); } catch (e) {}
+      changed = true;
+    }
+  }
+
   saveTombstones();
   if (changed) { saveEntries(entries); saveWeekSummaries(); }
 
@@ -1022,6 +1178,10 @@ async function pushEntriesNow(retrying) {
         ...Object.fromEntries(Object.entries(summaryTombstones).map(([k, ts]) => [k, { deletedAt: ts, updatedAt: ts }]))
       }
     };
+    // Only once she has edited it on THIS device. Sending the untouched defaults would give a
+    // device that has never been near Settings a say in the taxonomy, and its say would be
+    // "everything back to the seed" — see taxonomyUpdatedAt.
+    if (taxonomyUpdatedAt) state.taxonomy = taxonomyDoc();
     const res = await pushState(state, cloudEtag || undefined);
     if (res.conflict) {
       // the other device wrote while we were composing this. Re-read, re-merge, then write
@@ -1963,6 +2123,50 @@ let sheetViewportSync = null;
 // rebuild the composer, so the crossing has to reach in and move it. Dropped on close.
 let composerFmtReattach = null;
 
+// ---------- where the caret is, in pixels ----------
+// The composer's field grows to its full content height and the SHEET does the scrolling, so
+// the textarea never has an overflow of its own — and a caret that is inside its own element's
+// box is a caret no browser has any reason to scroll into view. Past the first screenful that
+// reads as the text being eaten: new lines land behind the docked format pill and the keyboard
+// and nothing follows them down. Safari's own caret-chase is no help either — it scrolls the
+// VISUAL viewport, which is exactly what --vvh is built to leave nothing to scroll.
+//
+// So the caret is measured and the sheet is scrolled by hand. There is no API for a textarea's
+// caret position, so this is the mirror trick: a hidden div carrying the field's own metrics
+// (font, width, padding, wrapping) with the text up to the caret inside it, laid out by the
+// same engine the field uses. A wrapped line therefore counts exactly as the field wraps it,
+// which counting "\n"s cannot do.
+//
+// One mirror for the whole app, made on demand and left in place: it is a single hidden div,
+// and the composer is rebuilt often enough (every tag pick, every day change) that a per-build
+// one would be a slow leak.
+let caretMirror = null;
+// every property that can move a line break — anything missed here shows up as the caret
+// drifting a line or two out once the text wraps
+const CARET_MIRROR_PROPS = [
+  "fontFamily", "fontSize", "fontWeight", "fontStyle", "fontVariant", "lineHeight",
+  "letterSpacing", "wordSpacing", "textTransform", "textIndent", "textRendering",
+  "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "tabSize"
+];
+/** The caret line's offset from the top of a textarea's border box, and its height. */
+function caretLineIn(ta) {
+  if (!caretMirror) {
+    caretMirror = el("div", { class: "caret-mirror", "aria-hidden": "true" });
+    document.body.appendChild(caretMirror);
+  }
+  const cs = getComputedStyle(ta);
+  caretMirror.style.width = ta.clientWidth + "px";
+  for (const p of CARET_MIRROR_PROPS) caretMirror.style[p] = cs[p];
+  caretMirror.textContent = ta.value.slice(0, ta.selectionEnd);
+  // a zero-width SPACE rather than an empty span: an empty inline box has no rect to read, and
+  // a caret sitting just after a newline needs a box on the new line, not the end of the old one
+  const mark = el("span", null, "\u200B");
+  caretMirror.appendChild(mark);
+  const mr = caretMirror.getBoundingClientRect(), sr = mark.getBoundingClientRect();
+  return { top: sr.top - mr.top, height: sr.height || parseFloat(cs.lineHeight) || 22 };
+}
+
 // ---------- the keyboard's height, remembered ----------
 // iOS won't tell you how tall the keyboard is until it has already opened, so it can only be
 // learned from the last time. The FIRST composer on a fresh install still adjusts when the
@@ -2557,12 +2761,57 @@ function openComposer(existing) {
     function autoGrow() {
       ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px";
     }
+    // ---- the screen follows the caret ----
+    // See caretLineIn for why nothing does this on its own. The band the caret has to stay
+    // inside is bounded below by the format pill (measured off the pill itself, so it can never
+    // drift from where the bar actually is) and above by the sheet's own visible top — the head
+    // scrolls away with the content, so there is nothing else up there to clear.
+    // Deliberately the SHEET's scrollTop and nothing else: the pill is fixed and docked to the
+    // keyboard, outside the sheet, so scrolling the text never takes the bar with it. That is
+    // the whole point — the caret comes back into view and the row of controls stays put.
+    const CARET_PAD = 26;   // a line of air either side, so the caret is followed rather than pinned
+    function keepCaretInView() {
+      if (document.activeElement !== ta) return;
+      const c = caretLineIn(ta);
+      const top = ta.getBoundingClientRect().top - ta.scrollTop + c.top;
+      const bottom = top + c.height;
+      const barShowing = fmtBar.classList.contains("show") && !fmtBar.classList.contains("tag-open");
+      // Whichever comes first: the pill, or the bottom of the visible viewport (which with the
+      // keyboard up IS the top of the keyboard, since --vvh already excludes it). Both, rather
+      // than the pill alone, because the pill is only an obstruction on a phone — on desktop it
+      // is an ordinary row inside the sheet that scrolls along with the text, and its top is not
+      // a floor at all. Taking the lower of the two is right at both breakpoints without either
+      // needing to know which one it is.
+      const seen = vvp ? vvp.offsetTop + vvp.height : window.innerHeight;
+      const floor = Math.min(barShowing ? fmtBar.getBoundingClientRect().top : seen, seen) - CARET_PAD;
+      const ceil = sheet.getBoundingClientRect().top + CARET_PAD;
+      if (bottom > floor) sheet.scrollTop += bottom - floor;
+      else if (top < ceil) sheet.scrollTop -= ceil - top;
+    }
     // re-measure when the keyboard comes or goes: the pinned height above is measured against
-    // whatever the sheet was then, and --vvh has just moved the ceiling under it
-    sheetViewportSync = () => { ta.style.height = ""; autoGrow(); };
+    // whatever the sheet was then, and --vvh has just moved the ceiling under it. The caret is
+    // chased afterwards, not before — the keyboard's arrival is exactly when the room under the
+    // caret disappears, and re-measuring first means the chase is against the new geometry.
+    // The scroll position has to be carried across by hand: clearing the field's height collapses
+    // it to its min-height for an instant, the sheet's scrollable content collapses with it, and
+    // the browser clamps scrollTop to 0 on the spot — putting her back at the top of a long entry
+    // every time the keyboard is dismissed and brought back. autoGrow restores the height but
+    // nothing restores the scroll, and the caret chase below can't either when the re-measure
+    // happens while the field is blurred.
+    sheetViewportSync = () => {
+      const keep = sheet.scrollTop;
+      ta.style.height = ""; autoGrow();
+      sheet.scrollTop = keep;
+      keepCaretInView();
+    };
     ta.addEventListener("input", () => {
       text = ta.value; saveBtn.disabled = !text.trim(); autoGrow(); syncGhost();
+      keepCaretInView(); // after autoGrow: the field has to be its new height before it's measured
     });
+    // typing is not the only way the caret moves — arrow keys and a tap into the middle of the
+    // text both get here, and the format bar's presses go through fmtPress. A caret already
+    // inside the band makes this a no-op, so it costs a measurement and nothing else.
+    ["keyup", "pointerup"].forEach(evt => ta.addEventListener(evt, keepCaretInView));
     syncGhost();
     sheet.appendChild(el("div", { class: "ta-wrap" }, ta, taGhost));
     pauseShimmerOnScroll(taGhost, sheet); // the sweep holds still while the sheet moves
@@ -2618,8 +2867,13 @@ function openComposer(existing) {
       manualHeight = applied;
       // autoGrow pins an explicit pixel height on the field; left alone it keeps the height
       // it had at the OLD sheet size and overflows once the sheet shrinks under it.
+      // Same scroll-clamp trap as sheetViewportSync: the field collapses for an instant, the
+      // sheet's scroll range collapses with it, and a drag of the notch would otherwise throw a
+      // long entry back to its first line.
+      const keep = sheet.scrollTop;
       ta.style.height = "";
       autoGrow();
+      sheet.scrollTop = keep;
     }
     // the drag's entry point: apply, then remember — dragging IS the choice.
     function setSheetHeight(h) {
@@ -2874,6 +3128,9 @@ function openComposer(existing) {
         if (ev.button !== 0) return; // left/primary press only — a right-click isn't a format op
         ev.preventDefault();
         run();
+        // a format op re-places the selection and can add a line (bullets, the fold marker), so
+        // the caret can end up under the pill from a press rather than a keystroke
+        keepCaretInView();
       });
       return b;
     }
@@ -4561,6 +4818,134 @@ function openSettings() {
     sheet.appendChild(el("div", { class: "grabber" }));
     sheet.appendChild(el("div", { class: "sheet-head" },
       el("span", { class: "title" }, "Settings"), el("span")));
+
+    // ---- tags ----
+    // First on the sheet: it's the only section here that is her CONTENT rather than the app's
+    // plumbing, and the one she'll come looking for. Rebuilt on its own (renderTags) rather than
+    // through build(), so editing a name can't wipe the connection note or the key field below.
+    const tagsBox = el("div");
+    sheet.appendChild(tagsBox);
+    // one debounce for both jobs a rename has to do — write it away, and redraw the list behind
+    // the sheet where the old name is still showing on every pill and group header.
+    let tagSaveT = null;
+    function commitTags() {
+      clearTimeout(tagSaveT);
+      tagSaveT = setTimeout(() => { saveTaxonomy(); render(); }, 220);
+    }
+    // A removal is instantly reversible, so it doesn't get a confirmation — it gets a restore row
+    // in the rose the app already uses for undo. It goes into the retired list rather than a
+    // variable in this sheet, so it is still there after Settings is closed, after a reload, and
+    // on her other device: an undo that expires the moment the panel does is not an undo, it's a
+    // grace period, and the deposits it would strand are the whole reason removal needs one.
+    // Nothing is done to those deposits either way — they keep the tag's id, so a restore puts
+    // every one of them back exactly where it was.
+    function removeTag(item, list, isTopic) {
+      const at = list.indexOf(item);
+      if (at < 0) return;
+      list.splice(at, 1);
+      RETIRED = [...RETIRED, { ...item, at, isTopic }].slice(-RETIRED_MAX);
+      commitTags(); renderTags();
+    }
+    function restoreTag(rec) {
+      const list = rec.isTopic ? TOPICS : MODES;
+      const { at, isTopic, ...item } = rec;
+      list.splice(Math.min(at == null ? list.length : at, list.length), 0, item);
+      RETIRED = RETIRED.filter(r => r !== rec);
+      commitTags(); renderTags();
+    }
+    // circular distance between two hues, so "far from the others" means the same going either
+    // way round the wheel
+    const hueGap = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+    // Tapping a dot walks the wheel FORWARD to the next hue that is at least 24° clear of every
+    // other topic. Forward means repeated taps keep moving rather than flipping between two
+    // colours; the 24° floor means every stop is a colour she can actually tell apart from the
+    // ones already on the list.
+    function cycleHue(cur, others) {
+      for (let step = 6; step <= 360; step += 6) {
+        const h = (cur + step) % 360;
+        if (others.every(o => hueGap(h, o) > 24)) return h;
+      }
+      return (cur + 30) % 360;
+    }
+    function taxRow(item, list, isTopic, usage) {
+      const row = el("div", { class: "tax-row" });
+      if (isTopic) {
+        const dot = el("button", {
+          class: "tax-dot", "aria-label": "Change colour",
+          style: { background: item.dot },
+          onclick: () => {
+            const others = list.filter(x => x !== item).map(x => x.hue != null ? x.hue : hexHue(x.dot));
+            Object.assign(item, topicColours(cycleHue(item.hue != null ? item.hue : hexHue(item.dot), others)));
+            commitTags(); renderTags();
+          }
+        });
+        row.appendChild(dot);
+      }
+      // a ghost input: it reads as the name until she puts a caret in it, and only then as a
+      // field. Same grammar as the composer — nothing looks editable until it is being edited.
+      const name = el("input", {
+        class: "tax-name", type: "text", value: item.label,
+        "aria-label": "Tag name", autocomplete: "off", spellcheck: "false"
+      });
+      // renderTags is deliberately NOT called from here: rebuilding the row under a live caret
+      // is how a rename loses the caret on every keystroke.
+      name.addEventListener("input", () => { item.label = name.value; commitTags(); });
+      name.addEventListener("blur", () => {
+        if (item.label.trim()) return;
+        item.label = isTopic ? "untitled topic" : "untitled mode";
+        name.value = item.label; commitTags();
+      });
+      row.appendChild(name);
+      const n = usage[item.id] || 0;
+      if (n) row.appendChild(el("span", { class: "tax-count" }, String(n)));
+      row.appendChild(el("button", {
+        class: "tax-del", "aria-label": "Remove " + item.label,
+        onclick: () => removeTag(item, list, isTopic)
+      }, "×"));
+      return row;
+    }
+    function addTag(list, isTopic) {
+      const item = isTopic
+        ? { id: "t" + Date.now().toString(36), label: "new topic", ...topicColours(nextFreeHue()) }
+        : { id: "m" + Date.now().toString(36), label: "new mode" };
+      list.push(item);
+      commitTags(); renderTags();
+      // straight into naming it, with the placeholder name selected so typing replaces it —
+      // adding a tag and naming it are one action, not two
+      const rows = tagsBox.querySelectorAll(".tax-row .tax-name");
+      const field = rows[isTopic ? TOPICS.length - 1 : TOPICS.length + MODES.length - 1];
+      if (field) { field.focus(); field.select(); }
+    }
+    function renderTags() {
+      tagsBox.innerHTML = "";
+      // counted off every deposit, not the current period: this is "what am I about to drop",
+      // and a topic with nothing filed under it this month may still hold a year of entries.
+      const usage = {};
+      for (const e of entries) for (const t of (e.tags || [])) usage[t] = (usage[t] || 0) + 1;
+
+      tagsBox.appendChild(el("p", { class: "field-label", style: { marginTop: "0" } }, "topics"));
+      TOPICS.forEach(t => tagsBox.appendChild(taxRow(t, TOPICS, true, usage)));
+      tagsBox.appendChild(el("button", { class: "tax-add", onclick: () => addTag(TOPICS, true) }, "+ topic"));
+
+      tagsBox.appendChild(el("p", { class: "field-label", style: { marginTop: "20px" } }, "modes"));
+      MODES.forEach(m => tagsBox.appendChild(taxRow(m, MODES, false, usage)));
+      tagsBox.appendChild(el("button", { class: "tax-add", onclick: () => addTag(MODES, false) }, "+ mode"));
+
+      // the retired ones, newest first — the mistake she is most likely to be undoing is the
+      // one she just made
+      [...RETIRED].reverse().forEach(rec => {
+        const n = usage[rec.id] || 0;
+        tagsBox.appendChild(el("button", { class: "tax-undo", onclick: () => restoreTag(rec) },
+          "restore " + (rec.label || "that tag")
+          + (n ? " · " + n + " deposit" + (n === 1 ? "" : "s") : "")));
+      });
+
+      tagsBox.appendChild(el("p", { class: "settings-note" },
+        "renaming keeps every deposit already filed under a tag — they're stored by tag, not by name. "
+        + "removing one leaves those deposits untagged rather than deleting them, and tapping a dot "
+        + "gives that topic the next colour the palette has room for."));
+    }
+    renderTags();
 
     // ---- cloud sync ----
     // A Worker URL and a secret, typed in once per device. No accounts and no sign-in

@@ -197,6 +197,58 @@
   }
   .settings-note { font-size: 12px; color: var(--subtle); line-height: 1.5; margin: 10px 0 0; }
 
+  /* the tag editor: one row per tag, and the row IS the name — no boxed field, no edit mode.
+     Nothing here announces itself as a control until it's being used, which is why the input
+     carries no background of its own and the × only arrives on hover (and stays put on touch,
+     where there is no hover to arrive on). */
+  .tax-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 2px 0 2px 2px; border-radius: 10px;
+  }
+  .tax-dot {
+    flex: none; width: 12px; height: 12px; padding: 0;
+    border: none; border-radius: 50%;
+    transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .tax-dot:active { transform: scale(0.86); }
+  /* the ghost: sits at the sheet's own text colour, so a list of tags reads as a list of names
+     rather than a stack of inputs. It only looks like a field once there's a caret in it. */
+  .tax-name {
+    flex: 1; min-width: 0;
+    font-family: var(--font); font-size: 15px; color: var(--ink);
+    background: none; border: none; outline: none;
+    padding: 8px 0; margin: 0;
+  }
+  .tax-name:focus { color: var(--ink); }
+  .tax-count { flex: none; font-family: var(--mono); font-size: 11px; color: var(--subtle); }
+  .tax-del {
+    flex: none; width: 26px; height: 26px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; line-height: 1; color: var(--subtle);
+    background: none; border: none; border-radius: 8px;
+    opacity: 0; transition: opacity 0.15s ease, background 0.15s ease;
+  }
+  /* no hover to reveal on a phone, so there the × is simply always there — quietly */
+  @media (hover: none) { .tax-del { opacity: 0.45; } }
+  @media (hover: hover) {
+    .tax-row:hover .tax-del, .tax-name:focus ~ .tax-del { opacity: 1; }
+    .tax-del:hover { background: #FBE3E1; color: #C43C36; }
+  }
+  .tax-add {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; color: var(--subtle);
+    background: none; border: none; padding: 10px 0 2px 2px;
+  }
+  @media (hover: hover) { .tax-add:hover { color: var(--ink); } }
+  /* undo lives where the tag was, in the app's restore rose — the removal needs no confirming
+     because this is standing right behind it */
+  .tax-undo {
+    display: block; width: 100%; margin-top: 8px;
+    font-family: var(--font); font-size: 13px; text-align: left;
+    color: #C43C36; background: #FBE3E1;
+    border: none; border-radius: 10px; padding: 9px 12px;
+  }
+
   /* layout experiment toggles (temporary) */
   .layout-btns { display: flex; gap: 12px; }
   .layout-btns button {
@@ -1267,6 +1319,17 @@
   @keyframes calRise { to { opacity: 0; transform: translateY(-10px) scale(0.97); } }
   @media (prefers-reduced-motion: reduce) { .cal-pop, .cal-pop.closing { animation: none; } }
   .cal-sel { background: var(--ink); color: #fff !important; border-radius: 8px; font-weight: 700; }
+
+  /* the caret mirror (see caretLineIn): an off-screen copy of the composer's field used only to
+     find out which line the caret is on. Everything that decides a line break is copied from the
+     field in JS; everything here is about it laying out at all, and being unreachable while it
+     does. visibility: hidden rather than display: none — a display: none box has no geometry to
+     measure, which is the one thing this element exists for. */
+  .caret-mirror {
+    position: absolute; top: 0; left: -9999px;
+    visibility: hidden; pointer-events: none;
+    white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;
+  }
 
   .sheet textarea {
     width: 100%; font-family: var(--font); font-size: 16px; line-height: 1.5;

@@ -122,10 +122,21 @@ async function putEntries(request, env) {
   if (!payload || !Array.isArray(payload.entries)) {
     return json({ error: "expected { entries: [...] }" }, 400);
   }
+  // The taxonomy (her tag names and colours) rides along with the entries, but unlike them it
+  // is CARRIED FORWARD when a push doesn't mention it. A client only sends it once she has
+  // edited it on that device, so a device still on the defaults pushes an entry without one —
+  // and rewriting the object with the key simply missing would drop her renamed tags for every
+  // device. The extra read only happens on that path.
+  let taxonomy = payload.taxonomy;
+  if (!taxonomy) {
+    const prev = await env.BUCKET.get(ENTRIES_KEY);
+    if (prev) taxonomy = (await prev.json().catch(() => ({}))).taxonomy;
+  }
   const body = JSON.stringify({
     entries: payload.entries,
     tombstones: payload.tombstones || {},
     summaries: payload.summaries || {},
+    ...(taxonomy ? { taxonomy } : {}),
     writtenAt: new Date().toISOString()
   });
 
