@@ -8,6 +8,9 @@
     --canvas-a: rgba(240,240,241,0.82);
     --canvas-0: rgba(240,240,241,0);
     --card: #FFFFFF;
+    /* the same white with no alpha, for fades that end in nothing — written out rather than
+       using `transparent`, which is rgba(0,0,0,0) and can grey the middle of a gradient */
+    --card-0: rgba(255,255,255,0);
     --hairline: rgba(0,0,0,0.055);
     --field: #F4F4F6;
     --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
@@ -1197,6 +1200,51 @@
     padding: 9px 22px; margin: -5px auto 3px;
     cursor: ns-resize; touch-action: none; user-select: none; -webkit-user-select: none;
   }
+  /* ---- the composer's pinned head ---- */
+  /* Grabber and control row in one sticky block, so a long entry can't scroll its own controls
+     away. The negative margins pull it out of the sheet's 20px gutters and its own padding puts
+     the spacing back inside — without that the fade underneath would stop 20px short of each
+     edge and leave two columns of text running past it unfaded. The -12px top does the same for
+     the sheet's padding-top: it makes that band part of the sticky block, so `top: 0` lands the
+     row where it already sat instead of 12px higher the instant it sticks.
+     Those margins are exactly the sheet's own padding, so the block spans the scrollport and not
+     a pixel more — .sheet has overflow-y: auto, which forces overflow-x to auto as well, and
+     anything wider than this would put a horizontal scrollbar on the composer. */
+  .composer-top {
+    position: sticky; top: 0; z-index: 6;
+    margin: -12px -20px 0; padding: 12px 20px 0;
+    background: var(--card);
+  }
+  /* the fade: the text doesn't slide under a hard edge, it dissolves into the white just below
+     the row. The gradient is the white itself; the mask fades the BLUR out on the same curve, so
+     the frosting thins as the paint thins rather than ending on a visible seam. Sits below the
+     block (top: 100%), which is where the text it is fading actually is. */
+  .composer-top::after {
+    content: ""; position: absolute; left: 0; right: 0; top: 100%;
+    height: 30px; pointer-events: none;
+    background: linear-gradient(to bottom, var(--card), var(--card-0));
+    -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
+    -webkit-mask-image: linear-gradient(to bottom, #000, transparent);
+    mask-image: linear-gradient(to bottom, #000, transparent);
+    opacity: 0; transition: opacity 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* nothing underneath yet — no gradient over a bar with plain white below it */
+  .composer-top.stuck::after { opacity: 1; }
+  /* Each end withdraws into its OWN corner: the left group scales toward the top-left, the right
+     group toward the top-right. A shared origin would slide both toward the middle, which reads
+     as the row collapsing inward rather than as two groups settling back out of the way.
+     --head-k is scrubbed by scroll from JS. No transition on the transform on purpose — it is
+     following a finger, and a transition would put the row behind it. */
+  .composer-top .head-left, .composer-top .head-acts {
+    transform: scale(var(--head-k, 1));
+    will-change: transform;
+  }
+  .composer-top .head-left { transform-origin: left top; }
+  .composer-top .head-acts { transform-origin: right top; }
+  @media (prefers-reduced-motion: reduce) {
+    .composer-top .head-left, .composer-top .head-acts { transform: none; }
+  }
+
   .sheet-head {
     position: relative;
     display: flex; justify-content: space-between; align-items: center;

@@ -2408,6 +2408,36 @@ function openComposer(existing) {
   // day/week/tag/lock change — so the tap-away handler is swapped, never stacked.
   let sheetTapAway = null;
 
+  // ---- the head pins, and shrinks as the text runs under it ----
+  // The grabber and the day/week/tag/dismiss/commit row ride in one sticky block, so a long
+  // entry never scrolls its own controls off the top. As the text moves under it the row scales
+  // down — the left group toward the top-left corner and the right group toward the top-right,
+  // so the two ends draw back into their own corners instead of both drifting toward the middle.
+  // It is scrubbed by scroll rather than played as an animation: a transition here would lag a
+  // finger that is still moving, and the whole point is that the bar tracks the text.
+  // Layout is deliberately untouched — a transform costs no reflow, so this stays smooth at 60fps
+  // where re-measuring a row on every scroll frame would fight the scroll itself.
+  const HEAD_FLOOR = 0.82;   // how small the row gets, at rest against the top
+  const HEAD_RUN = 120;      // px of scroll it takes to get there
+  // Registered ONCE per composer, not per build(): the sheet outlives every rebuild, so a
+  // listener added in build() would stack one more copy on every tag pick and day change.
+  // Written straight from the scroll handler with no requestAnimationFrame in between. The rAF
+  // was there out of habit and it was wrong twice over: scroll already fires at most once a
+  // frame, so it batches nothing, and deferring the write by a frame is exactly what makes a
+  // scroll-linked transform trail the content it is supposed to be tracking. Nothing here forces
+  // layout either — scrollTop is read after layout has settled, and a custom property plus a
+  // class that only drives opacity are both write-only as far as geometry is concerned.
+  let headWrapEl = null;
+  function syncHeadScale() {
+    if (!headWrapEl) return;
+    const run = Math.min(1, Math.max(0, sheet.scrollTop) / HEAD_RUN);
+    headWrapEl.style.setProperty("--head-k", (1 - run * (1 - HEAD_FLOOR)).toFixed(3));
+    // the fade only exists while there is something to fade — nothing under the bar means no
+    // reason to put a gradient over it
+    headWrapEl.classList.toggle("stuck", sheet.scrollTop > 2);
+  }
+  sheet.addEventListener("scroll", syncHeadScale, { passive: true });
+
   function close() {
     document.body.classList.remove("composing"); // let the list come back forward
     bindFmtSelectionSync(null); sheetViewportSync = null; clearKeyboardReserve();
@@ -2443,7 +2473,11 @@ function openComposer(existing) {
     sheet.innerHTML = "";
     if (fmtBarEl) { fmtBarEl.remove(); fmtBarEl = null; } // see the note on fmtBarEl above
     const grabber = el("div", { class: "grabber", title: "Drag to resize" });
-    sheet.appendChild(grabber);
+    // the sticky block: grabber and head together, so the resize notch stays reachable from
+    // anywhere in a long entry rather than being stranded at the top of the scroll
+    const headWrap = el("div", { class: "composer-top" }, grabber);
+    headWrapEl = headWrap;
+    sheet.appendChild(headWrap);
 
     // ---- header: day scrubber | title | save ----
     const head = el("div", { class: "sheet-head" });
@@ -2741,7 +2775,8 @@ function openComposer(existing) {
       head.appendChild(el("span", { class: "title" }, segState.ranges.length + " deposits"));
     }
     head.appendChild(headActs);
-    sheet.appendChild(head);
+    headWrap.appendChild(head);
+    syncHeadScale(); // a rebuild mid-scroll must come back at the size the scroll had it at
 
     // ---- segmentation preview: the ramble cut into blocks, nothing else on the sheet ----
     if (segState && segState.ranges) { buildSegPreview(); return; }
@@ -2764,8 +2799,9 @@ function openComposer(existing) {
     // ---- the screen follows the caret ----
     // See caretLineIn for why nothing does this on its own. The band the caret has to stay
     // inside is bounded below by the format pill (measured off the pill itself, so it can never
-    // drift from where the bar actually is) and above by the sheet's own visible top — the head
-    // scrolls away with the content, so there is nothing else up there to clear.
+    // drift from where the bar actually is) and above by the pinned head — which is a real
+    // obstruction now that it stays put, so the ceiling is its bottom edge rather than the
+    // sheet's top. Measured live, because that edge moves: the head shrinks as it is scrolled.
     // Deliberately the SHEET's scrollTop and nothing else: the pill is fixed and docked to the
     // keyboard, outside the sheet, so scrolling the text never takes the bar with it. That is
     // the whole point — the caret comes back into view and the row of controls stays put.
@@ -2784,7 +2820,8 @@ function openComposer(existing) {
       // needing to know which one it is.
       const seen = vvp ? vvp.offsetTop + vvp.height : window.innerHeight;
       const floor = Math.min(barShowing ? fmtBar.getBoundingClientRect().top : seen, seen) - CARET_PAD;
-      const ceil = sheet.getBoundingClientRect().top + CARET_PAD;
+      const ceil = (headWrap ? headWrap.getBoundingClientRect().bottom
+                             : sheet.getBoundingClientRect().top) + CARET_PAD;
       if (bottom > floor) sheet.scrollTop += bottom - floor;
       else if (top < ceil) sheet.scrollTop -= ceil - top;
     }
@@ -3343,7 +3380,10 @@ function openComposer(existing) {
     // fmtBarEl is only set in the phone case: that is the one build()'s `sheet.innerHTML = ""`
     // cannot reach, so it is the one that has to be removed by hand.
     const attachFmtBar = () => {
-      if (deskMQ.matches) { head.insertAdjacentElement("afterend", fmtBar); fmtBarEl = null; }
+      // after the WRAPPER, not after the head: the head lives inside the sticky block now, and
+      // "afterend" of the head would put the desktop format row inside it — pinning a row that
+      // has always scrolled with the text, and putting it above the block's own fade.
+      if (deskMQ.matches) { headWrap.insertAdjacentElement("afterend", fmtBar); fmtBarEl = null; }
       else { sheetRoot.appendChild(fmtBar); fmtBarEl = fmtBar; }
     };
     attachFmtBar();
