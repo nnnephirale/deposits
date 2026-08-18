@@ -192,6 +192,67 @@
   }
   .search-hint { font-size: 13px; color: var(--subtle); margin: 8px 4px; }
 
+  /* ---- the gradient tuner (TEMPORARY) ---- */
+  /* Scratch UI for dialling in the composer's fade — see the FADE_SPECS block in index.html.
+     Goes out with it once the numbers are settled.
+     z-index above the format pill (55) because it has to be usable while the composer is open
+     with the keyboard up, which is the only state where the thing it tunes is on screen.
+     Bottom-left on a phone so it clears the pill's own centred capsule; a fixed corner panel on
+     desktop. Width is capped either way — a control surface that spans the viewport is the one
+     thing her panels never do. */
+  .fade-tuner {
+    position: fixed; z-index: 70;
+    left: 12px; width: min(230px, calc(100vw - 24px));
+    bottom: calc(max(var(--vvb), var(--kbr), env(safe-area-inset-bottom)) + 84px);
+    padding: 10px 12px 8px;
+    background: rgba(255,255,255,0.92);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border: 1px solid rgba(0,0,0,0.04); border-radius: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 12px 34px rgba(0,0,0,0.16);
+    user-select: none; -webkit-user-select: none;
+  }
+  @media (min-width: 1080px) {
+    /* out of the composer's way entirely once there is room for it to stand aside */
+    .fade-tuner { left: 20px; bottom: 20px; width: 250px; }
+  }
+  .ft-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .ft-title {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; color: var(--subtle);
+  }
+  .ft-hide {
+    width: 22px; height: 22px; padding: 0; font-size: 15px; line-height: 1;
+    color: var(--subtle); background: none; border: none; border-radius: 7px;
+  }
+  /* the row IS the track — a filled background row, her slider idiom for a continuous value
+     worth scrubbing. No thumb: there is nothing to hit, so a press anywhere sets the value. */
+  .ft-row {
+    position: relative; display: flex; align-items: center; justify-content: space-between;
+    height: 30px; padding: 0 9px; margin-bottom: 4px;
+    border-radius: 9px; background: var(--field); overflow: hidden;
+    touch-action: none; cursor: ew-resize;
+  }
+  .ft-fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: #E4E4E9;
+  }
+  .ft-label, .ft-val {
+    position: relative; font-family: var(--mono); font-size: 11px; letter-spacing: 0.4px;
+    color: var(--subtle);
+  }
+  /* a value she has moved reads darker than one still sitting on its default, so the panel
+     says at a glance which of the five are actually doing anything */
+  .ft-row.moved .ft-label, .ft-row.moved .ft-val { color: var(--ink); }
+  .ft-foot { display: flex; gap: 6px; margin-top: 6px; }
+  .ft-copy, .ft-reset {
+    flex: 1; padding: 7px 0; border: none; border-radius: 9px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.4px;
+    background: var(--field); color: var(--ink);
+  }
+  /* reset is the destructive half of the pair, so it takes the app's faint-red treatment */
+  .ft-reset { flex: none; padding: 7px 12px; background: #FBE3E1; color: #C43C36; }
+  .ft-copy:active, .ft-reset:active { transform: scale(0.98); }
+
   /* settings sheet (long-press title) */
   .key-input {
     width: 100%; font-family: var(--mono); font-size: 13px;
@@ -350,6 +411,12 @@
        gap and the elbow→dashes gap are the same by construction rather than by eye. */
     --badge-gap: 5.75px;
   }
+  /* the pinned block's heading: the pin where a topic group has its colour dot, so the two
+     read as the same kind of heading with a different name on it */
+  .group-pin { display: inline-flex; color: var(--subtle); line-height: 0; }
+  .group-pin svg { width: 13px; height: 13px; }
+  .pinned-group .group-label { color: var(--ink); }
+
   .entry-gutter { position: relative; flex: none; width: 22px; }
   /* the thread linking one day badge to the next — from under this badge to the next one.
      suppressed on the last entry so it doesn't dangle into the card's bottom padding. */
@@ -431,6 +498,43 @@
     content: ""; position: absolute; top: 0; left: 58px; right: 20px;
     height: 1px; background: var(--hairline);
   }
+  /* ---- swipe an entry open ---- */
+  /* pan-y is what makes this coexist with the list: the browser keeps vertical scrolling and
+     hands us everything horizontal, so nothing has to guess which gesture is starting.
+     The rail is parked just off the card's right edge and the CARD is what slides — .group-card
+     already clips, so the rail needs no measuring, no animating in, and no z-index games. */
+  .entry {
+    touch-action: pan-y;
+    transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* nothing eased while a finger is on it — the card tracks the finger, it doesn't chase it */
+  .entry.swiping { transition: none; }
+  .entry.swiped { transform: translateX(calc(-1 * var(--rail-w))); }
+  /* a photo row does its own sideways scrolling, so it takes its axis back */
+  .rt-gallery { touch-action: pan-x pan-y; }
+  .entry-rail {
+    --rail-w: 132px;
+    position: absolute; left: 100%; top: 0; bottom: 0; width: var(--rail-w);
+    display: flex; align-items: stretch;
+  }
+  .entry { --rail-w: 132px; }
+  .er-btn {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 0; border: none; background: var(--field); color: var(--subtle);
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .er-btn svg { width: 19px; height: 19px; }
+  .er-btn:active { background: #E9E9EC; }
+  /* on-state for the two toggles: they say what the entry IS, so a pinned entry's rail opens
+     with the pin already lit and the tap plainly reads as "turn this off" */
+  .er-pin.on, .er-lock.on { background: var(--ink); color: #fff; }
+  .er-del { background: #FBE3E1; color: #C43C36; }
+  .er-del:active { background: #F7D2CF; }
+  /* the lock means what it says: delete stands down rather than disappearing, so the rail is
+     the same three slots whatever state the entry is in */
+  .er-del:disabled { background: var(--field); color: #D8D8DE; }
+  @media (prefers-reduced-motion: reduce) { .entry { transition: none; } }
+
   .entry p { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
 
   /* inline formatting */
@@ -1226,17 +1330,29 @@
      the row. The gradient is the white itself; the mask fades the BLUR out on the same curve, so
      the frosting thins as the paint thins rather than ending on a visible seam. Sits below the
      block (top: 100%), which is where the text it is fading actually is. */
+  /* Every number here is a variable so the fade can be tuned live — see the gradient tuner in
+     Settings, which writes these five onto :root. The values below ARE the defaults; the tuner's
+     reset simply clears its overrides and lets these show through again.
+       --fade-h     how far the fade reaches down (its length)
+       --fade-blur  how soft the frosting is
+       --fade-op    how strongly the whole band paints
+       --fade-hold  how far down the solid white holds before it starts giving way
+       --fade-mask  where the blur has thinned to nothing — below --fade-hold shapes the curve */
   .composer-top::after {
     content: ""; position: absolute; left: 0; right: 0; top: 100%;
-    height: 30px; pointer-events: none;
-    background: linear-gradient(to bottom, var(--card), var(--card-0));
-    -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px);
-    -webkit-mask-image: linear-gradient(to bottom, #000, transparent);
-    mask-image: linear-gradient(to bottom, #000, transparent);
+    height: var(--fade-h, 30px); pointer-events: none;
+    background: linear-gradient(to bottom,
+      var(--card) var(--fade-hold, 0%), var(--card-0) 100%);
+    -webkit-backdrop-filter: blur(var(--fade-blur, 7px));
+    backdrop-filter: blur(var(--fade-blur, 7px));
+    -webkit-mask-image: linear-gradient(to bottom,
+      #000 var(--fade-hold, 0%), transparent var(--fade-mask, 100%));
+    mask-image: linear-gradient(to bottom,
+      #000 var(--fade-hold, 0%), transparent var(--fade-mask, 100%));
     opacity: 0; transition: opacity 0.24s cubic-bezier(0.16, 1, 0.3, 1);
   }
   /* nothing underneath yet — no gradient over a bar with plain white below it */
-  .composer-top.stuck::after { opacity: 1; }
+  .composer-top.stuck::after { opacity: var(--fade-op, 1); }
   /* Each end withdraws into its OWN corner: the left group scales toward the top-left, the right
      group toward the top-right. A shared origin would slide both toward the middle, which reads
      as the row collapsing inward rather than as two groups settling back out of the way.
@@ -1300,6 +1416,15 @@
   .head-tag svg { width: 16px; height: 16px; display: block; }
   /* carrying tags is the notable state, so it takes the ink; empty stays quiet */
   .head-tag.has-tags { background: var(--ink); color: #fff; }
+  /* the pin sits beside the tag lozenge and borrows its whole shape, so the head reads as one
+     row of controls rather than a lozenge and a stray button. Square rather than the tag's
+     padded oval: it carries a glyph and no count, and an oval around a single 16px icon reads
+     as a lozenge missing its label. */
+  .head-pin { width: var(--head-h); padding: 0; }
+  .head-pin svg { width: 16px; height: 16px; }
+  /* off is quiet, on is ink — the same on/off pair .head-tag already uses, so "carrying
+     something" looks the same whether it is tags or a pin */
+  .head-pin.on { background: var(--ink); color: #fff; }
   .head-tag .ht-count { line-height: 1; }
   /* the two ring buttons. The ring is here, not in the SVGs, so both are the same circle and only
      their glyph differs — and so the disabled/active states have one thing to restyle. */

@@ -508,6 +508,9 @@ const FMT_LINK_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="non
 // CSS border on .head-act, so both buttons share one ring geometry and stay the same size
 // whatever is inside them.
 const TAG_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.2 3.5H5a1.5 1.5 0 0 0-1.5 1.5v6.2a2 2 0 0 0 .6 1.4l7 7a1.5 1.5 0 0 0 2.1 0l6.2-6.2a1.5 1.5 0 0 0 0-2.1l-7-7a2 2 0 0 0-1.4-.6Z"/><circle cx="8" cy="8" r="1.4" fill="currentColor" stroke="none"/></svg>';
+// the pin, for the composer head and the swipe rail. Drawn as a pushpin seen head-on: a head,
+// a shaft, and the two shoulders that make it read as a pin rather than a balloon at 16px.
+const PIN_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3.5h6M10 3.5v5.2L7.2 12a1 1 0 0 0 .8 1.6h8a1 1 0 0 0 .8-1.6L14 8.7V3.5"/><path d="M12 13.6V20.5"/></svg>';
 const CROSS_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17"/></svg>';
 // a bar wiping across the line — the ||redact|| marker's own idea (mask, not strike) rather
 // than the highlighter-pen glyph a literal read of "highlight" would suggest.
@@ -1521,6 +1524,9 @@ if (layoutBtns) for (const name of LAYOUT_OPTIONS) {
   }, name));
 }
 
+// the rail's two glyphs — bigger and stroked, where LOCK_ICON is a 10px meta-row marker
+const RAIL_LOCK_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="9.5" rx="2.4"/><path d="M8 10.5V7.6a4 4 0 0 1 8 0v2.9"/></svg>';
+const RAIL_TRASH_ICON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6.5h16M9.5 6.5V4.8a1.3 1.3 0 0 1 1.3-1.3h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7"/><path d="M6.5 6.5 7.6 20a1.4 1.4 0 0 0 1.4 1.3h6a1.4 1.4 0 0 0 1.4-1.3l1.1-13.5"/><path d="M10.5 10.5v7M13.5 10.5v7"/></svg>';
 const LOCK_ICON = '<svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><rect x="2.5" y="5.2" width="7" height="4.8" rx="1.2" fill="none" stroke="#C7C7CC" stroke-width="1.2"/><path d="M4 5.2V3.8a2 2 0 0 1 4 0v1.4" fill="none" stroke="#C7C7CC" stroke-width="1.2"/></svg>';
 
 // the grey rounded square with the day's initial. Shared by the entry gutter and — since
@@ -1622,7 +1628,137 @@ function entryEl(e, opts) {
   }
   if (meta.children.length) body.appendChild(meta);
   entry.appendChild(body);
+  if (!opts.noSwipe) attachEntrySwipe(entry, e);
   return entry;
+}
+
+// ---------- swipe an entry open ----------
+// Drag an entry left and a rail of three comes out from under its right edge: pin, lock,
+// delete. The card is what moves — the rail sits parked just off its right edge (left: 100%)
+// and is revealed by the card sliding over it, so nothing has to be measured or animated into
+// place and .group-card's own overflow does the clipping for free.
+//
+// Only ONE is open at a time. Two open rails means the next tap is ambiguous, and the second
+// swipe reads as "I've changed my mind about the first" far more often than "both".
+let openSwipe = null;
+function closeOpenSwipe() {
+  if (!openSwipe) return;
+  openSwipe.classList.remove("swiped");
+  openSwipe.style.transform = "";
+  openSwipe = null;
+}
+// the whole list stands down when a tap lands anywhere that isn't the open rail
+document.addEventListener("pointerdown", ev => {
+  if (openSwipe && !ev.target.closest(".entry-rail") && !openSwipe.contains(ev.target)) closeOpenSwipe();
+}, true);
+
+function attachEntrySwipe(entry, e) {
+  const rail = el("div", { class: "entry-rail" });
+  // Rebuilt per action rather than re-rendered from state: every one of these calls render(),
+  // which throws this element away and makes a new one. Nothing here has to stay in sync.
+  const act = (cls, label, iconHtml, run) => {
+    const b = el("button", { class: "er-btn " + cls, "aria-label": label });
+    b.innerHTML = iconHtml;
+    b.addEventListener("click", ev => { ev.stopPropagation(); closeOpenSwipe(); run(); });
+    return b;
+  };
+  const patch = fields => {
+    entries = entries.map(x => x.id === e.id
+      ? { ...x, ...fields, updatedAt: new Date().toISOString() } : x);
+    saveEntries(entries);
+    render();
+  };
+  rail.appendChild(act("er-pin" + (e.pinned ? " on" : ""),
+    e.pinned ? "Unpin" : "Pin", PIN_ICON, () => patch({ pinned: !e.pinned })));
+  rail.appendChild(act("er-lock" + (e.locked ? " on" : ""),
+    e.locked ? "Unlock" : "Lock", RAIL_LOCK_ICON, () => patch({ locked: !e.locked })));
+  // Locked means locked: the composer already refuses to show Delete on a locked entry, and a
+  // rail that deleted one anyway would make the lock worth less than the gesture that ignores
+  // it. Shown disabled rather than hidden so the rail is the same three slots every time.
+  const del = act("er-del", "Delete", RAIL_TRASH_ICON, () => {
+    tombstoneEntry(e.id);              // so the deletion syncs, not just locally
+    entries = entries.filter(x => x.id !== e.id);
+    saveEntries(entries);
+    render();
+  });
+  del.disabled = !!e.locked;
+  rail.appendChild(del);
+  entry.appendChild(rail);
+
+  // ---- the gesture ----
+  // touch-action: pan-y on .entry (see the CSS) hands vertical scrolling to the browser and
+  // horizontal movement to us, so the list still scrolls natively while this is listening.
+  const RAIL_W = 132;      // three 44px slots — kept in step with the CSS by --rail-w
+  const CLAIM = 8;         // px of horizontal travel before this is a swipe and not a tap
+  // suppressClick is for the ONE click that a finished drag leaves behind. Without it the two
+  // jobs of the click handler collide: the drag's own trailing click would be read as "a tap on
+  // an open rail" and close the rail the drag just opened.
+  let id = null, x0 = 0, y0 = 0, dx = 0, claimed = false, wasOpen = false, suppressClick = false;
+  entry.addEventListener("pointerdown", ev => {
+    if (!ev.isPrimary || ev.button !== 0) return;
+    // a photo row scrolls itself sideways, and the checkboxes/links/read-more are all targets
+    // whose own gesture this must not eat
+    if (ev.target.closest(".rt-gallery, .rt-check, .rt-link, .read-more, .entry-rail")) return;
+    id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY; dx = 0; claimed = false;
+    // a drag that ended without a click (the usual case on touch) must not leave the flag armed
+    // for whatever gets tapped next
+    suppressClick = false;
+    wasOpen = entry.classList.contains("swiped");
+  });
+  entry.addEventListener("pointermove", ev => {
+    if (ev.pointerId !== id) return;
+    const mx = ev.clientX - x0, my = ev.clientY - y0;
+    if (!claimed) {
+      // vertical intent wins outright — this is a list first and a set of rails second
+      if (Math.abs(my) > Math.abs(mx)) { id = null; return; }
+      if (Math.abs(mx) < CLAIM) return;
+      claimed = true;
+      closeOpenSwipe();
+      if (wasOpen) { entry.classList.add("swiped"); openSwipe = entry; }
+      try { entry.setPointerCapture(id); } catch (err) {}
+      entry.classList.add("swiping");
+    }
+    // rubber-band past the ends rather than stopping dead: an edge that refuses to move reads
+    // as a broken gesture, one that resists reads as an edge
+    const raw = (wasOpen ? -RAIL_W : 0) + mx;
+    dx = raw > 0 ? raw * 0.25 : (raw < -RAIL_W ? -RAIL_W + (raw + RAIL_W) * 0.25 : raw);
+    entry.style.transform = "translateX(" + dx.toFixed(1) + "px)";
+  });
+  const finish = ev => {
+    if (ev.pointerId !== id) return;
+    id = null;
+    if (!claimed) return;
+    entry.classList.remove("swiping");
+    try { entry.releasePointerCapture(ev.pointerId); } catch (err) {}
+    // past a third of the way is a commitment either direction — the same threshold both ways,
+    // so opening and closing take the same amount of travel
+    const open = dx < -RAIL_W / 3;
+    entry.style.transform = "";
+    entry.classList.toggle("swiped", open);
+    openSwipe = open ? entry : (openSwipe === entry ? null : openSwipe);
+    claimed = false;
+    suppressClick = true;   // eaten by the click this drag is about to produce, if any
+  };
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach(evt =>
+    entry.addEventListener(evt, finish));
+  // Two jobs, in order. A drag's trailing click is swallowed outright; after that, a tap on a
+  // card whose rail is open closes the rail instead of opening the composer — the rail is the
+  // question on screen, and the first tap anywhere should answer it.
+  entry.addEventListener("click", ev => {
+    // Consumed either way, so a press on the rail can't leave the flag armed for the next tap
+    // on the card body.
+    const trailing = suppressClick;
+    suppressClick = false;
+    // The rail is a child of the entry and this listener is on CAPTURE, so without this the
+    // card would eat the very clicks the rail exists to receive — pin, lock and delete all
+    // silently doing nothing. The rail's buttons stop their own propagation.
+    if (ev.target.closest(".entry-rail")) return;
+    if (trailing) { ev.stopPropagation(); ev.preventDefault(); return; }
+    if (entry.classList.contains("swiped")) {
+      ev.stopPropagation(); ev.preventDefault();
+      closeOpenSwipe();
+    }
+  }, true);
 }
 
 // Read-more opens the whole entry — above AND below the fold — floating in a centred modal
@@ -1686,6 +1822,23 @@ function renderTopicGroups(list, dense) {
     group.appendChild(card);
     entriesRoot.appendChild(group);
   }
+}
+
+// the pinned block: the same card as any other group, headed by the pin rather than a topic.
+// Order is whatever the view already sorted them into, so it follows the reading direction
+// she set rather than inventing a second rule for the top of the list.
+function renderPinnedGroup(list) {
+  const card = el("div", { class: "group-card" });
+  const head = el("div", { class: "group-head" });
+  const ico = el("span", { class: "group-pin" });
+  ico.innerHTML = PIN_ICON;
+  head.appendChild(ico);
+  head.appendChild(el("span", { class: "group-label" }, "pinned"));
+  card.appendChild(head);
+  for (const e of list) {
+    card.appendChild(entryEl(e, { showWeek: view === "month", showDate: view === "month" }));
+  }
+  entriesRoot.appendChild(el("div", { class: "group pinned-group" }, card));
 }
 
 function renderDayGroups(list) {
@@ -2096,12 +2249,164 @@ function renderView() {
       if (recap) entriesRoot.appendChild(recap);
     }
   }
-  if (layout === "day") renderDayGroups(list);
-  else renderTopicGroups(list, false);
+  // Pinned entries lift clear of the grouping into a block of their own at the top. Undated
+  // ones are the case this is really for: with no day to sort by they sink to the "anytime"
+  // bucket at the very bottom, which is the worst place for the running list or the standing
+  // note that is exactly the kind of thing you'd pin. A pinned DATED entry rises too — one
+  // toggle that means the same thing everywhere beats one that silently does nothing on most
+  // entries. They come out of the groups below, so nothing is listed twice.
+  const pins = list.filter(e => e.pinned);
+  if (pins.length) renderPinnedGroup(pins);
+  const rest = pins.length ? list.filter(e => !e.pinned) : list;
+  if (layout === "day") renderDayGroups(rest);
+  else renderTopicGroups(rest, false);
 }
 
 // ---------- composer ----------
 const sheetRoot = document.getElementById("sheetRoot");
+
+// ---------- the gradient tuner (temporary) ----------
+// TEMPORARY. A scratch panel for dialling in the composer's fade by eye instead of by guess —
+// the five numbers behind .composer-top::after, live, with the values printed so they can be
+// read back. When the fade is settled these numbers go into the CSS as literals and everything
+// in this section comes out: the FADE_SPECS list, the panel, its CSS, and the Settings row.
+//
+// Stored so a reload doesn't undo an afternoon of tuning, and written onto :root as overrides
+// rather than into the rule — the CSS keeps the defaults, so `reset` is a matter of removing
+// what's here and letting them show through again, with nothing to copy back.
+const FADE_KEY = "weekly-deposits-fade-tune";
+const FADE_TUNE_ON_KEY = "weekly-deposits-fade-tune-on";
+const FADE_SPECS = [
+  { k: "h",    var: "--fade-h",    label: "length",  min: 0,   max: 160, step: 1,    unit: "px", def: 30 },
+  { k: "blur", var: "--fade-blur", label: "blur",    min: 0,   max: 30,  step: 0.5,  unit: "px", def: 7 },
+  { k: "op",   var: "--fade-op",   label: "opacity", min: 0,   max: 1,   step: 0.01, unit: "",   def: 1 },
+  { k: "hold", var: "--fade-hold", label: "hold",    min: 0,   max: 90,  step: 1,    unit: "%",  def: 0 },
+  { k: "mask", var: "--fade-mask", label: "falloff", min: 10,  max: 100, step: 1,    unit: "%",  def: 100 }
+];
+let fadeTune = {};
+let fadeTuneOn = false;
+try { fadeTune = JSON.parse(localStorage.getItem(FADE_KEY)) || {}; } catch (e) {}
+try { fadeTuneOn = localStorage.getItem(FADE_TUNE_ON_KEY) === "1"; } catch (e) {}
+function fadeValue(spec) {
+  return fadeTune[spec.k] == null ? spec.def : fadeTune[spec.k];
+}
+// Only the keys that DIFFER from the default are written. A var set to its own default is
+// indistinguishable from an unset one on screen but not in the stylesheet — leaving them off
+// keeps "reset" and "never touched" the same state rather than two that merely look alike.
+function applyFadeTune() {
+  const s = document.documentElement.style;
+  for (const spec of FADE_SPECS) {
+    if (fadeTune[spec.k] == null) s.removeProperty(spec.var);
+    else s.setProperty(spec.var, fadeTune[spec.k] + spec.unit);
+  }
+}
+function saveFadeTune() {
+  try { localStorage.setItem(FADE_KEY, JSON.stringify(fadeTune)); } catch (e) {}
+  applyFadeTune();
+}
+function resetFadeTune() { fadeTune = {}; saveFadeTune(); }
+/** The current settings on one line, for reading back. Defaults included, so the line is a
+ *  complete description rather than a diff that only makes sense next to the stylesheet. */
+function fadeTuneSummary() {
+  return FADE_SPECS.map(sp => sp.label + " " + fadeValue(sp) + sp.unit).join(" · ");
+}
+applyFadeTune();
+
+// The panel. Fixed and floating so it can sit over the composer — which is the only place the
+// fade exists, so it has to be tunable while the composer is open and the keyboard is up.
+// Every control is a custom drag row rather than <input type=range> for exactly one reason:
+// a native range steals focus, the keyboard collapses, the sheet resizes, and the thing being
+// tuned moves out from under the finger tuning it. These rows commit on pointerdown with
+// preventDefault, the same rule the format bar and the day strip already follow.
+let fadeTunerEl = null;
+function syncFadeTuner() {
+  if (fadeTuneOn) mountFadeTuner(); else if (fadeTunerEl) { fadeTunerEl.remove(); fadeTunerEl = null; }
+}
+function setFadeTuneOn(on) {
+  fadeTuneOn = on;
+  try { localStorage.setItem(FADE_TUNE_ON_KEY, on ? "1" : "0"); } catch (e) {}
+  syncFadeTuner();
+}
+function mountFadeTuner() {
+  if (fadeTunerEl) { fadeTunerEl.remove(); fadeTunerEl = null; }
+  const panel = el("div", { class: "fade-tuner" });
+  fadeTunerEl = panel;
+  // a press anywhere on the panel keeps the caret where it is
+  panel.addEventListener("pointerdown", ev => {
+    if (ev.target.closest(".ft-copy, .ft-reset, .ft-hide")) return; // buttons need their click
+    ev.preventDefault();
+  });
+
+  const head = el("div", { class: "ft-head" },
+    el("span", { class: "ft-title" }, "fade"),
+    el("button", { class: "ft-hide", "aria-label": "Hide the tuner",
+      onclick: () => setFadeTuneOn(false) }, "×"));
+  panel.appendChild(head);
+
+  const rows = {};
+  for (const spec of FADE_SPECS) {
+    const row = el("div", { class: "ft-row" });
+    const fill = el("div", { class: "ft-fill" });
+    const label = el("span", { class: "ft-label" }, spec.label);
+    const val = el("span", { class: "ft-val" });
+    row.appendChild(fill); row.appendChild(label); row.appendChild(val);
+    const paint = () => {
+      const v = fadeValue(spec);
+      val.textContent = v + spec.unit;
+      fill.style.width = ((v - spec.min) / (spec.max - spec.min) * 100).toFixed(2) + "%";
+      row.classList.toggle("moved", fadeTune[spec.k] != null);
+    };
+    rows[spec.k] = paint;
+    // scrub anywhere along the row: the row IS the track, so there is no thumb to hit. Pointer
+    // capture means the finger can leave the row vertically and still be scrubbing it.
+    const at = clientX => {
+      const r = row.getBoundingClientRect();
+      const t = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+      const raw = spec.min + t * (spec.max - spec.min);
+      const snapped = Math.round(raw / spec.step) * spec.step;
+      // step 0.01 and 0.5 both leave float dust (0.30000000000000004) — round to the step's
+      // own precision so the number shown is the number she can read out
+      const dp = (String(spec.step).split(".")[1] || "").length;
+      fadeTune[spec.k] = Number(snapped.toFixed(dp));
+      saveFadeTune(); paint();
+    };
+    row.addEventListener("pointerdown", ev => {
+      ev.preventDefault();
+      try { row.setPointerCapture(ev.pointerId); } catch (e) {}
+      at(ev.clientX);
+      const move = e2 => at(e2.clientX);
+      const end = e2 => {
+        row.removeEventListener("pointermove", move);
+        row.removeEventListener("pointerup", end);
+        row.removeEventListener("pointercancel", end);
+        row.removeEventListener("lostpointercapture", end);
+        try { row.releasePointerCapture(e2.pointerId); } catch (err) {}
+      };
+      row.addEventListener("pointermove", move);
+      row.addEventListener("pointerup", end);
+      row.addEventListener("pointercancel", end);
+      row.addEventListener("lostpointercapture", end);
+    });
+    paint();
+    panel.appendChild(row);
+  }
+
+  const foot = el("div", { class: "ft-foot" });
+  const copy = el("button", { class: "ft-copy", onclick: async () => {
+    const line = fadeTuneSummary();
+    try { await navigator.clipboard.writeText(line); copy.textContent = "copied"; }
+    catch (e) { copy.textContent = line; }
+    setTimeout(() => { copy.textContent = "copy values"; }, 2200);
+  } }, "copy values");
+  const reset = el("button", { class: "ft-reset", onclick: () => {
+    resetFadeTune();
+    for (const spec of FADE_SPECS) rows[spec.k]();
+  } }, "reset");
+  foot.appendChild(copy); foot.appendChild(reset);
+  panel.appendChild(foot);
+  document.body.appendChild(panel);
+}
+syncFadeTuner();
 
 // ---------- the visual viewport ----------
 // The keyboard does NOT shrink the layout viewport on iOS: 100dvh reads exactly the same with
@@ -2363,6 +2668,9 @@ function openComposer(existing) {
   let tags = existing ? [...existing.tags] : [];
   let images = existing && existing.images ? { ...existing.images } : {};
   let locked = existing ? !!existing.locked : false;
+  // pinned rides with the entry like `locked` does: set in the head, saved with Save, and read
+  // by the list to lift it clear of the groups. See pinnedFirst.
+  let pinned = existing ? !!existing.pinned : false;
   // month mode: entries born in the month view belong to the month itself — no week, no
   // day. an entry keeps its scope for life: editing a month entry never grows week pills.
   const monthMode = existing ? (existing.week == null && existing.month != null) : view === "month";
@@ -2454,6 +2762,7 @@ function openComposer(existing) {
     if (!existing) return !!text.trim();
     if (text.trim() !== (existing.text || "").trim()) return true;
     if (locked !== !!existing.locked) return true;
+    if (pinned !== !!existing.pinned) return true;
     if (day !== entryDay(existing)) return true;
     if (cw.year !== existing.year || cw.week !== existing.week) return true;
     const a = [...tags].sort(), b = [...(existing.tags || [])].sort();
@@ -2658,7 +2967,7 @@ function openComposer(existing) {
       const imgVal = Object.keys(imgs).length ? imgs : undefined;
       if (existing) {
         entries = entries.map(e => e.id === existing.id
-          ? { ...e, text: text.trim(), tags, ...scopeFields(), locked,
+          ? { ...e, text: text.trim(), tags, ...scopeFields(), locked, pinned,
               images: imgVal, updatedAt: new Date().toISOString() }
           : e);
       } else {
@@ -2666,7 +2975,7 @@ function openComposer(existing) {
         entries = [...entries, {
           id: Date.now().toString(36),
           createdAt: stamp, updatedAt: stamp,
-          text: text.trim(), tags, ...scopeFields(), locked,
+          text: text.trim(), tags, ...scopeFields(), locked, pinned,
           images: imgVal
         }];
       }
@@ -2684,12 +2993,12 @@ function openComposer(existing) {
       const srcImgs = imagesUsedIn(text, images);
       let src;
       if (existing) {
-        src = { ...existing, text: text.trim(), tags, ...scopeFields(), locked,
+        src = { ...existing, text: text.trim(), tags, ...scopeFields(), locked, pinned,
           images: Object.keys(srcImgs).length ? srcImgs : undefined, segmented: true, updatedAt: stamp };
         entries = entries.map(e => e.id === existing.id ? src : e);
       } else {
         src = { id: base, createdAt: stamp, updatedAt: stamp, text: text.trim(), tags,
-          ...scopeFields(), locked, segmented: true,
+          ...scopeFields(), locked, pinned, segmented: true,
           images: Object.keys(srcImgs).length ? srcImgs : undefined };
         entries = [...entries, src];
       }
@@ -2711,21 +3020,24 @@ function openComposer(existing) {
       render();
     }
 
+    // The commit, as a function rather than inline on the button: ⌘/ctrl+Enter is a second way
+    // to reach it, and the week-move confirm has to stand in front of BOTH of them.
+    function commitEntry() {
+      if (!text.trim()) return;
+      const save = (segState && segState.ranges) ? doSaveSegments : doSave;
+      // moving an existing entry to a different week is easy to do by accident — confirm it
+      if (existing && (cw.year !== existing.year || cw.week !== existing.week)) {
+        const from = "W" + pad2(existing.week) + (existing.year !== cw.year ? " " + existing.year : "");
+        const to = "W" + pad2(cw.week) + (existing.year !== cw.year ? " " + cw.year : "");
+        confirmAction("Move this entry from " + from + " to " + to + "?", "Move", save);
+      } else {
+        save();
+      }
+    }
     const saveBtn = el("button", {
       class: "head-act act-save",
       "aria-label": "Save",
-      onclick: () => {
-        if (!text.trim()) return;
-        const save = (segState && segState.ranges) ? doSaveSegments : doSave;
-        // moving an existing entry to a different week is easy to do by accident — confirm it
-        if (existing && (cw.year !== existing.year || cw.week !== existing.week)) {
-          const from = "W" + pad2(existing.week) + (existing.year !== cw.year ? " " + existing.year : "");
-          const to = "W" + pad2(cw.week) + (existing.year !== cw.year ? " " + cw.year : "");
-          confirmAction("Move this entry from " + from + " to " + to + "?", "Move", save);
-        } else {
-          save();
-        }
-      }
+      onclick: commitEntry
     });
     saveBtn.innerHTML = TICK_ICON;
     saveBtn.disabled = !text.trim();
@@ -2759,6 +3071,24 @@ function openComposer(existing) {
       build();
     });
 
+    // the pin, beside the tag lozenge and built to the same grammar: quiet and grey while it is
+    // off, filled with ink once it is on, so the head reads its own state without a label. One
+    // tap either way — this is a toggle, not a menu.
+    const pinBtn = el("button", {
+      class: "head-tag head-pin" + (pinned ? " on" : ""),
+      "aria-label": pinned ? "Pinned — tap to unpin" : "Pin this entry",
+      "aria-pressed": String(pinned)
+    });
+    pinBtn.innerHTML = PIN_ICON;
+    // same rule as the tag lozenge: commit on pointerdown with preventDefault, or the tap pulls
+    // focus out of the textarea and the keyboard collapses the sheet on the way to the click.
+    pinBtn.addEventListener("pointerdown", ev => {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      pinned = !pinned;
+      build();
+    });
+
     const pills = monthMode
       // month entries carry no week/day — a single quiet pill names the month instead
       ? (() => {
@@ -2769,7 +3099,7 @@ function openComposer(existing) {
           return el("div", { class: "head-pills" }, monthPill);
         })()
       : el("div", { class: "head-pills" }, dayPill, el("span", { class: "scope-div" }), weekPill);
-    head.appendChild(el("div", { class: "head-left" }, pills, tagBtn));
+    head.appendChild(el("div", { class: "head-left" }, pills, tagBtn, pinBtn));
     // no "New entry" label: an empty field that says "Start typing…" is already the message.
     if (segState && segState.ranges) {
       head.appendChild(el("span", { class: "title" }, segState.ranges.length + " deposits"));
@@ -3001,6 +3331,10 @@ function openComposer(existing) {
     // cursor between them, typing lands inside, and the same combo steps back out.
     ta.addEventListener("keydown", ev => {
       if (!(ev.metaKey || ev.ctrlKey) || ev.altKey) return;
+      // ⌘/ctrl+Enter commits the entry — the keyboard's version of the tick. It goes through
+      // commitEntry, so a week move still asks first rather than the shortcut being a quieter
+      // path past the confirm. preventDefault or the newline lands before the save reads `text`.
+      if (ev.key === "Enter") { ev.preventDefault(); commitEntry(); return; }
       const key = ev.key.toLowerCase();
       // ⌘K is the link, the same op as the bar's L: it asks for the url straight away rather
       // than needing words selected first. stopPropagation as well as preventDefault — the
@@ -3299,6 +3633,9 @@ function openComposer(existing) {
     // marker/indent instead of carrying a dangling one to the next line).
     const INDENT_LINE = /^([ \t]+)(.*)$/;
     ta.addEventListener("keydown", ev => {
+      // a MODIFIED Enter is the save shortcut above, not a new line — carrying a bullet into a
+      // line that is never typed would leave a dangling marker in the saved text
+      if (ev.metaKey || ev.ctrlKey) return;
       if (ev.key !== "Enter" || ta.selectionStart !== ta.selectionEnd) return;
       const v = ta.value, s = ta.selectionStart;
       const ls = v.lastIndexOf("\n", s - 1) + 1;
@@ -5110,6 +5447,21 @@ function openSettings() {
     }
     sheet.appendChild(seg);
     sheet.appendChild(el("p", { class: "settings-note" }, unfoldNote()));
+
+    // ---- gradient tuner (TEMPORARY) ----
+    // Comes out with the rest of the tuner once the fade's numbers are settled — see FADE_SPECS.
+    sheet.appendChild(el("p", { class: "field-label", style: { marginTop: "26px" } }, "gradient tuner"));
+    const ftBtn = el("button", { class: "lock-btn", style: { marginTop: "0" }, onclick: () => {
+      setFadeTuneOn(!fadeTuneOn);
+      ftBtn.textContent = fadeTuneOn ? "hide the tuner" : "show the tuner";
+      ftNote.textContent = fadeTuneNote();
+    } }, fadeTuneOn ? "hide the tuner" : "show the tuner");
+    const fadeTuneNote = () => (fadeTuneOn
+      ? "open a long entry and scroll — the panel floats over the composer. now: " + fadeTuneSummary()
+      : "five live dials for the fade under the composer's pinned head. now: " + fadeTuneSummary());
+    const ftNote = el("p", { class: "settings-note" }, fadeTuneNote());
+    sheet.appendChild(ftBtn);
+    sheet.appendChild(ftNote);
 
     sheet.appendChild(el("p", { class: "field-label", style: { marginTop: "26px" } }, "anthropic api key"));
     const input = el("input", { class: "key-input", type: "password", placeholder: "sk-ant-…", autocomplete: "off" });
