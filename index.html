@@ -1690,6 +1690,7 @@ function attachEntrySwipe(entry, e) {
   // horizontal movement to us, so the list still scrolls natively while this is listening.
   const RAIL_W = 132;      // three 44px slots — kept in step with the CSS by --rail-w
   const CLAIM = 8;         // px of horizontal travel before this is a swipe and not a tap
+  const GIVE_UP = 10;      // px of VERTICAL travel before this is conceded to the scroller
   // suppressClick is for the ONE click that a finished drag leaves behind. Without it the two
   // jobs of the click handler collide: the drag's own trailing click would be read as "a tap on
   // an open rail" and close the rail the drag just opened.
@@ -1709,9 +1710,15 @@ function attachEntrySwipe(entry, e) {
     if (ev.pointerId !== id) return;
     const mx = ev.clientX - x0, my = ev.clientY - y0;
     if (!claimed) {
-      // vertical intent wins outright — this is a list first and a set of rails second
-      if (Math.abs(my) > Math.abs(mx)) { id = null; return; }
-      if (Math.abs(mx) < CLAIM) return;
+      // THREE outcomes, not two, and the third is what was missing: keep waiting.
+      // The first cut decided on the very first pointermove — `if (|my| > |mx|) give up` — and a
+      // real finger's first move is one or two pixels of noise, so a 2px-down-1px-across wobble
+      // at the start of a perfectly good horizontal swipe abandoned the gesture before it had
+      // travelled far enough to have an intent at all. Neither reading is trustworthy inside the
+      // first few pixels, so neither is acted on: this waits for one axis to actually get
+      // somewhere, and only then commits.
+      if (Math.abs(my) >= GIVE_UP && Math.abs(my) > Math.abs(mx)) { id = null; return; }
+      if (Math.abs(mx) < CLAIM || Math.abs(mx) <= Math.abs(my)) return;
       claimed = true;
       closeOpenSwipe();
       if (wasOpen) { entry.classList.add("swiped"); openSwipe = entry; }
@@ -1741,6 +1748,15 @@ function attachEntrySwipe(entry, e) {
   };
   ["pointerup", "pointercancel", "lostpointercapture"].forEach(evt =>
     entry.addEventListener(evt, finish));
+  // touch-action: pan-y stops iOS SCROLLING the page out from under a horizontal drag, but it
+  // does not stop iOS deciding the drag is a text interaction and taking the gesture back — and
+  // when it does it sends pointercancel, which lands here as a short drag and springs the card
+  // home. That is the "almost swipes and then resets". Preventing the touchmove once the swipe
+  // is claimed is what actually holds the gesture; passive: false because a passive listener is
+  // not allowed to.
+  entry.addEventListener("touchmove", ev => {
+    if (claimed) ev.preventDefault();
+  }, { passive: false });
   // Two jobs, in order. A drag's trailing click is swallowed outright; after that, a tap on a
   // card whose rail is open closes the rail instead of opening the composer — the rail is the
   // question on screen, and the first tap anywhere should answer it.

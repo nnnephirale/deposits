@@ -524,6 +524,12 @@
      already clips, so the rail needs no measuring, no animating in, and no z-index games. */
   .entry {
     touch-action: pan-y;
+    /* iOS's own text gestures are the other thing that steals this drag: a horizontal pull
+       across a paragraph starts a selection, the pointer is cancelled, and the card springs
+       back half-open. Nothing in a card is selectable text as far as the app is concerned —
+       tapping it opens the editor, and the read-modal is where a long entry is actually read —
+       so the selection and the long-press callout both come off. */
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
     transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
   }
   /* nothing eased while a finger is on it — the card tracks the finger, it doesn't chase it */
