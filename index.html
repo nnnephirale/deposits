@@ -1689,74 +1689,119 @@ function attachEntrySwipe(entry, e) {
   // touch-action: pan-y on .entry (see the CSS) hands vertical scrolling to the browser and
   // horizontal movement to us, so the list still scrolls natively while this is listening.
   const RAIL_W = 132;      // three 44px slots — kept in step with the CSS by --rail-w
-  const CLAIM = 8;         // px of horizontal travel before this is a swipe and not a tap
-  const GIVE_UP = 10;      // px of VERTICAL travel before this is conceded to the scroller
-  // suppressClick is for the ONE click that a finished drag leaves behind. Without it the two
-  // jobs of the click handler collide: the drag's own trailing click would be read as "a tap on
-  // an open rail" and close the rail the drag just opened.
-  let id = null, x0 = 0, y0 = 0, dx = 0, claimed = false, wasOpen = false, suppressClick = false;
-  entry.addEventListener("pointerdown", ev => {
-    if (!ev.isPrimary || ev.button !== 0) return;
-    // a photo row scrolls itself sideways, and the checkboxes/links/read-more are all targets
-    // whose own gesture this must not eat
-    if (ev.target.closest(".rt-gallery, .rt-check, .rt-link, .read-more, .entry-rail")) return;
-    id = ev.pointerId; x0 = ev.clientX; y0 = ev.clientY; dx = 0; claimed = false;
-    // a drag that ended without a click (the usual case on touch) must not leave the flag armed
-    // for whatever gets tapped next
-    suppressClick = false;
-    wasOpen = entry.classList.contains("swiped");
-  });
-  entry.addEventListener("pointermove", ev => {
-    if (ev.pointerId !== id) return;
-    const mx = ev.clientX - x0, my = ev.clientY - y0;
-    if (!claimed) {
-      // THREE outcomes, not two, and the third is what was missing: keep waiting.
-      // The first cut decided on the very first pointermove — `if (|my| > |mx|) give up` — and a
-      // real finger's first move is one or two pixels of noise, so a 2px-down-1px-across wobble
-      // at the start of a perfectly good horizontal swipe abandoned the gesture before it had
-      // travelled far enough to have an intent at all. Neither reading is trustworthy inside the
-      // first few pixels, so neither is acted on: this waits for one axis to actually get
-      // somewhere, and only then commits.
-      if (Math.abs(my) >= GIVE_UP && Math.abs(my) > Math.abs(mx)) { id = null; return; }
-      if (Math.abs(mx) < CLAIM || Math.abs(mx) <= Math.abs(my)) return;
-      claimed = true;
-      closeOpenSwipe();
-      if (wasOpen) { entry.classList.add("swiped"); openSwipe = entry; }
-      try { entry.setPointerCapture(id); } catch (err) {}
-      entry.classList.add("swiping");
-    }
+  const LOCK = 6;          // px of travel before the gesture's axis is decided
+  const HBIAS = 0.75;      // how much less than the vertical the horizontal may be and still win
+
+  // ---- one drag, two input paths ----
+  // TOUCH IS DRIVEN BY TOUCH EVENTS, NOT POINTER EVENTS, and that is the whole fix for "it moves
+  // a little and snaps back". Two things go wrong with the pointer path on iOS:
+  //   1. iOS decides who owns a gesture on the FIRST touchmove. Preventing only after the swipe
+  //      had been claimed — 8px and two or three frames in — was always too late: Safari had
+  //      already committed to its own recogniser and answered with pointercancel, which arrives
+  //      as a short drag and springs the card home.
+  //   2. setPointerCapture on a TOUCH pointer is the thing iOS drops the moment that recogniser
+  //      engages, and lostpointercapture ends the drag the same way.
+  // Touch events have no capture semantics to lose, and a preventDefault on the move that
+  // decides the axis locks the gesture for the rest of its life. The pointer path stays for the
+  // mouse, where none of this applies and capture is genuinely useful.
+  let dx = 0, wasOpen = false, active = false, suppressClick = false;
+
+  const begin = { x: 0, y: 0 };
+  const startAt = (cx, cy) => { begin.x = cx; begin.y = cy; wasOpen = entry.classList.contains("swiped"); dx = 0; };
+  const claim = () => {
+    active = true;
+    closeOpenSwipe();
+    if (wasOpen) { entry.classList.add("swiped"); openSwipe = entry; }
+    entry.classList.add("swiping");
+  };
+  const moveTo = mx => {
     // rubber-band past the ends rather than stopping dead: an edge that refuses to move reads
     // as a broken gesture, one that resists reads as an edge
     const raw = (wasOpen ? -RAIL_W : 0) + mx;
     dx = raw > 0 ? raw * 0.25 : (raw < -RAIL_W ? -RAIL_W + (raw + RAIL_W) * 0.25 : raw);
     entry.style.transform = "translateX(" + dx.toFixed(1) + "px)";
-  });
-  const finish = ev => {
-    if (ev.pointerId !== id) return;
-    id = null;
-    if (!claimed) return;
+  };
+  const settle = () => {
+    if (!active) return;
+    active = false;
     entry.classList.remove("swiping");
-    try { entry.releasePointerCapture(ev.pointerId); } catch (err) {}
     // past a third of the way is a commitment either direction — the same threshold both ways,
     // so opening and closing take the same amount of travel
     const open = dx < -RAIL_W / 3;
     entry.style.transform = "";
     entry.classList.toggle("swiped", open);
     openSwipe = open ? entry : (openSwipe === entry ? null : openSwipe);
-    claimed = false;
     suppressClick = true;   // eaten by the click this drag is about to produce, if any
   };
-  ["pointerup", "pointercancel", "lostpointercapture"].forEach(evt =>
-    entry.addEventListener(evt, finish));
-  // touch-action: pan-y stops iOS SCROLLING the page out from under a horizontal drag, but it
-  // does not stop iOS deciding the drag is a text interaction and taking the gesture back — and
-  // when it does it sends pointercancel, which lands here as a short drag and springs the card
-  // home. That is the "almost swipes and then resets". Preventing the touchmove once the swipe
-  // is claimed is what actually holds the gesture; passive: false because a passive listener is
-  // not allowed to.
+  // a photo row scrolls itself sideways, and the checkboxes/links/read-more are all targets
+  // whose own gesture this must not eat
+  const offLimits = t => !!(t && t.closest && t.closest(".rt-gallery, .rt-check, .rt-link, .read-more, .entry-rail"));
+
+  // ---- touch ----
+  let tid = null, axis = null;
+  entry.addEventListener("touchstart", ev => {
+    if (ev.touches.length !== 1 || offLimits(ev.target)) { tid = null; return; }
+    const t = ev.changedTouches[0];
+    tid = t.identifier; axis = null; suppressClick = false;
+    startAt(t.clientX, t.clientY);
+  }, { passive: true });
   entry.addEventListener("touchmove", ev => {
-    if (claimed) ev.preventDefault();
+    if (tid === null) return;
+    const t = [...ev.touches].find(x => x.identifier === tid);
+    if (!t) return;
+    const mx = t.clientX - begin.x, my = t.clientY - begin.y;
+    if (!axis) {
+      // Wait for real movement before judging — the first sample of a real finger is noise, and
+      // reading an intent out of two pixels is what threw good swipes away before. Then lock the
+      // axis ONCE, with a bias toward horizontal: a thumb swiping across a phone pivots at its
+      // base and arcs, so an honest sideways swipe carries real vertical travel with it. Losing
+      // the axis race by a quarter still counts as horizontal.
+      if (Math.hypot(mx, my) < LOCK) return;
+      axis = Math.abs(mx) >= Math.abs(my) * HBIAS ? "x" : "y";
+      if (axis === "y") { tid = null; return; }   // it's a scroll — hands off, and stay off
+      claim();
+    }
+    ev.preventDefault();   // ours for the rest of this gesture; iOS cannot take it back now
+    moveTo(mx);
   }, { passive: false });
+  const endTouch = ev => {
+    if (tid === null) return;
+    if ([...ev.changedTouches].every(t => t.identifier !== tid)) return;
+    tid = null; axis = null;
+    settle();
+  };
+  entry.addEventListener("touchend", endTouch);
+  entry.addEventListener("touchcancel", endTouch);
+
+  // ---- mouse ----
+  // Pointer events, capture and all: on a mouse there is no rival recogniser to lose the gesture
+  // to, and capture is what keeps the drag alive when the cursor leaves the card.
+  let mid = null;
+  entry.addEventListener("pointerdown", ev => {
+    if (ev.pointerType === "touch") return;           // the touch path above owns those
+    if (!ev.isPrimary || ev.button !== 0 || offLimits(ev.target)) return;
+    mid = ev.pointerId; suppressClick = false;
+    startAt(ev.clientX, ev.clientY);
+  });
+  entry.addEventListener("pointermove", ev => {
+    if (ev.pointerId !== mid) return;
+    const mx = ev.clientX - begin.x, my = ev.clientY - begin.y;
+    if (!active) {
+      if (Math.hypot(mx, my) < LOCK) return;
+      if (Math.abs(mx) < Math.abs(my) * HBIAS) { mid = null; return; }
+      claim();
+      try { entry.setPointerCapture(mid); } catch (err) {}
+    }
+    moveTo(mx);
+  });
+  const endMouse = ev => {
+    if (ev.pointerId !== mid) return;
+    mid = null;
+    try { entry.releasePointerCapture(ev.pointerId); } catch (err) {}
+    settle();
+  };
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach(evt =>
+    entry.addEventListener(evt, endMouse));
   // Two jobs, in order. A drag's trailing click is swallowed outright; after that, a tap on a
   // card whose rail is open closes the rail instead of opening the composer — the rail is the
   // question on screen, and the first tap anywhere should answer it.
