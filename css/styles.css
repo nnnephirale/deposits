@@ -2154,6 +2154,46 @@
     .rail-row > .pill { transition: opacity 0.18s ease; }
     .rr-mark { flex: none; width: 5px; height: 5px; border-radius: 50%; background: #D4D4D9; }
 
+    /* ---- the rail calendar ---- */
+    /* The composer's picker, living in the rail. It borrows .cal-row / .cal-wk / .cal-dow
+       wholesale so the two calendars are the same object in two places rather than a pair that
+       drift; only what the rail changes is written here — tighter cells, real buttons in place
+       of the popover's spans, and the deposit dot the popover has no room for. */
+    .rail-cal { padding: 0 14px; margin-bottom: 4px; }
+    .rail-cal .cal-head { margin-bottom: 4px; }
+    .rail-cal .cal-title { font-size: 13px; padding: 4px 8px; }
+    .rail-cal .cal-row { padding: 2px 2px; border-radius: 8px; }
+    .rail-cal .cal-row span, .rail-cal .cal-row button { font-size: 11px; }
+    .rail-cal .cal-wk { flex: 0 0 30px; font-size: 10px; padding-left: 2px; }
+    .rail-cal .cal-dow span { font-size: 9px; }
+    /* every cell is a real button now: the week takes you to that week and so does any day in
+       it, so the whole row has to be reachable from a keyboard as well as a pointer */
+    .rail-cal button.cal-wk, .rail-cal .cal-day {
+      background: none; border: none; padding: 3px 0; color: inherit;
+      font-family: var(--mono); border-radius: 6px;
+    }
+    .rail-cal .cal-day { position: relative; flex: 1; text-align: center; color: var(--ink); }
+    .rail-cal button.cal-wk { text-align: left; color: var(--subtle); cursor: pointer; }
+    @media (hover: hover) {
+      .rail-cal .cal-day:hover, .rail-cal button.cal-wk:hover { background: rgba(0,0,0,0.05); color: var(--ink); }
+      .rail-cal .cal-row.wk-row:hover { background: rgba(0,0,0,0.022); }
+    }
+    /* the week the panel is actually showing */
+    .rail-cal .cal-row.wk-row.current { background: var(--field); }
+    .rail-cal .cal-row.wk-row.current button.cal-wk { color: var(--ink); font-weight: 700; }
+    .rail-cal .cal-out { color: #C7C7CC; }
+    .rail-cal .cal-today { color: #FF3B30; font-weight: 700; }
+    /* a day that carries deposits. A dot rather than a number: the rail is a map of where the
+       month has weight, and an exact count at 9px would be read as a date. */
+    .rail-cal .cal-day.has-dep::after {
+      content: ""; position: absolute; left: 50%; bottom: 0;
+      width: 3px; height: 3px; margin-left: -1.5px;
+      border-radius: 50%; background: #C2C2C7;
+    }
+    .rail-cal .cal-day.cal-today.has-dep::after { background: #FF3B30; }
+    /* the topics heading, once the calendar is standing above it */
+    .rail-head-gap { margin-top: 22px; }
+
     .rail-search {
       display: flex; align-items: center; gap: 8px;
       margin: 0 14px; padding: 9px 12px;

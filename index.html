@@ -2273,6 +2273,92 @@ function renderRightRail() {
       ));
     }
   }
+
+  // the calendar sits under the topics: the list is what the rail is for, and the month is the
+  // thing you drop to when you want to go somewhere else
+  scroll.appendChild(el("p", { class: "rail-head rail-head-gap" }, "month"));
+  scroll.appendChild(railCalendarEl());
+}
+
+// ---------- the rail calendar (desktop) ----------
+// The composer's date picker, given a permanent home in the right rail. Same grid, same week
+// column, same tokens — it is the one place on desktop where a month is a SHAPE rather than a
+// number in a tab, and where "which week was that" has an answer you can point at.
+//
+// It carries its own month cursor rather than reading `mo` directly. Browsing forward to see
+// what is coming should not drag the middle panel along with it; the cursor re-centres itself
+// whenever the app's own month moves, so the period tabs still put the rail back where the
+// panel is. railCalSeen is what makes that "whenever" observable — there is no event for it.
+let railCalMonth = null, railCalSeen = "";
+function syncRailCalMonth() {
+  const key = mo.year + "-" + mo.month;
+  if (railCalMonth && railCalSeen === key) return;
+  railCalSeen = key;
+  railCalMonth = { ...mo };
+}
+// Which calendar dates carry deposits. A week-scoped entry with a day resolves to one real
+// date; a month-scoped one has no day and belongs to no cell, so it is left out rather than
+// smeared across the month. Keyed by date so two entries on one day count once for the dot.
+function entryDateCounts() {
+  const counts = {};
+  for (const e of entries) {
+    if (e.segmented || e.week == null) continue;
+    const d = entryDay(e);
+    if (d == null) continue;
+    const dt = mondayOfISOWeek(e.year, e.week);
+    dt.setUTCDate(dt.getUTCDate() + d);
+    const k = dt.getUTCFullYear() + "-" + dt.getUTCMonth() + "-" + dt.getUTCDate();
+    counts[k] = (counts[k] || 0) + 1;
+  }
+  return counts;
+}
+function railCalendarEl() {
+  syncRailCalMonth();
+  const cm = railCalMonth;
+  const counts = entryDateCounts();
+  const wrap = el("div", { class: "rail-cal" });
+
+  const head = el("div", { class: "cal-head" });
+  head.appendChild(el("button", { class: "stepper-btn", "aria-label": "Previous month",
+    onclick: () => { railCalMonth = stepMonth(cm, -1); renderRails(); } }, "\u2039"));
+  // tapping the title returns to the month the panel is on — the same "back to now" the
+  // composer's picker offers, pointed at the app's own position rather than at today
+  head.appendChild(el("button", { class: "cal-title", title: "Back to " + monthLabel(mo.year, mo.month),
+    onclick: () => { railCalMonth = { ...mo }; renderRails(); } }, monthLabel(cm.year, cm.month)));
+  head.appendChild(el("button", { class: "stepper-btn", "aria-label": "Next month",
+    onclick: () => { railCalMonth = stepMonth(cm, 1); renderRails(); } }, "\u203A"));
+  wrap.appendChild(head);
+
+  const dow = el("div", { class: "cal-row cal-dow" }, el("span", { class: "cal-wk" }, ""));
+  DAY_TOKENS.forEach(t => dow.appendChild(el("span", null, t)));
+  wrap.appendChild(dow);
+
+  for (const { iso, days } of monthGridRows(cm.year, cm.month)) {
+    const current = view === "week" && iso.year === wk.year && iso.week === wk.week;
+    const row = el("div", { class: "cal-row wk-row" + (current ? " current" : "") });
+    // the week number is the row's own control: it takes the panel to that week, which is the
+    // thing this calendar is for
+    const wkCell = el("button", { class: "cal-wk", title: "Go to W" + pad2(iso.week) },
+      "W" + pad2(iso.week));
+    wkCell.addEventListener("click", () => { wk = iso; view = "week"; render(); });
+    row.appendChild(wkCell);
+    days.forEach(d => {
+      const k = d.getUTCFullYear() + "-" + d.getUTCMonth() + "-" + d.getUTCDate();
+      const cls = ["cal-day",
+        d.getUTCMonth() !== cm.month ? "cal-out" : "",
+        isTodayCell(d) ? "cal-today" : "",
+        counts[k] ? "has-dep" : ""].filter(Boolean).join(" ");
+      const cell = el("button", { class: cls,
+        title: counts[k] ? counts[k] + " deposit" + (counts[k] === 1 ? "" : "s") : undefined },
+        String(d.getUTCDate()));
+      // a day belongs to a week, and the week is what the panel can show — so tapping any date
+      // lands on its week rather than doing nothing
+      cell.addEventListener("click", () => { wk = iso; view = "week"; render(); });
+      row.appendChild(cell);
+    });
+    wrap.appendChild(row);
+  }
+  return wrap;
 }
 
 function renderRails() {
