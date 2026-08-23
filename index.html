@@ -4486,7 +4486,6 @@ function weekSummaryUnlocked(year, week) {
 function weekSummaryBlock(list) {
   const k = weekKey(wk.year, wk.week);
   const rec = weekSummaries[k];
-  const filledDays = new Set(list.map(entryDay).filter(d => d != null)).size;
 
   if (!rec) {
     // a requested summary is on its way — hold the pending line
@@ -4495,15 +4494,28 @@ function weekSummaryBlock(list) {
       wrap.appendChild(el("p", { class: "wsum-text pending" }, "Summarizing the week…"));
       return wrap;
     }
-    // 3+ days filled and a key set → this week can be read back, and the chevron under the
-    // period is the door to it (see syncWrappedCue). The wand that used to sit here is gone:
-    // it hung over the first card's top-right corner and read as a smudge on the entry.
-    if (filledDays >= 3 && apiKey) return null;
-    // no reading available (no key / fewer than 3 days) → offer to hand-write one (saves as MINE),
-    // but only once the week has reached its sunday 10am. before that the whole surface
-    // stays dormant (no invite, no eye). suppressed when hidden too.
+    // The invite waits for the week to reach its sunday 10am — before that the whole surface
+    // stays dormant (no invite, no eye). Suppressed when hidden too. The chevron is not bound
+    // by this and never was: mid-week the gesture is still there for anyone who wants it.
     if (!showWeekSummary || !weekSummaryUnlocked(wk.year, wk.week)) return null;
     const wrap = el("div", { class: "wsum" });
+    // Named, in the place she was already looking. This block used to disappear entirely
+    // whenever the AI route existed, which left the chevron as the only door to it — an
+    // 22px control at 1.5:1 contrast that fades out on scroll. One unlabelled gesture is not
+    // a way to offer a feature; the chevron stays as the shortcut, not as the whole path.
+    if (apiKey) {
+      wrap.appendChild(el("button", {
+        class: "wsum-add wsum-ai",
+        onclick: () => {
+          confirmAction("Create a summary of this week?", "Summarize", () => {
+            showWeekSummary = true; // she asked for it — don't let it land hidden
+            try { localStorage.setItem(SHOW_WSUM_KEY, "1"); } catch (e) {}
+            generateWeekSummary(wk.year, wk.week, list);
+            render();
+          });
+        }
+      }, "summarize with ai"));
+    }
     wrap.appendChild(el("button", {
       class: "wsum-add",
       onclick: () => openWeekSummaryEditor(wk.year, wk.week, list)
@@ -5955,8 +5967,12 @@ function wrappedActionFor(list) {
     if (weekSumInFlight.has(k)) return null;         // already being written
     const rec = weekSummaries[k];
     if (rec) return { kind: "open", run: () => openWeekReveal(wk.year, wk.week, list) };
-    const filledDays = new Set(list.map(entryDay).filter(d => d != null)).size;
-    if (filledDays >= 3 && apiKey) return {
+    // A key is the only condition now. The old rule also wanted entries on three separate
+    // days, which read as the control being broken rather than as the week being too quiet:
+    // nothing on screen said what was missing, and a week bunched onto one day — six deposits
+    // on a Sunday — could never be summarised at all. A thin week is the AI's problem to
+    // handle, not a reason to hide the door to it.
+    if (apiKey) return {
       kind: "make",
       ask: "Create a summary of this week?", ok: "Summarize",
       run: () => {

@@ -104,13 +104,19 @@
   .wrap.has-cue > .header { padding-bottom: 12px; }
   .wc-chev {
     background: none; border: none; padding: 6px 26px; line-height: 0;
-    color: #C4C4C9;                 /* barely there, like the eye it replaces */
+    /* The old #C4C4C9 was 1.5:1 against the canvas and read as simply not there. This sits at
+       about 2.1:1 — quiet, but findable. It can afford to stay quiet BECAUSE it is no longer
+       the only way in: "summarize with ai" is a labelled control in the summary block, and
+       this is the shortcut beside it rather than the whole path. */
+    color: #A8A8AD;
     touch-action: none;             /* the drag is ours — don't let it scroll the list */
     -webkit-tap-highlight-color: transparent;
     transition: color 0.2s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  .wc-chev svg { width: 22px; height: 22px; display: block; }
-  @media (hover: hover) { .wc-chev:hover { color: #8A8A8E; } }
+  /* the glyph shrinks; the padding does NOT, so the tap target stays a comfortable ~34px
+     even though the mark itself is small */
+  .wc-chev svg { width: 17px; height: 17px; display: block; }
+  @media (hover: hover) { .wc-chev:hover { color: #6E6E73; } }
   /* while dragging, the chevron follows the finger a little and darkens with the pull —
      the control itself is the progress indicator, so nothing extra has to appear */
   .wc-chev.pulling { transition: none; }
@@ -1125,19 +1131,29 @@
   .wsum-pill::after { content: ""; position: absolute; inset: -12px -2px -10px; }
   .wsum-pill + .wsum-pill { margin-left: 6px; }
   .wsum-pill.on { background: var(--ink); color: #fff; }
-  /* faint invitation to hand-write a summary when none exists / AI won't auto-generate */
+  /* the two ways to start a summary, side by side */
   .wsum-add {
     font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
     text-transform: uppercase; color: #C7C7CC; cursor: pointer;
     background: none; border: none; padding: 0;
   }
+  /* the AI one leads: it is the offer, and the hand-written invite is the alternative to it.
+     Still quiet — a filled chip in the app's own field grey, not a call to action. */
+  .wsum-ai {
+    color: var(--ink); background: var(--field);
+    border-radius: 7px; padding: 5px 9px; margin-right: 10px;
+  }
+  @media (hover: hover) {
+    .wsum-ai:hover { background: #E9E9EC; }
+    .wsum-add:not(.wsum-ai):hover { color: var(--subtle); }
+  }
+  .wsum-ai:active { transform: scale(0.98); }
   .wsum-eye {
     position: absolute; top: 0; right: 0;
     background: none; border: none; padding: 4px; line-height: 0;
     color: #D6D6DB; /* barely there by design */
   }
   .wsum-eye svg { width: 15px; height: 15px; }
-  /* magic wand: the summary offer once 3 days are filled — a touch more present than the eye */
 
   /* subtle frost at the bottom edge — content softly fades behind the fab zone */
   /* a white fade the list scrolls up into, so the compose bar always sits on clean ground */
