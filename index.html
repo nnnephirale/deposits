@@ -282,6 +282,9 @@ try { applyTaxonomy(JSON.parse(localStorage.getItem(TAX_KEY))); } catch (e) {}
 reindexTaxonomy();
 
 const DAY_TOKENS = ["M", "T\u00B9", "W", "T\u00B2", "F", "S\u00B9", "S\u00B2"];
+// spoken forms of the same seven, for anything a screen reader has to say out loud — "T¹" is a
+// fine glyph and a poor word
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 // ---------- date helpers (ISO week) ----------
 function getISOWeek(date) {
@@ -531,7 +534,7 @@ function plainText(t, redactedAs) {
   if (redactedAs !== "keep") t = t.replace(/\|\|[\s\S]+?\|\|/g, () => redactedAs);
   return t.replace(IMG_MARK_RE, "")
     .replace(/^[ \t]*[-+]{3,}[ \t]*$/gm, "")          // "---" dividers and "+++" fold markers
-    .replace(/^[ \t]*[-—] (?:\[[ xX]\] ?)?/gm, "")    // bullet + optional checkbox prefix
+    .replace(new RegExp("^[ \\t]*[-—] (?:\\[(?:" + CHECK_MARK + ")\\] ?)?", "gm"), "") // bullet + checkbox prefix
     .replace(RICH_RE, (m0, linkLabel, linkUrl, b, i, u, mono, red, img) => {
     if (linkLabel != null) return linkLabel;
     if (red != null) return redactedAs === "keep" ? red : redactedAs;
@@ -607,7 +610,30 @@ function renderRich(text, images, onResize) {
 const HR_LINE_RE = /^[ \t]*-{3,}[ \t]*$/;
 const FOLD_LINE_RE = /^[ \t]*\+{3,}[ \t]*$/m;        // the "read more" cut — handled by the card
                                                      // (m flag: entryEl execs it against the whole entry)
-const CHECK_RE = /^\[([ xX])\] ?([\s\S]*)$/;          // a bullet's body when it's a checklist item
+// A checklist item's mark. Three states, not two: empty, done, or done ON A DAY — the last
+// written as the weekday's own token, so "- [M] call the vet" is an item ticked off on Monday
+// and reads as that in the raw text as much as on screen.
+//   T and S have to carry their number: T alone cannot say Tuesday or Thursday, and the app has
+// used T¹/T² everywhere since the day strip. The digit form is what gets WRITTEN (¹ is not on a
+// keyboard and this text is typed by hand), but the superscript is accepted too, so an item
+// pasted back from anywhere the app rendered it still parses.
+const CHECK_MARK = "[ xX]|[MmWwFf]|[TtSs][12\u00B9\u00B2]";
+const CHECK_RE = new RegExp("^\\[(" + CHECK_MARK + ")\\] ?([\\s\\S]*)$");
+// the same class, for finding the mark at the head of a raw line
+const LINE_MARK_RE = new RegExp("^(\\s*[-—] )\\[(?:" + CHECK_MARK + ")\\]");
+// mark -> weekday index, or null when it is not a day (" ", "x"). The letter identifies the day
+// and the digit only separates the two T's and the two S's, so case is irrelevant.
+function dayFromMark(mark) {
+  const m = String(mark).toUpperCase().replace("\u00B9", "1").replace("\u00B2", "2");
+  const idx = { M: 0, T1: 1, W: 2, T2: 3, F: 4, S1: 5, S2: 6 }[m];
+  return idx == null ? null : idx;
+}
+// weekday index -> the mark that gets written. Derived from DAY_TOKENS rather than spelled out
+// again, so the two cannot drift.
+function markForDay(idx) {
+  return DAY_TOKENS[idx].replace("\u00B9", "1").replace("\u00B2", "2");
+}
+function isDoneMark(mark) { return /[xX]/.test(mark) || dayFromMark(mark) != null; }
 const PHOTO_ONLY_LINE_RE = /^[ \t]*!\[photo:[a-z0-9]+(?:@(?:inline|1x|2x|3x))?\][ \t]*$/; // a line that is just a photo
 // just the tick — the filled box is the .rt-box.on container itself, so no inner rect
 // (that "box in a box" read cluttered). iOS-clean: white checkmark on a solid fill.
@@ -660,16 +686,33 @@ function renderRichBlocks(text, images, onResize, onCheck) {
     // it's driven purely by the leading indent, so backspacing the indent away removes it.
     const quote = ind >= 1 && !m[2];
     const row = el("div", { class: "rt-line" + (m[2] ? " rt-bullet" : "") + (quote ? " rt-quote" : "")
-      + (check ? " rt-check" + (/[xX]/.test(check[1]) ? " done" : "") : "") });
+      + (check ? " rt-check" + (isDoneMark(check[1]) ? " done" : "") : "") });
     if (ind) row.style.setProperty("--ind", ind);
     if (check) {
-      const on = /[xX]/.test(check[1]);
-      const box = el("span", { class: "rt-box" + (on ? " on" : ""), role: "checkbox", "aria-checked": String(on) });
-      if (on) box.innerHTML = CHECK_ICON;
+      const day = dayFromMark(check[1]);
+      const on = isDoneMark(check[1]);
+      const box = el("span", {
+        class: "rt-box" + (on ? " on" : "") + (day == null ? "" : " rt-box-day"),
+        role: "checkbox", "aria-checked": String(on)
+      });
+      // only when there IS a day to name — el() stringifies whatever it is given, so passing
+      // undefined through the attrs above would set the literal text "undefined"
+      if (day != null) box.setAttribute("aria-label", "done " + DAY_NAMES[day]);
+      // the day takes the tick's place inside the same filled circle — same box, same fill,
+      // different glyph. The token is drawn the way the day badge draws it (T with a raised 1)
+      // so the two never disagree about what Tuesday looks like.
+      if (day != null) {
+        const tok = DAY_TOKENS[day], sup = tok.match(/^(.)([\u00B9\u00B2])$/);
+        if (sup) { box.appendChild(document.createTextNode(sup[1]));
+                   box.appendChild(el("sup", null, sup[2] === "\u00B9" ? "1" : "2")); }
+        else box.textContent = tok;
+      } else if (on) box.innerHTML = CHECK_ICON;
       if (onCheck) {
         const idx = li; // captured per row so the right line toggles
         box.classList.add("live");
-        box.addEventListener("click", ev => { ev.stopPropagation(); onCheck(idx, !on); });
+        box.addEventListener("click", ev => { ev.stopPropagation(); onCheck(idx, on ? " " : "x"); });
+        // long-press the circle for the day strip — see attachMarkPress
+        attachMarkPress(box, mark => onCheck(idx, mark), check[1]);
       }
       row.appendChild(box);
       const body = el("span", { class: "rt-body" });
@@ -686,6 +729,93 @@ function renderRichBlocks(text, images, onResize, onCheck) {
     frag.appendChild(row);
   }
   return frag;
+}
+
+// ---------- long-press a checkbox for the day strip ----------
+// A tap ticks an item; a HOLD asks which day it was done, and the answer takes the tick's place
+// inside the same circle. The whole vocabulary of the strip is the week the app already talks
+// in — the same seven tokens as the day badge and the composer's scrubber — plus the plain tick
+// and a way back to empty, so every state an item can be in is reachable from one place.
+let openMarkPop = null;
+function closeMarkPop() {
+  if (!openMarkPop) return;
+  openMarkPop.remove();
+  openMarkPop = null;
+  document.removeEventListener("pointerdown", closeMarkPop, true);
+}
+function openMarkPicker(box, pick, current) {
+  closeMarkPop();
+  const pop = el("div", { class: "mark-pop", role: "group", "aria-label": "Mark done on a day" });
+  const choose = mark => { closeMarkPop(); pick(mark); };
+  // the seven days, then the two plain states — the days are the point of the strip, so they
+  // lead, and the pair that isn't a day is set apart rather than dropped in among them
+  DAY_TOKENS.forEach((tok, i) => {
+    const mark = markForDay(i);
+    const b = el("button", {
+      class: "mp-day" + (dayFromMark(current) === i ? " on" : ""),
+      "aria-label": DAY_NAMES[i]
+    });
+    const sup = tok.match(/^(.)([\u00B9\u00B2])$/);
+    if (sup) { b.appendChild(document.createTextNode(sup[1]));
+               b.appendChild(el("sup", null, sup[2] === "\u00B9" ? "1" : "2")); }
+    else b.textContent = tok;
+    b.addEventListener("click", ev => { ev.stopPropagation(); choose(mark); });
+    pop.appendChild(b);
+  });
+  pop.appendChild(el("span", { class: "mp-div" }));
+  const tick = el("button", { class: "mp-day mp-tick" + (/[xX]/.test(current) ? " on" : ""), "aria-label": "Done" });
+  tick.innerHTML = CHECK_ICON;
+  tick.addEventListener("click", ev => { ev.stopPropagation(); choose("x"); });
+  pop.appendChild(tick);
+  const clear = el("button", { class: "mp-day mp-clear", "aria-label": "Not done" });
+  clear.addEventListener("click", ev => { ev.stopPropagation(); choose(" "); });
+  pop.appendChild(clear);
+
+  // Positioned in viewport coordinates against the circle it belongs to, and kept on screen:
+  // a checklist item can sit anywhere in a card, including hard against either edge. Measured
+  // after it is in the document, because its width depends on its own contents.
+  document.body.appendChild(pop);
+  const r = box.getBoundingClientRect(), pr = pop.getBoundingClientRect();
+  const left = Math.min(Math.max(8, r.left + r.width / 2 - pr.width / 2), window.innerWidth - pr.width - 8);
+  // above the circle by default; below it when there isn't room, so it never opens off the top
+  const above = r.top - pr.height - 8;
+  pop.style.left = Math.round(left) + "px";
+  pop.style.top = Math.round(above >= 8 ? above : r.bottom + 8) + "px";
+  requestAnimationFrame(() => pop.classList.add("show"));
+  openMarkPop = pop;
+  // capture, so a tap anywhere else dismisses before that tap does anything of its own
+  setTimeout(() => document.addEventListener("pointerdown", closeMarkPop, true), 0);
+}
+// The hold itself. Deliberately NOT a long-press on the whole row: the row is the entry's own
+// tap target (it opens the composer) and the circle is the only part of a checklist item that
+// already means "the state of this item".
+const MARK_HOLD = 420;   // ms — long enough not to fire on a slow tap, short enough to feel like a hold
+function attachMarkPress(box, pick, current) {
+  let timer = null, fired = false, sx = 0, sy = 0;
+  const cancel = () => { clearTimeout(timer); timer = null; };
+  box.addEventListener("pointerdown", ev => {
+    if (!ev.isPrimary) return;
+    fired = false; sx = ev.clientX; sy = ev.clientY;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      fired = true;
+      openMarkPicker(box, pick, current);
+    }, MARK_HOLD);
+  });
+  // a finger that travels is scrolling the list, not holding a circle
+  box.addEventListener("pointermove", ev => {
+    if (timer && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 8) cancel();
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach(evt => box.addEventListener(evt, cancel));
+  // the click that follows a hold would otherwise ALSO toggle the tick, so the hold eats it
+  box.addEventListener("click", ev => {
+    if (!fired) return;
+    fired = false;
+    ev.stopPropagation(); ev.preventDefault();
+  }, true);
+  // iOS puts its own callout on a long press over text; the circle has to be exempt or the
+  // magnifier arrives on top of the strip
+  box.addEventListener("contextmenu", ev => ev.preventDefault());
 }
 
 // a shimmering gradient fighting with moving content just reads as noise, so the sweep holds
@@ -913,14 +1043,15 @@ function setImageSize(entryId, imgId, size) {
   render();
 }
 
-// toggle a checklist item in place by rewriting the box on that exact line (line index, so
-// identical item text can't cross wires). the state lives in the text, so it syncs for free.
-function setLineChecked(entryId, lineIndex, checked) {
+// Set a checklist item's mark in place by rewriting the box on that exact line (line index, so
+// identical item text can't cross wires). The state lives in the text, so it syncs for free.
+// `mark` is what goes between the brackets: " ", "x", or a day token like "M" or "T2".
+function setLineMark(entryId, lineIndex, mark) {
   entries = entries.map(e => {
     if (e.id !== entryId) return e;
     const lines = e.text.split("\n");
     if (lineIndex >= lines.length) return e;
-    lines[lineIndex] = lines[lineIndex].replace(/^(\s*[-—] )\[[ xX]\]/, "$1[" + (checked ? "x" : " ") + "]");
+    lines[lineIndex] = lines[lineIndex].replace(LINE_MARK_RE, "$1[" + mark + "]");
     return { ...e, text: lines.join("\n"), updatedAt: new Date().toISOString() };
   });
   saveEntries(entries);
@@ -1579,7 +1710,7 @@ function entryEl(e, opts) {
   }
   const collapse = compactView && entryWords(e) > SUMMARY_MIN_WORDS;
   const onResize = (imgId, size) => setImageSize(e.id, imgId, size);
-  const onCheck = (li, c) => setLineChecked(e.id, li, c);
+  const onCheck = (li, mark) => setLineMark(e.id, li, mark);
   const p = el("p");
   // a "+++" line folds everything below it behind a Read-more that floats the whole entry
   // in a centred modal — but only in the normal card; the pinch-collapsed view is its own
@@ -1838,7 +1969,7 @@ function openReadModal(entry) {
     // renderRichBlocks already drops the "+++" fold line, so the modal shows above+below seamlessly
     body.appendChild(renderRichBlocks(e.text, e.images,
       (imgId, size) => { setImageSize(id, imgId, size); renderBody(); },
-      (li, c) => { setLineChecked(id, li, c); renderBody(); }));
+      (li, mark) => { setLineMark(id, li, mark); renderBody(); }));
   };
   renderBody();
   const close = () => {
@@ -3691,7 +3822,9 @@ function openComposer(existing) {
     // checklist toggle is its own transform, shared by the standalone button below and by
     // Bullet's "return to plain text" case in the popover
     const checkboxTransform = line => {
-      const m = /^([ \t]*)(?:([-—] )(\[[ xX]\] ?)?)?([\s\S]*)$/.exec(line);
+      // the mark class, not just [ ] and [x] — a line already marked with a day is already a
+      // checklist item, and reading it as plain text put a SECOND box in front of the first
+      const m = new RegExp("^([ \\t]*)(?:([-—] )(\\[(?:" + CHECK_MARK + ")\\] ?)?)?([\\s\\S]*)$").exec(line);
       return m[3] ? m[1] + m[4] : m[1] + "- [ ] " + m[4];
     };
     const LINE_OPS = [

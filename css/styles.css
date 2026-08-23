@@ -599,9 +599,51 @@
     display: inline-flex; align-items: center; justify-content: center;
     transition: background 0.15s ease, border-color 0.15s ease;
   }
-  .rt-box.live { cursor: pointer; }
+  .rt-box.live { cursor: pointer; touch-action: manipulation; -webkit-touch-callout: none; }
   .rt-box.on { background: var(--ink); border-color: var(--ink); }
   .rt-box svg { width: 12px; height: 12px; }
+  /* a day takes the tick's place inside the same filled circle: same box, same fill, a letter
+     instead of a glyph. The face and the raised digit are the day badge's, so Tuesday looks
+     like Tuesday wherever it appears. */
+  .rt-box-day {
+    font-family: var(--day); font-weight: 500; font-size: 9px; letter-spacing: 0;
+    user-select: none; -webkit-user-select: none;
+  }
+  .rt-box-day sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
+
+  /* the day strip, on a long press of the circle */
+  .mark-pop {
+    position: fixed; z-index: 60; display: flex; align-items: center; gap: 3px;
+    padding: 5px; border-radius: 999px;
+    background: var(--card);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 12px 34px rgba(0,0,0,0.16);
+    border: 1px solid rgba(0,0,0,0.04);
+    opacity: 0; transform: scale(0.96);
+    transition: opacity 0.16s ease, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .mark-pop.show { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .mark-pop { transition: none; }
+  }
+  /* every cell is the checklist circle at a tappable size — the strip is a row of the thing it
+     is going to put in the box, so what you pick is what you get */
+  .mp-day {
+    flex: none; width: 30px; height: 30px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1.75px solid transparent; border-radius: 50%;
+    background: var(--field); color: #6B6B70;
+    font-family: var(--day); font-weight: 500; font-size: 10px; letter-spacing: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .mp-day sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
+  .mp-day.on { background: var(--ink); color: #fff; }
+  .mp-day svg { width: 13px; height: 13px; }
+  @media (hover: hover) { .mp-day:not(.on):hover { background: #E9E9EC; color: var(--ink); } }
+  .mp-day:active { transform: scale(0.94); }
+  /* the two that aren't days stand apart from the seven that are */
+  .mp-div { flex: none; width: 1px; height: 18px; background: var(--hairline); margin: 0 2px; }
+  /* empty reads as the unchecked box itself — an outline with nothing in it */
+  .mp-clear { background: none; border-color: #C7C4BD; }
   .rt-check.done .rt-body { color: var(--subtle); text-decoration: line-through; text-decoration-color: #C7C4BD; }
   /* read-more: the pill that floats the folded entry in a centred modal */
   .read-more {
