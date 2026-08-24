@@ -1220,6 +1220,14 @@ async function syncPull() {
   }
   for (const [k, r] of Object.entries(remote.summaries || {})) {
     if (r && r.deletedAt) {
+      // A DELETION IS DATED AND SO IS A SUMMARY, and the newer one wins — the entries merge two
+      // loops up has always compared them and this did not. A summary tombstone lives in the
+      // cloud document forever (nothing collects them), so a week cleared once was a week whose
+      // every future summary was deleted on the next pull: generate it, watch it save, and lose
+      // it silently the next time the app opened. The write to summaryTombstones was the second
+      // half of it, re-arming the deletion this device had already retired.
+      const local = weekSummaries[k];
+      if (local && new Date(summaryUpdatedAt(local)) > new Date(r.deletedAt)) continue;
       if (weekSummaries[k]) { delete weekSummaries[k]; changed = true; }
       if (weekSummaryVersions[k]) { delete weekSummaryVersions[k]; saveWeekSummaryVersions(); }
       summaryTombstones[k] = r.deletedAt;
@@ -1307,9 +1315,16 @@ async function pushEntriesNow(retrying) {
       entries: entries.map(entryToWire).concat(
         Object.entries(tombstones).map(([id, ts]) => ({ id, deletedAt: ts, updatedAt: ts }))),
       tombstones: {},
+      // Tombstones for weeks that still hold a summary are NOT sent. The spread put them last,
+      // so any tombstone that outlived its week — a pull can add one back without
+      // saveWeekSummaries running to clear it — overwrote the live record on its way up and
+      // deleted that week's summary on every device. A week that has a summary is a week that
+      // is not deleted; the two can never both be true in the payload now.
       summaries: {
         ...weekSummaries,
-        ...Object.fromEntries(Object.entries(summaryTombstones).map(([k, ts]) => [k, { deletedAt: ts, updatedAt: ts }]))
+        ...Object.fromEntries(Object.entries(summaryTombstones)
+          .filter(([k]) => !weekSummaries[k])
+          .map(([k, ts]) => [k, { deletedAt: ts, updatedAt: ts }]))
       }
     };
     // Only once she has edited it on THIS device. Sending the untouched defaults would give a
@@ -4520,6 +4535,24 @@ function weekSummaryBlock(list) {
       class: "wsum-add",
       onclick: () => openWeekSummaryEditor(wk.year, wk.week, list)
     }, "+ write a summary"));
+    // A week whose current summary is gone can still have takes in the back-catalogue: the
+    // version slots are a separate, LOCAL store that a sync deletion does not always reach.
+    // Nothing surfaced them once the current record was missing, so a recoverable summary was
+    // indistinguishable from one that had never been written. Newest take wins.
+    const orphans = Object.entries(weekSummaryVersions[k] || {});
+    if (orphans.length) {
+      const best = orphans.map(([, r]) => r)
+        .sort((a, b) => new Date(summaryUpdatedAt(b)) - new Date(summaryUpdatedAt(a)))[0];
+      wrap.appendChild(el("button", {
+        class: "wsum-add wsum-restore",
+        onclick: () => {
+          weekSummaries[k] = { ...best, updatedAt: new Date().toISOString() };
+          delete summaryTombstones[k]; saveTombstones(); // a restore outranks any prior clear
+          saveWeekSummaries();
+          render();
+        }
+      }, "\u00B7 restore last summary"));
+    }
     // No key, no AI route — and until now nothing on screen said so. The absence was silent in
     // both directions at once: the block quietly offered only the hand-written invite, and the
     // chevron quietly did not appear, so "why can't I summarise this week" had no answer

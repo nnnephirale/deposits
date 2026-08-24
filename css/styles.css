@@ -1151,6 +1151,8 @@
   /* the answer to "why is there no AI option" — quieter than either of the two real offers,
      because it is an explanation first and a control second */
   .wsum-nokey { margin-left: 10px; color: #D2D2D7; }
+  /* a take that survived in the back-catalogue — the app's restore rose, same as the tag undo */
+  .wsum-restore { margin-left: 10px; color: #C43C36; }
   @media (hover: hover) { .wsum-nokey:hover { color: var(--subtle); } }
   .wsum-eye {
     position: absolute; top: 0; right: 0;
