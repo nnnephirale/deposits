@@ -1148,6 +1148,10 @@
     .wsum-add:not(.wsum-ai):hover { color: var(--subtle); }
   }
   .wsum-ai:active { transform: scale(0.98); }
+  /* the answer to "why is there no AI option" — quieter than either of the two real offers,
+     because it is an explanation first and a control second */
+  .wsum-nokey { margin-left: 10px; color: #D2D2D7; }
+  @media (hover: hover) { .wsum-nokey:hover { color: var(--subtle); } }
   .wsum-eye {
     position: absolute; top: 0; right: 0;
     background: none; border: none; padding: 4px; line-height: 0;

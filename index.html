@@ -4520,6 +4520,16 @@ function weekSummaryBlock(list) {
       class: "wsum-add",
       onclick: () => openWeekSummaryEditor(wk.year, wk.week, list)
     }, "+ write a summary"));
+    // No key, no AI route — and until now nothing on screen said so. The absence was silent in
+    // both directions at once: the block quietly offered only the hand-written invite, and the
+    // chevron quietly did not appear, so "why can't I summarise this week" had no answer
+    // anywhere in the interface. A missing precondition should name itself.
+    if (!apiKey) {
+      wrap.appendChild(el("button", {
+        class: "wsum-add wsum-nokey",
+        onclick: () => openSettings()
+      }, "\u00B7 add a key for ai"));
+    }
     return wrap;
   }
 
@@ -5826,11 +5836,17 @@ function openSettings() {
     const input = el("input", { class: "key-input", type: "password", placeholder: "sk-ant-…", autocomplete: "off" });
     input.value = apiKey || "";
     input.addEventListener("input", () => {
+      const had = !!apiKey;
       apiKey = input.value.trim() || null;
       try {
         if (apiKey) localStorage.setItem(API_KEY_KEY, apiKey);
         else localStorage.removeItem(API_KEY_KEY);
       } catch (e) {}
+      // The key decides whether the AI routes exist at all — the chevron, the summary block's
+      // offer, the segmentation invite. None of them re-read it on their own, so pasting a key
+      // used to leave every one of them showing the state from before it was there until some
+      // unrelated thing happened to trigger a render. Only on the transition, not per keystroke.
+      if (had !== !!apiKey) render();
     });
     sheet.appendChild(input);
     sheet.appendChild(el("p", { class: "settings-note" },
