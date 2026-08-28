@@ -94,7 +94,7 @@ import {
 import {
   cloudConfig, cloudConfigured, setCloudConfig, cloudCheck, setupLink,
   fetchState, pushState, pushImages, pullImages, imageIdsIn,
-  syncHealth, onSyncHealth
+  syncHealth, onSyncHealth, cloudDiagnose
 } from "./js/sync.js";
 
 // The status bar's height in real pixels. The page paints under it (black-translucent), so
@@ -5840,23 +5840,33 @@ function openSettings() {
       sheet.appendChild(note);
       // The claim the dot is making, spelled out. A green dot with "last synced 9 days ago"
       // under it is still bad news, but it is bad news you can see.
-      sheet.appendChild(el("p", { class: "settings-note" + (syncHealth().failing ? " warn" : ""),
-        style: { margin: "2px 0 0" } }, syncHealthText()));
+      const healthNote = el("p", { class: "settings-note", style: { margin: "2px 0 0" } });
+      const paintHealthNote = (text, bad) => {
+        healthNote.textContent = text === undefined ? syncHealthText() : text;
+        healthNote.className = "settings-note" + ((bad === undefined ? syncHealth().failing : bad) ? " warn" : "");
+      };
+      paintHealthNote();
+      sheet.appendChild(healthNote);
       sheet.appendChild(evictionNote());
       const syncBtn = el("button", { class: "lock-btn", onclick: async () => {
         syncBtn.disabled = true; syncBtn.textContent = "syncing…";
         await syncPull(); await pushEntriesNow();
-        syncBtn.disabled = false; syncBtn.textContent = "sync now"; render();
+        syncBtn.disabled = false; syncBtn.textContent = "sync now";
+        paintHealthNote();   // whatever just happened, say so rather than leaving the old line
+        render();
       } }, "sync now");
       sheet.appendChild(syncBtn);
+      // The result goes in the health line, not over the address: overwriting the address was
+      // how the panel ended up showing a failure with no mention of what it had failed to reach.
       const testBtn = el("button", { class: "lock-btn", onclick: async () => {
         testBtn.disabled = true; testBtn.textContent = "checking…";
-        const r = await cloudCheck();
+        paintHealthNote("checking…", false);
+        const r = await cloudDiagnose();
         testBtn.disabled = false; testBtn.textContent = "test connection";
-        note.textContent = r.ok
+        paintHealthNote(r.ok
           ? "connected — " + r.entries + " entries in the cloud" +
             (r.deleted ? " (plus " + r.deleted + " deleted)." : ".")
-          : "can't reach it: " + r.reason;
+          : r.reason, !r.ok);
       } }, "test connection");
       sheet.appendChild(testBtn);
       // Setting a device up by retyping a 48-character key is how keys end up mistyped.

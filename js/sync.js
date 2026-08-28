@@ -183,6 +183,60 @@ export async function cloudCheck() {
   }
 }
 
+/** What "Load failed" actually was.
+ *
+ *  WebKit says "Load failed" for every fetch that doesn't complete, and Chrome says "Failed
+ *  to fetch": no status, no cause, and the same three words whether the phone is off the
+ *  network, a content blocker ate the request, Private Relay dropped it, the carrier's DNS
+ *  refuses workers.dev, or the Worker is simply refusing this page's origin. Those have
+ *  completely different fixes, so the check asks the questions one at a time instead of
+ *  handing the browser's sentence back to her.
+ *
+ *  /health is the probe on purpose: no Authorization header, so it is a *simple* request that
+ *  goes straight out with no preflight, and it needs no secret to answer. Then, if even that
+ *  fails, the same URL again with mode:"no-cors" — an opaque response still resolves when the
+ *  bytes came back, so a reply that only CORS rejected is told apart from nothing arriving.
+ */
+export async function cloudDiagnose() {
+  if (!cloudConfigured()) return { ok: false, reason: "not set up", stage: "unconfigured" };
+
+  const first = await cloudCheck();
+  if (first.ok) return first;
+  // A status came back, so the network is fine and the answer is already specific.
+  if (!/load failed|failed to fetch|networkerror|unreachable|timed out/i.test(first.reason || "")) return first;
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return { ok: false, stage: "offline", reason: "this device is offline — nothing left the phone." };
+  }
+
+  const host = cfg.url.replace(/^https?:\/\//, "");
+  try {
+    const res = await fetch(cfg.url + "/health", { signal: deadline(8000) });
+    if (res.ok) {
+      const body = await res.json().catch(() => ({}));
+      if (body.configured === false) {
+        return { ok: false, stage: "no-secret",
+          reason: host + " is up but has no secret set — run `wrangler secret put DEPOSITS_SECRET`." };
+      }
+      return { ok: false, stage: "request-blocked",
+        reason: host + " answers a plain request, so it's this app's request being stopped — a content blocker, "
+          + "a VPN or Private Relay. Turn those off for this site and test again." };
+    }
+    return { ok: false, stage: "health-http", reason: host + " answered /health with HTTP " + res.status + "." };
+  } catch (e) {
+    try {
+      await fetch(cfg.url + "/health", { mode: "no-cors", signal: deadline(8000) });
+      return { ok: false, stage: "cors",
+        reason: host + " is reachable but refusing this page's origin — set ALLOWED_ORIGIN on the Worker to "
+          + location.origin + " and redeploy." };
+    } catch (e2) {
+      return { ok: false, stage: "unreachable",
+        reason: "can't reach " + host + " at all from this network. Try Wi-Fi instead of cellular, and turn off "
+          + "Private Relay or a VPN — mobile networks do block workers.dev." };
+    }
+  }
+}
+
 // ---------- entries ----------
 
 export async function fetchState() {
