@@ -34,12 +34,16 @@ export default {
         if (request.method === "GET") return cors(await getEntries(env), env);
         if (request.method === "PUT") return cors(await putEntries(request, env), env);
       }
-      // ---- SSaved ----
-      // Reads are public so share links keep working for people who do not have the secret;
-      // writes need it. That is strictly better than what SSaved has today, where the bucket
-      // is public and the tables have no row-level security, so anyone holding a share link
-      // can also delete the collection.
-      const ss = path.match(/^\/s\/([A-Za-z0-9_-]{1,64})(?:\/img\/([A-Za-z0-9._-]{1,128}))?$/);
+      // ---- SSaved (moving out; see ../worker-ssaved) ----
+      // These routes now live in their own Worker. They are still answered here until SSaved's
+      // client has been repointed, because removing them before that would take SSaved down —
+      // set SSAVED_ROUTES = "off" in wrangler.toml and redeploy once the new URL is live.
+      //
+      // Why they are leaving at all: one Worker meant one daily request budget for two apps,
+      // and SSaved's reads are unauthenticated by design. A crawled share link could spend the
+      // journal's quota, which is exactly how both apps went dark at once on 28 Aug 2026 —
+      // Cloudflare error 1027, and a browser can only see it as "Load failed".
+      const ss = env.SSAVED_ROUTES === "off" ? null : path.match(/^\/s\/([A-Za-z0-9_-]{1,64})(?:\/img\/([A-Za-z0-9._-]{1,128}))?$/);
       if (ss) {
         const [, collection, image] = ss;
         if (image) {
@@ -68,13 +72,10 @@ export default {
     }
   },
 
-  // Keeps the shared Supabase project awake on SSaved's behalf. SSaved has no local copy of
-  // its cards — when that project pauses, SSaved is simply down. Its own keep-alive lives in
-  // a GitHub workflow, and GitHub switches scheduled workflows off after 60 days of repo
-  // quiet, which is how it died the first time. This scheduler has no such rule.
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(pingSupabase(env));
-  }
+  // The Supabase keep-alive moved to the ssaved Worker along with the routes it serves — it
+  // was always SSaved's uptime, not this one's. This Worker has no schedule of its own; what
+  // watches *it* runs elsewhere on purpose (../worker-ssaved's cron, and the GitHub Actions
+  // check that sits outside Cloudflare entirely).
 };
 
 // ---------- auth ----------
@@ -239,20 +240,6 @@ async function putSsavedImage(collection, image, request, env) {
     httpMetadata: { contentType: request.headers.get("content-type") || "image/png" }
   });
   return json({ ok: true, size: body.byteLength });
-}
-
-// ---------- SSaved keep-alive ----------
-
-async function pingSupabase(env) {
-  const url = env.SUPABASE_PING_URL;
-  const key = env.SUPABASE_ANON_KEY;
-  if (!url || !key) return;
-  try {
-    const r = await fetch(url, { headers: { apikey: key, authorization: "Bearer " + key } });
-    console.log(`supabase ping: HTTP ${r.status}${r.ok ? " (alive)" : " (paused or over limit)"}`);
-  } catch (e) {
-    console.log("supabase ping failed: " + e.message);
-  }
 }
 
 // ---------- helpers ----------

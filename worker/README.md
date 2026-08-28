@@ -79,18 +79,42 @@ link that gets crawled or polled is charged to this same 100,000.
 Storage 10 GB, and downloads are never charged. At roughly 300 KB a photo that's about
 33,000 photos. Writes are 1M/month, reads 10M/month; a journal makes a handful a day.
 
+## Two Workers now
+
+SSaved's `/s/…` routes are moving to `../worker-ssaved`. One Worker meant one daily request
+budget for two apps, and SSaved's reads are unauthenticated by design — so a crawled share
+link could spend the journal's quota, which is how both went dark at once on 28 Aug 2026.
+
+Deploy order matters, because SSaved cannot be repointed from this repo:
+
+1. `cd ../worker-ssaved && npx wrangler deploy` and `npx wrangler secret put DEPOSITS_SECRET`
+   (the same secret). The old routes keep answering here in the meantime, so nothing breaks.
+2. Point SSaved's client at `https://ssaved.<you>.workers.dev` and load a collection to check.
+   Note that SSaved may be taking its address from the shared `cf-worker` localStorage record,
+   which this app writes and which still holds *this* Worker's address — repointing means
+   giving SSaved its own URL rather than that shared one.
+3. Set `SSAVED_ROUTES = "off"` in `wrangler.toml` and `npx wrangler deploy` here. From then on
+   the two apps cannot take each other down.
+
+## Knowing before she notices
+
+deposits is local-first, so an outage is silent: the app keeps working and quietly stops
+syncing. Two checks, deliberately failing independently:
+
+- `.github/workflows/health.yml` — every 30 minutes, from GitHub, i.e. outside Cloudflare. A
+  failing run emails the repo owner. Add a `DEPOSITS_SECRET` repo secret and it also reads
+  `/entries`, which proves the bucket and not just the Worker.
+- `../worker-ssaved`'s hourly cron pings this Worker's `/health` and pushes to `ALERT_URL`
+  (an ntfy.sh topic needs no account). It is on the same Cloudflare account, so the daily
+  limit can silence it — which is exactly why the GitHub one exists too.
+
 ## The scheduled ping
 
-`crons` fires every 4 days and pokes the Supabase project SSaved still uses. SSaved keeps no
-local copy of its cards, so whenever that project pauses, SSaved is simply down. Its own
-keep-alive is a GitHub workflow, and GitHub disables scheduled workflows after 60 days of
-repo quiet — which is how it died the first time. Cloudflare's scheduler has no such rule.
-
-Watch it with `npx wrangler tail`; it logs the status and says plainly when the project is
-paused or over its limits.
-
-If you later move SSaved off Supabase too, delete the `[triggers]` block and the two
-`SUPABASE_*` vars.
+Gone from this Worker — it was SSaved's uptime, not this one's, and it moved with the routes
+it serves. See `../worker-ssaved`. `.github/workflows/keep-supabase-alive.yml` still pings the
+same project every 4 days as a second line; GitHub disables scheduled workflows after 60 days
+of repo quiet, which is how SSaved's original keep-alive died, so the Cloudflare cron is the
+one to trust.
 
 ## API
 

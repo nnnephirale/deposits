@@ -1,0 +1,35 @@
+name = "ssaved"
+main = "src/worker.js"
+compatibility_date = "2026-01-15"
+
+# The same bucket deposits uses. Separate Workers, separate request budgets, one store —
+# the split is about blast radius, not about the data.
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "deposits"
+
+[vars]
+# Wherever SSaved is served from. "*" works but means the secret is the only thing in the way.
+ALLOWED_ORIGIN = "https://nnnephirale.github.io"
+
+# Keeps the Supabase project SSaved still reads from awake — it has no local copy of its
+# cards, so a paused project means SSaved is simply down.
+SUPABASE_PING_URL = "https://uauqqdaalnddedgjdgcg.supabase.co/rest/v1/collections?select=id&limit=1"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhdXFxZGFhbG5kZGVkZ2pkZ2NnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3OTQ2NDIsImV4cCI6MjA4MzM3MDY0Mn0.afUxr9uKdSamnbFQmOt7DDRvEJYLEz3-c8u5P3zZcnE"
+
+# The other app, watched from outside itself. deposits is local-first, so an outage there is
+# silent for days — the app keeps working and quietly stops syncing.
+DEPOSITS_HEALTH_URL = "https://deposits.nnnephirale.workers.dev/health"
+
+# Where a failure goes. Any endpoint that accepts a POST body; an ntfy.sh topic needs no
+# account — pick an unguessable name, put it here, and subscribe the phone app to it.
+# Left empty the check still logs to `wrangler tail`, it just doesn't reach you.
+ALERT_URL = ""
+
+[triggers]
+# Hourly. The Supabase ping only needs every few days, but the deposits watch is the reason
+# for the schedule, and 24 requests a day is nothing.
+crons = ["23 * * * *"]
+
+# DEPOSITS_SECRET is NOT here — same secret as deposits, set once and kept encrypted:
+#   npx wrangler secret put DEPOSITS_SECRET

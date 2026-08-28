@@ -13,8 +13,16 @@
 
 const CONFIG_KEY = "weekly-deposits-cloud";
 
-// Shared with SSaved. Both apps are served from the same origin and talk to the same Worker,
-// so they can share one stored credential — enter it in either and the other already has it.
+// One user, one Worker, and that is not going to change — so the address is not really
+// configuration, it is a fact about this app. Baking it in means a device that has lost its
+// storage only has to be told the *secret* again, not both halves; a setup link can carry
+// #k= alone; and the Settings fields still override it if the Worker is ever renamed.
+const DEFAULT_URL = "https://deposits.nnnephirale.workers.dev";
+
+// Shared with SSaved. Both apps are served from the same origin and use the same secret, so
+// entering it in either sets up the other. They no longer share a *Worker* — SSaved is moving
+// to its own so that one app's traffic cannot spend the other's daily request budget — which
+// is why only the secret is taken from this record now, never the address.
 // Kept separate from CONFIG_KEY so an older install's config still loads.
 const SHARED_KEY = "cf-worker";
 
@@ -33,7 +41,7 @@ function readSetupLink() {
     const h = new URLSearchParams((location.hash || "").replace(/^#/, ""));
     const secret = h.get("k");
     if (!secret) return null;
-    const url = h.get("w") || (readShared() || {}).url || null;
+    const url = h.get("w") || DEFAULT_URL;
     // Strip only once the link is actually usable. A link that carries the key but no
     // address, opened on a device with nothing stored, used to be consumed anyway: the
     // fragment went, the config never arrived, and the one copy of the key on that phone
@@ -46,7 +54,14 @@ function readSetupLink() {
 
 let cfg = null;
 try { cfg = JSON.parse(localStorage.getItem(CONFIG_KEY)) || null; } catch (e) {}
-if (!cfg || !cfg.secret) cfg = readShared() || cfg;
+// The shared record contributes its SECRET and nothing else. It used to hand over its url as
+// well, which was harmless while both apps sat on one Worker — but SSaved is moving to its
+// own, and adopting that address would point the journal at a Worker with no /entries at all.
+if (!cfg || !cfg.secret) {
+  const shared = readShared();
+  if (shared) cfg = { url: (cfg && cfg.url) || DEFAULT_URL, secret: shared.secret };
+}
+if (cfg && cfg.secret && !cfg.url) cfg.url = DEFAULT_URL;
 
 export function cloudConfig() { return cfg; }
 export function cloudConfigured() { return !!(cfg && cfg.url && cfg.secret); }
