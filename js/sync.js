@@ -34,8 +34,13 @@ function readSetupLink() {
     const secret = h.get("k");
     if (!secret) return null;
     const url = h.get("w") || (readShared() || {}).url || null;
+    // Strip only once the link is actually usable. A link that carries the key but no
+    // address, opened on a device with nothing stored, used to be consumed anyway: the
+    // fragment went, the config never arrived, and the one copy of the key on that phone
+    // was gone with the address bar.
+    if (!url) return null;
     history.replaceState(null, "", location.pathname + location.search);
-    return url ? { url, secret } : null;
+    return { url, secret };
   } catch (e) { return null; }
 }
 
@@ -66,6 +71,7 @@ export function setCloudConfig(next) {
       localStorage.removeItem(SHARED_KEY);
     }
   } catch (e) {}
+  resetHealth();   // a new address or key gets a clean record; the old one's is not about it
   return cfg;
 }
 
@@ -96,14 +102,69 @@ function deadline(ms) {
   return c.signal;
 }
 
+// ---------- health ----------
+// Every sync failure used to be a console.warn, on a phone with no console. The app went on
+// looking connected — the dot is lit by having a config, not by anything having worked — so a
+// device could stop reaching the Worker and say nothing about it for days.
+//
+// lastOkAt is kept in localStorage on purpose. "last synced 9 days ago" is the sentence that
+// names the problem; and after WebKit's seven-day sweep takes the storage, its absence
+// alongside a config that is also gone is the same fact told the other way.
+
+const HEALTH_KEY = "weekly-deposits-sync-health";
+let health = { lastOkAt: null, lastError: null, lastErrorAt: null };
+try { health = { ...health, ...(JSON.parse(localStorage.getItem(HEALTH_KEY)) || {}) }; } catch (e) {}
+
+let healthListener = null;
+let lastWroteHealth = 0;
+
+/** { lastOkAt, lastError, lastErrorAt, failing } — failing means the last attempt didn't land. */
+export function syncHealth() {
+  const failing = !!(health.lastError && (!health.lastOkAt || health.lastErrorAt > health.lastOkAt));
+  return { ...health, failing };
+}
+/** Called when the answer to syncHealth() changes, so the dot can repaint without a render. */
+export function onSyncHealth(fn) { healthListener = fn; }
+
+function noteHealth(next) {
+  const before = syncHealth().failing;
+  Object.assign(health, next);
+  const now = Date.now();
+  // One write a minute at most: a photo pull is a request per photo, and none of this is
+  // worth a storage write each.
+  if (before !== syncHealth().failing || now - lastWroteHealth > 60000) {
+    lastWroteHealth = now;
+    try { localStorage.setItem(HEALTH_KEY, JSON.stringify(health)); } catch (e) {}
+  }
+  if (before !== syncHealth().failing && healthListener) { try { healthListener(syncHealth()); } catch (e) {} }
+}
+
+function resetHealth() {
+  health = { lastOkAt: null, lastError: null, lastErrorAt: null };
+  try { localStorage.removeItem(HEALTH_KEY); } catch (e) {}
+}
+
+function noteOk() { noteHealth({ lastOkAt: new Date().toISOString(), lastError: null }); }
+function noteFail(reason) { noteHealth({ lastError: reason, lastErrorAt: new Date().toISOString() }); }
+
 async function call(path, init, ms = TIMEOUT_JSON) {
   if (!cloudConfigured()) throw new Error("cloud not configured");
+  let res;
   try {
-    return await fetch(cfg.url + path, { ...init, signal: deadline(ms) });
+    res = await fetch(cfg.url + path, { ...init, signal: deadline(ms) });
   } catch (e) {
-    if (e.name === "TimeoutError" || e.name === "AbortError") throw new Error("timed out after " + (ms / 1000) + "s");
+    const timedOut = e.name === "TimeoutError" || e.name === "AbortError";
+    const reason = timedOut ? "timed out after " + (ms / 1000) + "s" : (e.message || "unreachable");
+    noteFail(reason);
+    if (timedOut) throw new Error(reason);
     throw e;
   }
+  // A 412 is the conflict check doing its job and a 404 is an image this device doesn't have
+  // yet — both are round-trips that reached the Worker and came back understood.
+  if (res.ok || res.status === 412 || res.status === 404) noteOk();
+  else if (res.status === 401) noteFail("secret rejected");
+  else noteFail("HTTP " + res.status);
+  return res;
 }
 
 /** Reachable and the secret is right? Used by Settings to give a straight yes/no. */

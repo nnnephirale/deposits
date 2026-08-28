@@ -88,12 +88,13 @@
 // the bottom is the deliberate way in from the console.
 import {
   openStore, loadEntries, persistEntries, flushEntries, onStoreError,
-  migrateFromLocalStorage, storageReport, requestPersistence,
+  migrateFromLocalStorage, storageReport, requestPersistence, persistenceState,
   imageBlob, hasImage, putImage, imageUrl
 } from "./js/store.js";
 import {
   cloudConfig, cloudConfigured, setCloudConfig, cloudCheck, setupLink,
-  fetchState, pushState, pushImages, pullImages, imageIdsIn
+  fetchState, pushState, pushImages, pullImages, imageIdsIn,
+  syncHealth, onSyncHealth
 } from "./js/sync.js";
 
 // The status bar's height in real pixels. The page paints under it (black-translucent), so
@@ -1132,6 +1133,106 @@ function weekKey(year, week) { return year + "-" + pad2(week); }
 // free tier and paused the project.
 
 function syncActive() { return cloudConfigured(); }
+
+// ---------- is it actually working? ----------
+// The dot next to Settings used to be lit by having a config, which is not the same claim as
+// "your entries are reaching the cloud" — and on the device where those two came apart, it
+// said nothing. Green now means a request landed; amber means the last one didn't.
+
+function syncDotClass() {
+  if (!cloudConfigured()) return "";
+  return syncHealth().failing ? " warn" : " live";
+}
+// Repaint in place: health changes between renders, and a full render to move a 6px dot is
+// both wasteful and capable of stealing a caret out of the composer.
+function paintSyncDot() {
+  document.querySelectorAll(".ico-dot").forEach(d => { d.className = "ico-dot" + syncDotClass(); });
+}
+onSyncHealth(paintSyncDot);
+
+/** "just now" / "6 minutes ago" / "9 days ago" — the number that makes a stale sync obvious. */
+function agoText(iso) {
+  if (!iso) return null;
+  const then = Date.parse(iso);
+  if (!then) return null;
+  const mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + " minute" + (mins === 1 ? "" : "s") + " ago";
+  const hrs = Math.round(mins / 60);
+  if (hrs < 36) return hrs + " hour" + (hrs === 1 ? "" : "s") + " ago";
+  const days = Math.round(hrs / 24);
+  return days + " day" + (days === 1 ? "" : "s") + " ago";
+}
+
+// ---------- the seven-day clock ----------
+// The recurring disconnection this all exists for. WebKit deletes every scrap of
+// script-writable storage after seven days of Safari use without a visit — localStorage and
+// IndexedDB together — and the Worker address and secret live in localStorage. So a phone
+// left alone for a week comes back with the entries gone, the dot dark and the connect form
+// showing, as though it had never been set up. Nothing about it is a network problem, which
+// is why the app had nothing to say about it.
+//
+// A home-screen install is exempt, and it is also how Safari decides to grant persistent
+// storage in the first place. So there is exactly one instruction to give, and the app now
+// gives it — in Settings, and once on the device that needs it.
+
+let storageRisk = null;   // { persisted, standalone, webkit, atRisk } once resolved
+
+const RISK_SEEN_KEY = "weekly-deposits-eviction-nudge";
+
+const EVICTION_FIX = "open deposits in Safari, tap the share button, then \u201cAdd to Home Screen\u201d, "
+  + "and use it from that icon. an installed app is exempt from the sweep.";
+
+/** A Settings line about this device's grip on its own data. Empty when there's nothing to say. */
+function evictionNote() {
+  const p = el("p", { class: "settings-note warn", style: { margin: "8px 0 0", display: "none" } });
+  const fill = st => {
+    if (st && st.atRisk) {
+      p.style.display = "";
+      p.textContent = "this device is on Safari\u2019s seven-day clock. after seven days without opening "
+        + "deposits, Safari deletes the app\u2019s stored data \u2014 including this connection \u2014 and it "
+        + "comes back looking brand new. your entries stay safe in the cloud, but the key doesn\u2019t: "
+        + EVICTION_FIX;
+    } else if (st && (st.persisted || st.standalone)) {
+      p.className = "settings-note";
+      p.style.display = "";
+      p.textContent = st.standalone
+        ? "installed to the home screen \u2014 this device keeps its data between visits."
+        : "this browser has agreed to keep this app\u2019s data rather than evicting it.";
+    }
+  };
+  if (storageRisk) fill(storageRisk);
+  else persistenceState().then(st => { storageRisk = st; fill(st); }).catch(() => {});
+  return p;
+}
+
+/** Say it once, unprompted, on a device that is going to lose its key otherwise. */
+function maybeNudgeAboutEviction() {
+  if (!storageRisk || !storageRisk.atRisk || !cloudConfigured()) return;
+  let seen = 0;
+  try { seen = Number(localStorage.getItem(RISK_SEEN_KEY)) || 0; } catch (e) {}
+  if (Date.now() - seen < 30 * 24 * 3600 * 1000) return;   // a month between reminders
+  try { localStorage.setItem(RISK_SEEN_KEY, String(Date.now())); } catch (e) {}
+
+  const box = el("div", { class: "save-alert keep-alert show", role: "status" },
+    el("strong", null, "Safari will forget this app in seven days."),
+    el("span", null, "That\u2019s what keeps disconnecting your sync: after a week without opening "
+      + "deposits, Safari clears its data, key and all. To stop it, " + EVICTION_FIX),
+    el("button", { class: "keep-alert-x", onclick: () => box.remove() }, "got it"));
+  document.body.appendChild(box);
+}
+
+/** The line Settings shows under the address: what the last round-trip actually did. */
+function syncHealthText() {
+  const h = syncHealth();
+  const last = agoText(h.lastOkAt);
+  if (h.failing) {
+    return "not reaching it: " + h.lastError
+      + (last ? " — last synced " + last + "." : " — nothing has synced from this device yet.");
+  }
+  if (last) return "last synced " + last + ".";
+  return "nothing has synced from this device yet.";
+}
 
 // the etag of the bucket object we last read: sent back on write so a device that wrote in
 // between gets a 412 instead of being flattened.
@@ -2190,7 +2291,7 @@ function renderIconRail() {
     () => setLayout(layout === "day" ? "topic" : "day")));
   bar.appendChild(icoRow("Export markdown", ICO_EXPORT, false, () => doExport()));
   bar.appendChild(icoRow("Settings", ICO_SETTINGS, false, () => openSettings(),
-    el("span", { class: "ico-dot" + (cloudConfigured() ? " live" : "") })));
+    el("span", { class: "ico-dot" + syncDotClass() })));
 
   railL.appendChild(bar);
 }
@@ -5737,6 +5838,11 @@ function openSettings() {
       const note = el("p", { class: "settings-note", style: { margin: "0" } },
         "backing up to " + cc.url.replace(/^https?:\/\//, "") + " — entries and photos sync across your devices.");
       sheet.appendChild(note);
+      // The claim the dot is making, spelled out. A green dot with "last synced 9 days ago"
+      // under it is still bad news, but it is bad news you can see.
+      sheet.appendChild(el("p", { class: "settings-note" + (syncHealth().failing ? " warn" : ""),
+        style: { margin: "2px 0 0" } }, syncHealthText()));
+      sheet.appendChild(evictionNote());
       const syncBtn = el("button", { class: "lock-btn", onclick: async () => {
         syncBtn.disabled = true; syncBtn.textContent = "syncing…";
         await syncPull(); await pushEntriesNow();
@@ -6374,7 +6480,12 @@ document.addEventListener("keydown", ev => {
   entries = await loadEntries();
   render();
 
-  requestPersistence(); // ask Safari not to evict us after 7 idle days
+  // Ask first, then look: a granted request is exactly what takes this device off the clock,
+  // and asking after reading the answer would report a state one launch out of date.
+  requestPersistence()
+    .then(() => persistenceState())
+    .then(st => { storageRisk = st; maybeNudgeAboutEviction(); })
+    .catch(() => {});
 
   // restore any existing session and reconcile with the cloud (async; local render already happened)
   initSync();

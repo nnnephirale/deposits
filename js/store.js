@@ -353,3 +353,32 @@ export async function requestPersistence() {
   } catch (e) {}
   return false;
 }
+
+/** Why this device may lose everything, in the two terms that decide it.
+ *
+ *  WebKit deletes all script-writable storage — localStorage AND IndexedDB — after seven
+ *  days of Safari use without a visit to the site. First party, no exceptions asked for and
+ *  none given. That is what takes the cloud config with it: the Worker address and the
+ *  secret live in localStorage, so a phone that goes a week untouched comes back looking
+ *  like a device that was never set up.
+ *
+ *  Two things exempt a site: storage the browser has agreed to persist, and a home-screen
+ *  install (which is also how Safari decides to grant the first). Anything else on WebKit is
+ *  living on a seven-day clock.
+ */
+export async function persistenceState() {
+  let persisted = false;
+  try {
+    if (navigator.storage && navigator.storage.persisted) persisted = !!(await navigator.storage.persisted());
+  } catch (e) {}
+
+  const standalone = (typeof navigator !== "undefined" && navigator.standalone === true)
+    || !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+
+  // Chrome and Firefox evict only under real storage pressure, and warning there would be
+  // crying wolf. The seven-day rule is WebKit's alone.
+  const ua = navigator.userAgent || "";
+  const webkit = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(ua);
+
+  return { persisted, standalone, webkit, atRisk: webkit && !persisted && !standalone };
+}
