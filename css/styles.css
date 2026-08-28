@@ -2377,14 +2377,3 @@
 @media (min-width: 1080px) {
   .save-alert { left: auto; right: 24px; bottom: 24px; max-width: 340px; }
 }
-
-/* The same slab, in the colour of a warning rather than a failure: nothing has gone wrong
-   yet, and everything still will unless the app gets installed. */
-.keep-alert { background: #2C2A26; }
-.keep-alert-x {
-  align-self: flex-start; margin-top: 8px;
-  padding: 5px 12px; border: 0; border-radius: 999px;
-  background: rgba(255,255,255,.16); color: #fff;
-  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
-}
-.keep-alert-x:hover { background: rgba(255,255,255,.24); }

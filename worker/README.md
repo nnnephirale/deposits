@@ -37,25 +37,22 @@ openssl rand -base64 32
 
 Deploy prints the Worker's address. Open the app → Settings → cloud sync, paste that address
 and the same secret, and press connect. Repeat on each device. Nothing on this side expires —
-but see the seven-day clock below, which is what actually disconnects a phone.
+but read the next paragraph before setting up an iPhone.
 
-**Add the app to the home screen on iOS.** Safari deletes every scrap of a site's
-script-writable storage — `localStorage` *and* IndexedDB — after seven days of Safari use
-without a visit to that site. The Worker address and secret live in `localStorage`, so a
-phone left alone for a week comes back with no entries, no key, and the connect form showing,
-as though it had never been set up. A home-screen install is exempt (and is also how Safari
-decides to grant persistent storage, which the app requests on every launch). Nothing is lost
-when it happens — the entries are in the bucket — but the key has to be re-entered, and the
-easy way is Settings → **copy setup link** on a device that still works, then open that link
-on the phone.
+**On iOS, install from a setup link — not from the plain address.** Safari deletes every
+scrap of a site's script-writable storage — `localStorage` *and* IndexedDB — after seven days
+of Safari use without a visit, and the Worker address and secret live in `localStorage`. So a
+phone left alone for a week comes back with no entries, no key and the connect form showing.
 
-Settings now says which of these a device is in: a green dot and "last synced …" when
-requests are landing, amber when they are not, and a line naming the seven-day clock on any
-device still exposed to it.
+The app's answer is Settings → cloud sync → **keep this device connected**, which puts
+`#w=<worker>&k=<secret>` back in the address bar so that Share → *Add to Home Screen* saves an
+icon carrying the key. A bookmark is not script-writable storage and is never swept: that icon
+re-seeds the config on every cold launch, so a wiped device opens, reconnects and pulls its
+entries back down without anyone noticing it had been wiped. The fragment is stripped from the
+address bar as soon as it is read, so it lives in the icon and nowhere else.
 
-Before deploying, set `ALLOWED_ORIGIN` in `wrangler.toml` to wherever the app is served from.
-It's defence in depth — the secret is the actual lock — but it stops any other page from
-using a leaked secret from a browser.
+The secret field is also a real password field in a real form, so Safari offers to keep it in
+the keychain — which means iCloud, and every other device you own.
 
 ## Free tier
 

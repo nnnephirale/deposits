@@ -1164,62 +1164,57 @@ function agoText(iso) {
   return days + " day" + (days === 1 ? "" : "s") + " ago";
 }
 
-// ---------- the seven-day clock ----------
-// The recurring disconnection this all exists for. WebKit deletes every scrap of
-// script-writable storage after seven days of Safari use without a visit — localStorage and
-// IndexedDB together — and the Worker address and secret live in localStorage. So a phone
-// left alone for a week comes back with the entries gone, the dot dark and the connect form
-// showing, as though it had never been set up. Nothing about it is a network problem, which
-// is why the app had nothing to say about it.
+// ---------- staying connected ----------
+// Why this phone kept ending up disconnected: WebKit deletes all script-writable storage —
+// localStorage and IndexedDB together — after seven days of Safari use without a visit, and
+// the Worker address and secret live in localStorage. requestPersistence() asks to be spared
+// and is usually refused in a plain tab.
 //
-// A home-screen install is exempt, and it is also how Safari decides to grant persistent
-// storage in the first place. So there is exactly one instruction to give, and the app now
-// gives it — in Settings, and once on the device that needs it.
+// Rather than explain that to the one person who uses this, put the key somewhere the sweep
+// can't reach: the URL of the home-screen icon. A bookmark is not script-writable storage.
+// An icon whose URL carries #w=…&k=… re-seeds the config on every cold launch, so a wiped
+// device opens, reconnects and pulls all its entries back down without anyone noticing it
+// had been wiped. Set up once, and the failure mode is gone rather than described.
 
 let storageRisk = null;   // { persisted, standalone, webkit, atRisk } once resolved
 
-const RISK_SEEN_KEY = "weekly-deposits-eviction-nudge";
+/** The one-time move, offered only on a device that is actually exposed. */
+function keepConnectedRow() {
+  const wrap = el("div", { style: { display: "none" } });
+  const line = el("p", { class: "settings-note", style: { margin: "6px 0 0" } });
 
-const EVICTION_FIX = "open deposits in Safari, tap the share button, then \u201cAdd to Home Screen\u201d, "
-  + "and use it from that icon. an installed app is exempt from the sweep.";
-
-/** A Settings line about this device's grip on its own data. Empty when there's nothing to say. */
-function evictionNote() {
-  const p = el("p", { class: "settings-note warn", style: { margin: "8px 0 0", display: "none" } });
-  const fill = st => {
-    if (st && st.atRisk) {
-      p.style.display = "";
-      p.textContent = "this device is on Safari\u2019s seven-day clock. after seven days without opening "
-        + "deposits, Safari deletes the app\u2019s stored data \u2014 including this connection \u2014 and it "
-        + "comes back looking brand new. your entries stay safe in the cloud, but the key doesn\u2019t: "
-        + EVICTION_FIX;
-    } else if (st && (st.persisted || st.standalone)) {
-      p.className = "settings-note";
-      p.style.display = "";
-      p.textContent = st.standalone
-        ? "installed to the home screen \u2014 this device keeps its data between visits."
-        : "this browser has agreed to keep this app\u2019s data rather than evicting it.";
+  const btn = el("button", { class: "lock-btn", style: { marginTop: "10px" }, onclick: async () => {
+    const link = setupLink();
+    if (!link) return;
+    // A home-screen app has no share button of its own, so from there the link has to travel
+    // back to Safari to be installed.
+    if (storageRisk && storageRisk.standalone) {
+      try {
+        await navigator.clipboard.writeText(link);
+        line.textContent = "copied. open Safari, paste it in, then Share \u2192 \u201cAdd to Home Screen\u201d. "
+          + "use that new icon from now on and it stays connected on its own.";
+      } catch (e) {
+        line.textContent = link;
+      }
+      return;
     }
+    history.replaceState(null, "", link);
+    btn.textContent = "the address bar is ready";
+    line.textContent = "tap the share button, then \u201cAdd to Home Screen\u201d, and open deposits from that icon. "
+      + "it carries your key, so it reconnects itself \u2014 even if Safari clears everything.";
+  } }, "keep this device connected");
+
+  wrap.appendChild(btn);
+  wrap.appendChild(line);
+
+  const fill = st => {
+    // Persistent storage granted means the browser has already promised to keep this; there
+    // is nothing to fix and nothing to say.
+    if (st && st.webkit && !st.persisted) wrap.style.display = "";
   };
   if (storageRisk) fill(storageRisk);
   else persistenceState().then(st => { storageRisk = st; fill(st); }).catch(() => {});
-  return p;
-}
-
-/** Say it once, unprompted, on a device that is going to lose its key otherwise. */
-function maybeNudgeAboutEviction() {
-  if (!storageRisk || !storageRisk.atRisk || !cloudConfigured()) return;
-  let seen = 0;
-  try { seen = Number(localStorage.getItem(RISK_SEEN_KEY)) || 0; } catch (e) {}
-  if (Date.now() - seen < 30 * 24 * 3600 * 1000) return;   // a month between reminders
-  try { localStorage.setItem(RISK_SEEN_KEY, String(Date.now())); } catch (e) {}
-
-  const box = el("div", { class: "save-alert keep-alert show", role: "status" },
-    el("strong", null, "Safari will forget this app in seven days."),
-    el("span", null, "That\u2019s what keeps disconnecting your sync: after a week without opening "
-      + "deposits, Safari clears its data, key and all. To stop it, " + EVICTION_FIX),
-    el("button", { class: "keep-alert-x", onclick: () => box.remove() }, "got it"));
-  document.body.appendChild(box);
+  return wrap;
 }
 
 /** The line Settings shows under the address: what the last round-trip actually did. */
@@ -5847,7 +5842,6 @@ function openSettings() {
       };
       paintHealthNote();
       sheet.appendChild(healthNote);
-      sheet.appendChild(evictionNote());
       const syncBtn = el("button", { class: "lock-btn", onclick: async () => {
         syncBtn.disabled = true; syncBtn.textContent = "syncing…";
         await syncPull(); await pushEntriesNow();
@@ -5881,16 +5875,29 @@ function openSettings() {
       sheet.appendChild(linkBtn);
       sheet.appendChild(el("p", { class: "settings-note", style: { margin: "2px 0 0" } },
         "the link contains your key — treat it like a password, and it only needs to travel once."));
+      // Same link, aimed at this device rather than another one — see keepConnectedRow.
+      sheet.appendChild(keepConnectedRow());
       sheet.appendChild(el("button", { class: "lock-btn", style: { marginTop: "10px" }, onclick: () => {
         setCloudConfig(null); build();   // local entries are untouched; only the link goes
       } }, "disconnect"));
     } else {
-      const urlIn = el("input", { class: "key-input", type: "url", placeholder: "https://deposits.<you>.workers.dev", autocomplete: "off" });
-      const secretIn = el("input", { class: "key-input", type: "password", placeholder: "worker secret", autocomplete: "off" });
+      // A real <form> with a named password field, submitted rather than click-handled, so
+      // Safari offers to put the secret in the keychain — which is iCloud, which is every
+      // other device she owns, and which nothing on this phone can evict. `autocomplete:
+      // "off"` used to actively prevent that, leaving 48 characters to retype by hand.
+      const urlIn = el("input", { class: "key-input", type: "url", name: "url",
+        placeholder: "https://deposits.<you>.workers.dev", autocomplete: "url" });
+      const userIn = el("input", { type: "text", name: "username", value: "deposits",
+        autocomplete: "username", readonly: "readonly", "aria-hidden": "true", tabindex: "-1",
+        style: { position: "absolute", left: "-9999px", width: "1px", height: "1px" } });
+      const secretIn = el("input", { class: "key-input", type: "password", name: "password",
+        placeholder: "worker secret", autocomplete: "current-password" });
       const status = el("p", { class: "settings-note" },
         "paste the Worker's address and its secret. entries back up as one small file; " +
         "photos go up once each and are only ever downloaded once per device.");
-      const connect = el("button", { class: "lock-btn", onclick: async () => {
+      const connect = el("button", { class: "lock-btn", type: "submit" }, "connect");
+      const form = el("form", { style: { display: "contents" }, onsubmit: async ev => {
+        ev.preventDefault();
         const url = urlIn.value.trim(), secret = secretIn.value.trim();
         if (!url || !secret) return;
         connect.disabled = true; connect.textContent = "connecting…";
@@ -5900,11 +5907,8 @@ function openSettings() {
         if (!r.ok) { setCloudConfig(null); status.textContent = "couldn't connect: " + r.reason; return; }
         await syncPull(); render(); syncPushEntries();
         build();
-      } }, "connect");
-      sheet.appendChild(urlIn);
-      sheet.appendChild(secretIn);
-      sheet.appendChild(connect);
-      sheet.appendChild(status);
+      } }, urlIn, userIn, secretIn, connect, status);
+      sheet.appendChild(form);
     }
 
     // ---- storage ----
@@ -6494,7 +6498,7 @@ document.addEventListener("keydown", ev => {
   // and asking after reading the answer would report a state one launch out of date.
   requestPersistence()
     .then(() => persistenceState())
-    .then(st => { storageRisk = st; maybeNudgeAboutEviction(); })
+    .then(st => { storageRisk = st; })
     .catch(() => {});
 
   // restore any existing session and reconcile with the cloud (async; local render already happened)
