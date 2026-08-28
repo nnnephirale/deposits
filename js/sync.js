@@ -71,7 +71,8 @@ export function setCloudConfig(next) {
       localStorage.removeItem(SHARED_KEY);
     }
   } catch (e) {}
-  resetHealth();   // a new address or key gets a clean record; the old one's is not about it
+  resetHealth();     // a new address or key gets a clean record; the old one's is not about it
+  forgetUploaded();  // and a different bucket has made no promises about this device's photos
   return cfg;
 }
 
@@ -226,9 +227,15 @@ export async function cloudDiagnose() {
   } catch (e) {
     try {
       await fetch(cfg.url + "/health", { mode: "no-cors", signal: deadline(8000) });
-      return { ok: false, stage: "cors",
-        reason: host + " is reachable but refusing this page's origin — set ALLOWED_ORIGIN on the Worker to "
-          + location.origin + " and redeploy." };
+      // Something answered, but not with the CORS header the Worker's own cors() always adds —
+      // so the reply did not come from the Worker's code. Nearly always that is Cloudflare's
+      // edge returning an error page of its own: 1027, the free plan's 100,000-requests-a-day
+      // ceiling, is the one that bites, and it resets at 00:00 UTC. The status is real but a
+      // browser is not allowed to read it, which is why this arrives as "Load failed".
+      return { ok: false, stage: "edge",
+        reason: host + " is answering, but not as the Worker \u2014 usually Cloudflare's own error page. "
+          + "Run: curl -i " + cfg.url + "/health \u2014 error 1027 means the daily request limit, which "
+          + "clears at 00:00 UTC. (Or ALLOWED_ORIGIN no longer matches " + location.origin + ".)" };
     } catch (e2) {
       return { ok: false, stage: "unreachable",
         reason: "can't reach " + host + " at all from this network. Try Wi-Fi instead of cellular, and turn off "
@@ -290,17 +297,59 @@ export async function downloadImage(id) {
   return res.blob();
 }
 
+// ---------- what the bucket already has ----------
+// This is what took the Worker over its daily request ceiling. Every push walked every photo
+// id in every entry and PUT each one; the Worker answered with a HEAD and skipped:true, so no
+// bytes moved — bb0c630 fixed that much — but the *request* was still spent. With 33 photos
+// that is 34 requests per save, on a 1.2s debounce, and an evening of writing is tens of
+// thousands of them. The free plan allows 100,000 a day across every app on the account.
+//
+// A photo object is immutable: written once, never rewritten. So an id confirmed present up
+// there is present forever, and asking again can only ever be told the same thing. Remember
+// which ones have been confirmed and skip them, and steady state becomes one request a save.
+//
+// The ledger is per device and disposable: if it is lost — evicted, cleared, a new device —
+// the next push simply re-confirms each id once and refills it. It is cleared outright when
+// the cloud address changes, because a different bucket has made no such promise.
+
+const UPLOADED_KEY = "weekly-deposits-uploaded";
+let uploaded = new Set();
+try { uploaded = new Set(JSON.parse(localStorage.getItem(UPLOADED_KEY)) || []); } catch (e) {}
+
+let uploadedT = null;
+function rememberUploaded(id) {
+  if (uploaded.has(id)) return;
+  uploaded.add(id);
+  clearTimeout(uploadedT);
+  uploadedT = setTimeout(() => {
+    try { localStorage.setItem(UPLOADED_KEY, JSON.stringify([...uploaded])); } catch (e) {}
+  }, 500);
+}
+function forgetUploaded() {
+  uploaded = new Set();
+  try { localStorage.removeItem(UPLOADED_KEY); } catch (e) {}
+}
+
+/** How many photos this device would still ask about — Settings shows it, and it is the
+ *  number that used to be "all of them, every save". */
+export function pendingUploads(ids) { return ids.filter(id => !uploaded.has(id)).length; }
+
 /** Push any photo the cloud doesn't have yet. Failures are per-photo: one bad upload must
  *  not stop the rest, and the entry text has already landed regardless. */
 export async function pushImages(ids, getBlob) {
-  let sent = 0, failed = 0;
+  let sent = 0, failed = 0, skipped = 0;
   for (const id of ids) {
+    if (uploaded.has(id)) { skipped++; continue; }   // confirmed present; nothing can change that
     const blob = getBlob(id);
     if (!blob) continue;
-    try { const r = await uploadImage(id, blob); if (!r.skipped) sent++; }
+    try {
+      const r = await uploadImage(id, blob);
+      rememberUploaded(id);                          // skipped:true counts — it means "already there"
+      if (!r.skipped) sent++;
+    }
     catch (e) { failed++; console.warn("deposits: photo upload failed", id, e); }
   }
-  return { sent, failed };
+  return { sent, failed, skipped };
 }
 
 /** Pull any photo this device is missing. Runs in the background after a sync — the entries
@@ -311,7 +360,7 @@ export async function pullImages(ids, have, store, onProgress) {
   for (const id of todo) {
     try {
       const blob = await downloadImage(id);
-      if (blob) { await store(id, blob); got++; }
+      if (blob) { await store(id, blob); rememberUploaded(id); got++; }
     } catch (e) { failed++; console.warn("deposits: photo download failed", id, e); }
     if (onProgress) onProgress(got + failed, todo.length);
   }

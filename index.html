@@ -94,7 +94,7 @@ import {
 import {
   cloudConfig, cloudConfigured, setCloudConfig, cloudCheck, setupLink,
   fetchState, pushState, pushImages, pullImages, imageIdsIn,
-  syncHealth, onSyncHealth, cloudDiagnose
+  syncHealth, onSyncHealth, cloudDiagnose, pendingUploads
 } from "./js/sync.js";
 
 // The status bar's height in real pixels. The page paints under it (black-translucent), so
@@ -5947,7 +5947,14 @@ function openSettings() {
       storageNote.textContent =
         r.entries + " entries · " + r.images + " photos (" + mb(r.imageBytes) + ")" +
         (r.quota ? " · using " + mb(r.usage) + " of " + mb(r.quota) + " available (" + pct + "%)" : "") +
-        (r.legacyBytes > 100000 ? " · " + mb(r.legacyBytes) + " still in the old store" : "");
+        (r.legacyBytes > 100000 ? " · " + mb(r.legacyBytes) + " still in the old store" : "") +
+        // How many photos this device would still ask the bucket about. It used to be all of
+        // them, on every save.
+        (cloudConfigured() ? (() => {
+          const pending = pendingUploads(imageIdsIn(entries));
+          return pending ? " · " + pending + " photo" + (pending === 1 ? "" : "s") + " not backed up yet"
+                         : " · every photo is backed up";
+        })() : "");
     }).catch(() => { storageNote.textContent = "couldn't read storage stats"; });
 
     // ---- composer speed ----

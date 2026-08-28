@@ -54,6 +54,26 @@ address bar as soon as it is read, so it lives in the icon and nowhere else.
 The secret field is also a real password field in a real form, so Safari offers to keep it in
 the keychain — which means iCloud, and every other device you own.
 
+## Staying under the daily limit
+
+Workers' free plan allows **100,000 requests a day** across the whole account, and the edge
+answers 429 with error 1027 for the rest of the UTC day once that is spent. That page is
+Cloudflare's, not this Worker's, so it carries none of the CORS headers `cors()` adds — which
+means a browser refuses to read it and the app sees only "Load failed". Both devices go dark
+at once and nothing in the logs explains it. `curl -i https://<worker>/health` shows the 1027
+plainly; a browser never will.
+
+What used to spend them: the app re-`PUT`ing every photo on every push. No bytes moved — the
+Worker `HEAD`s the key and skips — but the request was still spent, so 33 photos meant 34
+requests per save on a 1.2s debounce. A photo object is immutable, so a confirmed id is
+confirmed forever; the client now keeps a small ledger of ids the bucket has acknowledged and
+skips them, and steady state is one request per save. The ledger is per device and
+disposable: lose it and the next push re-confirms each id once.
+
+If the limit is still being reached, look at Workers & Pages → deposits → Metrics for which
+route is hot. `/s/:collection` (SSaved) is *unauthenticated on reads* by design, so a shared
+link that gets crawled or polled is charged to this same 100,000.
+
 ## Free tier
 
 Storage 10 GB, and downloads are never charged. At roughly 300 KB a photo that's about
