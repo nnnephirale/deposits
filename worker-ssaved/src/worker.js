@@ -172,17 +172,25 @@ async function watchDeposits(env) {
   await alert(env, msg);
 }
 
-/** Fire-and-forget push. ALERT_URL is any endpoint that takes a POST body — an ntfy.sh topic
- *  is the zero-setup one: https://ntfy.sh/<something-only-you-know>, and the phone app
- *  subscribes to it. Nothing to sign up for and nothing to pay. */
+/** Fire-and-forget. ALERT_URL is any endpoint that takes a POST body — an ntfy.sh topic is
+ *  the zero-setup one: https://ntfy.sh/<something-only-you-know>, and the phone app
+ *  subscribes to it. Nothing to sign up for and nothing to pay.
+ *
+ *  ALERT_EMAIL rides along as ntfy's `Email` header, which forwards the same message to an
+ *  address — so the alert arrives somewhere that is still there when the phone isn't. It is
+ *  ntfy's own free forwarding, rate-limited and sent from their address; for something more
+ *  yours, Cloudflare Email Routing plus a send_email binding sends direct from this Worker,
+ *  but that wants a domain on the account and a verified destination.
+ *
+ *  The message carries the dashboard link, because the next thing anyone reading it wants is
+ *  to see whether their entries are safe. */
 async function alert(env, message) {
   if (!env.ALERT_URL) return;
+  const headers = { "content-type": "text/plain", title: "deposits" };
+  if (env.ALERT_EMAIL) headers.email = env.ALERT_EMAIL;
+  const body = env.DASHBOARD_URL ? message + "\n\n" + env.DASHBOARD_URL : message;
   try {
-    await fetch(env.ALERT_URL, {
-      method: "POST",
-      headers: { "content-type": "text/plain", title: "deposits" },
-      body: message
-    });
+    await fetch(env.ALERT_URL, { method: "POST", headers, body });
   } catch (e) {
     console.log("alert failed: " + e.message);
   }

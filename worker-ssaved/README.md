@@ -34,6 +34,18 @@ Hourly, and it does two things that are both somebody else's uptime:
 pick an unguessable topic, set `ALERT_URL = "https://ntfy.sh/<that-topic>"`, install the ntfy
 app and subscribe to it.
 
+**To get it as email**, set `ALERT_EMAIL` as well — ntfy forwards the same message to that
+address. It is their free forwarding, so it is rate-limited and arrives from ntfy rather than
+from you; for something more yours, Cloudflare Email Routing plus a `send_email` binding sends
+direct from this Worker, but that needs a domain on the account and a verified destination.
+
+Try it without waiting for a failure:
+
+```bash
+curl -H "Email: you@example.com" -H "Title: deposits" \
+     -d "test" https://ntfy.sh/<that-topic>
+```
+
 This watch runs on the same Cloudflare account it is watching, so a daily-limit rejection can
 stop the cron as well — which is exactly the failure it exists to catch. That is why
 `.github/workflows/health.yml` checks the same endpoint from outside Cloudflare. Two cheap
