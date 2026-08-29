@@ -116,6 +116,40 @@ same project every 4 days as a second line; GitHub disables scheduled workflows 
 of repo quiet, which is how SSaved's original keep-alive died, so the Cloudflare cron is the
 one to trust.
 
+## The dashboard
+
+`/dashboard.html`, served from the same origin as the app, so it inherits the stored
+credential and satisfies `ALLOWED_ORIGIN` with nothing to set up. Settings → storage → **open
+the dashboard**, or go straight to the URL.
+
+It answers the questions this repo has had to answer the hard way: what is actually in the
+bucket, when it was last written, what this device holds that the bucket does not (the shape
+of the day the newest entries existed on one machine and nowhere else), what changed since
+any earlier day, and a real file on disk at the end of it.
+
+It is read-only by design — nothing on it writes to the bucket. Recovery is by reading a
+snapshot and copying what you lost back into the app: a blind overwrite of `entries.json`
+would fight the merge, because a device still holding a tombstone would re-delete on its
+next push, and that is a restore that sometimes silently does not happen.
+
+One `GET /entries` and one `GET /snapshots` per load. No photo requests at all.
+
+## Snapshots
+
+`entries.json` is rewritten whole on every push and R2 keeps no versions, so a bad merge
+overwrites the only copy — see `7a160f5`, where a stale tombstone ate every summary written
+after it. Quotas make the app unavailable for an afternoon; a bad write loses entries, which
+is the failure actually worth insuring against.
+
+The first push of each day leaves `history/<YYYY-MM-DD>.json` behind: one extra head and one
+extra put, once a day, written in `waitUntil` so the client never waits for it. A few hundred
+KB a copy means a year of them is under a percent of the free 10 GB, so nothing is pruned.
+
+| | |
+|---|---|
+| `GET /snapshots` | `{ snapshots: [{ date, size, uploaded }] }`, newest first |
+| `GET /snapshots/YYYY-MM-DD` | that day's entries document |
+
 ## API
 
 All routes except `/health` need `Authorization: Bearer <DEPOSITS_SECRET>`.
@@ -125,6 +159,8 @@ All routes except `/health` need `Authorization: Bearer <DEPOSITS_SECRET>`.
 | `GET /health` | liveness, no auth |
 | `GET /entries` | `{ entries, tombstones, summaries, etag }` |
 | `PUT /entries` | send `If-Match: <etag>`; `412` means another device wrote first |
+| `GET /snapshots` | the dated copies, newest first |
+| `GET /snapshots/YYYY-MM-DD` | one day's entries document |
 | `GET /images/:id` | the photo, cached immutably |
 | `PUT /images/:id` | upload; an id already present is skipped |
 | `HEAD /images/:id` | existence check |

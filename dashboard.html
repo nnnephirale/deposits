@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>deposits · dashboard</title>
+<!--
+  A window onto the data, outside the app that writes it.
+
+  The one thing a database console gives you that a bucket doesn't is the ability to look at
+  your own data when something has gone wrong — and when this app's sync broke, the only way
+  to see any of it was a phone plugged into a Mac and a console. So: what is actually up
+  there, what this device holds that the cloud doesn't, what changed since any earlier day,
+  and a real file on disk at the end of it.
+
+  It is deliberately read-mostly. Nothing here writes to the bucket. Recovery is by looking
+  at a snapshot and copying what you lost back into the app, not by a button whose meaning
+  is hard to be sure of: a blind overwrite of entries.json would fight the merge — a device
+  still holding a tombstone would simply re-delete on its next push — so it would be a
+  restore that sometimes silently didn't.
+
+  Served from the same origin as the app on purpose: it shares the app's stored credential
+  and satisfies the Worker's ALLOWED_ORIGIN with nothing new to configure.
+
+  Cost, since that is what broke: one GET /entries and one GET /snapshots per load. No photo
+  requests at all — photo state is read from this device's own IndexedDB.
+-->
+<style>
+  :root {
+    --ink: #1C1C1E;
+    --subtle: #8A8A8E;
+    --canvas: #F0F0F1;
+    --card: #FFFFFF;
+    --hairline: rgba(0,0,0,0.055);
+    --field: #F4F4F6;
+    --warn: #8A5A11;
+    --bad: #B3261E;
+    --good: #3F7D4A;
+    --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 20px 80px;
+    background: var(--canvas); color: var(--ink);
+    font: 14px/1.5 var(--font);
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 900px; margin: 0 auto; }
+
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 2px; letter-spacing: -0.01em; }
+  .sub { color: var(--subtle); font-size: 12px; margin: 0 0 22px; }
+  .sub a { color: inherit; }
+
+  section {
+    background: var(--card); border-radius: 16px; padding: 18px 20px; margin-bottom: 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 2px 10px rgba(0,0,0,.03);
+  }
+  h2 {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--subtle); margin: 0 0 12px;
+  }
+  p { margin: 0 0 8px; }
+  .note { color: var(--subtle); font-size: 12px; }
+  .warn { color: var(--warn); }
+  .bad { color: var(--bad); }
+  .good { color: var(--good); }
+
+  /* the numbers that matter, big enough to read at a glance and never in a sentence */
+  .stats { display: flex; flex-wrap: wrap; gap: 26px; margin: 2px 0 4px; }
+  .stat b { display: block; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+  .stat span { font-size: 11px; color: var(--subtle); }
+
+  button {
+    font: inherit; font-size: 13px; color: var(--ink);
+    background: var(--field); border: 0; border-radius: 10px;
+    padding: 8px 14px; cursor: pointer; margin: 4px 6px 0 0;
+  }
+  button:hover:not(:disabled) { background: #E9E9EE; }
+  button:disabled { opacity: .5; cursor: default; }
+
+  input[type="search"] {
+    font: inherit; font-size: 13px; width: 100%;
+    background: var(--field); border: 0; border-radius: 10px; padding: 9px 12px; margin-bottom: 10px;
+  }
+
+  /* a wide table must scroll inside itself rather than push the page sideways */
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th {
+    text-align: left; font-weight: 500; font-size: 11px; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--subtle);
+    padding: 0 12px 6px 0; white-space: nowrap;
+  }
+  td { padding: 7px 12px 7px 0; border-top: 1px solid var(--hairline); vertical-align: top; }
+  tbody tr:hover { background: #FAFAFC; }
+  td.num, th.num { text-align: right; padding-right: 16px; font-variant-numeric: tabular-nums; }
+  .tag {
+    display: inline-block; background: var(--field); border-radius: 999px;
+    padding: 1px 8px; margin: 0 4px 2px 0; font-size: 11px; color: var(--subtle);
+  }
+  .clip { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  tbody tr { cursor: pointer; }
+
+  pre {
+    background: var(--field); border-radius: 12px; padding: 14px; overflow-x: auto;
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 10px 0 0;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  dialog {
+    border: 0; border-radius: 16px; padding: 20px; max-width: 720px; width: calc(100% - 32px);
+    box-shadow: 0 10px 40px rgba(0,0,0,.2);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.3); }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>deposits · dashboard</h1>
+  <p class="sub" id="head">reading…</p>
+
+  <section id="connSec">
+    <h2>connection</h2>
+    <p id="conn">checking…</p>
+    <button id="testBtn">test connection</button>
+    <button id="reloadBtn">reload everything</button>
+  </section>
+
+  <section id="cloudSec">
+    <h2>in the bucket</h2>
+    <div class="stats" id="cloudStats"></div>
+    <p class="note" id="cloudMeta"></p>
+  </section>
+
+  <section id="diffSec">
+    <h2>this device vs the bucket</h2>
+    <div class="stats" id="diffStats"></div>
+    <p class="note" id="diffNote"></p>
+  </section>
+
+  <section id="entriesSec">
+    <h2>entries in the bucket</h2>
+    <input type="search" id="filter" placeholder="filter by text, tag or date" autocomplete="off" />
+    <div class="scroll"><table>
+      <thead><tr>
+        <th>date</th><th>text</th><th>tags</th>
+        <th class="num">words</th><th class="num">photos</th><th>updated</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <p class="note" id="rowsNote"></p>
+  </section>
+
+  <section id="snapSec">
+    <h2>daily snapshots</h2>
+    <p class="note" id="snapNote">loading…</p>
+    <div class="scroll"><table>
+      <thead><tr><th>date</th><th class="num">size</th><th>written</th><th></th></tr></thead>
+      <tbody id="snapRows"></tbody>
+    </table></div>
+  </section>
+
+  <section id="backupSec">
+    <h2>backups</h2>
+    <p class="note">
+      the cloud copy is one file; the device copy is the same entries plus the photo bytes, which
+      live only in this browser until they are asked for. neither contains your key.
+    </p>
+    <button id="dlCloud">download the bucket's copy</button>
+    <button id="dlLocal">download this device's copy (with photos)</button>
+    <p class="note" id="backupNote"></p>
+  </section>
+</div>
+
+<dialog id="dlg"><div id="dlgBody"></div><br /><button id="dlgClose">close</button></dialog>
+
+<script type="module">
+import {
+  cloudConfig, cloudConfigured, cloudDiagnose, syncHealth, fetchState, imageIdsIn
+} from "./js/sync.js";
+import { openStore, loadEntries, imageBlob, hasImage } from "./js/store.js";
+
+const $ = id => document.getElementById(id);
+const fmtBytes = n => n < 1024 ? n + "B" : n < 1048576 ? (n / 1024).toFixed(0) + "KB" : (n / 1048576).toFixed(1) + "MB";
+const day = iso => (iso || "").slice(0, 10);
+const words = t => (t || "").trim().split(/\s+/).filter(Boolean).length;
+
+function ago(iso) {
+  if (!iso) return "never";
+  const mins = Math.round((Date.now() - Date.parse(iso)) / 60000);
+  if (!isFinite(mins)) return "never";
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + "m ago";
+  if (mins < 36 * 60) return Math.round(mins / 60) + "h ago";
+  return Math.round(mins / 1440) + "d ago";
+}
+
+function stats(el, pairs) {
+  el.textContent = "";
+  for (const [n, label, cls] of pairs) {
+    const d = document.createElement("div");
+    d.className = "stat";
+    const b = document.createElement("b");
+    b.textContent = n;
+    if (cls) b.className = cls;
+    const s = document.createElement("span");
+    s.textContent = label;
+    d.append(b, s);
+    el.appendChild(d);
+  }
+}
+
+function show(title, body) {
+  $("dlgBody").textContent = "";
+  const h = document.createElement("h2");
+  h.textContent = title;
+  const pre = document.createElement("pre");
+  pre.textContent = body;
+  $("dlgBody").append(h, pre);
+  $("dlg").showModal();
+}
+$("dlgClose").onclick = () => $("dlg").close();
+
+function download(name, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// ---------- state ----------
+
+let remote = null;   // what the bucket holds
+let local = [];      // what this device holds
+
+// ---------- load ----------
+
+async function load() {
+  if (!cloudConfigured()) {
+    $("head").textContent = "this browser has no cloud config — open the app and connect first.";
+    $("conn").textContent = "not set up";
+    return;
+  }
+  const cfg = cloudConfig();
+  $("head").textContent = cfg.url.replace(/^https?:\/\//, "");
+
+  const h = syncHealth();
+  $("conn").textContent = h.failing
+    ? "the app's last request didn't land: " + h.lastError
+    : "the app last synced " + ago(h.lastOkAt) + ".";
+  $("conn").className = h.failing ? "warn" : "";
+
+  // this device first: it needs no network, and it is the copy that might be the only one
+  try {
+    await openStore();
+    local = await loadEntries();
+  } catch (e) {
+    $("diffNote").textContent = "couldn't open this device's store: " + e.message;
+  }
+
+  try {
+    remote = await fetchState();
+  } catch (e) {
+    $("cloudMeta").textContent = "couldn't read the bucket: " + e.message;
+    $("cloudMeta").className = "note bad";
+    renderDiff();
+    return;
+  }
+  renderCloud();
+  renderDiff();
+  renderRows();
+  loadSnapshots();
+}
+
+function renderCloud() {
+  const rows = remote.entries || [];
+  const live = rows.filter(e => !e.deletedAt);
+  const summaries = Object.values(remote.summaries || {});
+  const liveSummaries = summaries.filter(s => !s.deletedAt);
+  const tax = remote.taxonomy || {};
+  const tagCount = (tax.topics || []).length + (tax.modes || []).length;
+
+  stats($("cloudStats"), [
+    [live.length, "entries"],
+    [rows.length - live.length, "deleted"],
+    [imageIdsIn(live).length, "photos referenced"],
+    [liveSummaries.length, "week summaries"],
+    [tagCount || "—", "tags"]
+  ]);
+
+  const size = JSON.stringify(remote).length;
+  $("cloudMeta").textContent =
+    "written " + (remote.writtenAt ? ago(remote.writtenAt) + " (" + remote.writtenAt.replace("T", " ").slice(0, 16) + ")" : "unknown") +
+    " · " + fmtBytes(size) + " of json · etag " + (remote.etag || "none") +
+    (remote.taxonomy ? "" : " · no taxonomy stored (an older Worker wrote this)");
+}
+
+// The question this page exists for: is anything here that isn't up there? That is what the
+// day of the outage looked like — the newest entries on one machine and nowhere else.
+function renderDiff() {
+  const liveRemote = (remote ? remote.entries : []).filter(e => !e.deletedAt);
+  const byRemote = new Map(liveRemote.map(e => [e.id, e]));
+  const byLocal = new Map(local.map(e => [e.id, e]));
+
+  const onlyHere = local.filter(e => !byRemote.has(e.id));
+  const onlyThere = liveRemote.filter(e => !byLocal.has(e.id));
+  const newerHere = local.filter(e => {
+    const r = byRemote.get(e.id);
+    return r && (e.updatedAt || "") > (r.updatedAt || "");
+  });
+
+  const referenced = imageIdsIn(liveRemote);
+  const missingPhotos = referenced.filter(id => !hasImage(id)).length;
+
+  stats($("diffStats"), [
+    [local.length, "entries here"],
+    [onlyHere.length, "not backed up", onlyHere.length ? "bad" : "good"],
+    [newerHere.length, "newer here", newerHere.length ? "warn" : ""],
+    [onlyThere.length, "not pulled yet"],
+    [missingPhotos, "photos not downloaded"]
+  ]);
+
+  $("diffNote").textContent = !remote
+    ? "the bucket couldn't be read, so this is only what the device holds."
+    : onlyHere.length || newerHere.length
+      ? "open the app and sync — " + (onlyHere.length + newerHere.length) + " entr" +
+        (onlyHere.length + newerHere.length === 1 ? "y is" : "ies are") + " only on this device."
+      : "everything on this device has reached the bucket.";
+  $("diffNote").className = "note" + (onlyHere.length ? " bad" : newerHere.length ? " warn" : "");
+}
+
+// ---------- entries ----------
+
+function renderRows() {
+  const q = $("filter").value.trim().toLowerCase();
+  const live = (remote.entries || []).filter(e => !e.deletedAt);
+  const match = live.filter(e => !q ||
+    (e.text || "").toLowerCase().includes(q) ||
+    (e.tags || []).some(t => String(t).toLowerCase().includes(q)) ||
+    day(e.createdAt).includes(q));
+
+  match.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+
+  const body = $("rows");
+  body.textContent = "";
+  for (const e of match.slice(0, 300)) {
+    const tr = document.createElement("tr");
+    tr.onclick = () => show(day(e.createdAt) + " · " + e.id, JSON.stringify(e, null, 2));
+    const cells = [
+      [day(e.createdAt), ""],
+      [(e.text || "").replace(/\s+/g, " ").trim(), "clip"],
+      [null, ""],   // tags, built below
+      [String(words(e.text)), "num"],
+      [String(imageIdsIn([e]).length || ""), "num"],
+      [ago(e.updatedAt), ""]
+    ];
+    cells.forEach(([text, cls], i) => {
+      const td = document.createElement("td");
+      if (cls) td.className = cls;
+      if (i === 2) {
+        for (const t of (e.tags || [])) {
+          const s = document.createElement("span");
+          s.className = "tag";
+          s.textContent = t;
+          td.appendChild(s);
+        }
+      } else td.textContent = text;
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  }
+  $("rowsNote").textContent = match.length > 300
+    ? "showing the newest 300 of " + match.length + " · click a row for its raw record"
+    : match.length + (match.length === 1 ? " entry" : " entries") + " · click a row for its raw record";
+}
+$("filter").addEventListener("input", () => { if (remote) renderRows(); });
+
+// ---------- snapshots ----------
+
+async function api(path) {
+  const cfg = cloudConfig();
+  const res = await fetch(cfg.url + path, { headers: { authorization: "Bearer " + cfg.secret } });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+
+async function loadSnapshots() {
+  let list;
+  try {
+    list = (await api("/snapshots")).snapshots || [];
+  } catch (e) {
+    $("snapNote").textContent = e.message.includes("404")
+      ? "this Worker doesn't have snapshots yet — deploy worker/ and they start on the next push."
+      : "couldn't list snapshots: " + e.message;
+    return;
+  }
+  $("snapNote").textContent = list.length
+    ? list.length + " day" + (list.length === 1 ? "" : "s") + " kept, newest first. one copy is written on the first push of each day."
+    : "no snapshots yet — the first push after deploying the Worker writes one.";
+
+  const body = $("snapRows");
+  body.textContent = "";
+  for (const s of list) {
+    const tr = document.createElement("tr");
+    const btns = document.createElement("td");
+
+    const cmp = document.createElement("button");
+    cmp.textContent = "what changed since";
+    cmp.onclick = () => compare(s.date);
+
+    const dl = document.createElement("button");
+    dl.textContent = "download";
+    dl.onclick = async () => {
+      dl.disabled = true;
+      try { download("deposits-" + s.date + ".json", JSON.stringify(await api("/snapshots/" + s.date), null, 2)); }
+      catch (e) { show("couldn't fetch " + s.date, e.message); }
+      dl.disabled = false;
+    };
+    btns.append(cmp, dl);
+
+    [s.date, fmtBytes(s.size), ago(s.uploaded)].forEach((t, i) => {
+      const td = document.createElement("td");
+      if (i === 1) td.className = "num";
+      td.textContent = t;
+      tr.appendChild(td);
+    });
+    tr.appendChild(btns);
+    body.appendChild(tr);
+  }
+}
+
+/** What is in that day's copy that is not in the bucket now — the shape of an accidental
+ *  deletion, and the text to copy back into the app. */
+async function compare(date) {
+  let snap;
+  try { snap = await api("/snapshots/" + date); }
+  catch (e) { return show("couldn't fetch " + date, e.message); }
+
+  const then = (snap.entries || []).filter(e => !e.deletedAt);
+  const now = (remote.entries || []).filter(e => !e.deletedAt);
+  const nowIds = new Set(now.map(e => e.id));
+  const thenIds = new Set(then.map(e => e.id));
+
+  const gone = then.filter(e => !nowIds.has(e.id));
+  const added = now.filter(e => !thenIds.has(e.id));
+  const thenSummaries = Object.keys(snap.summaries || {}).filter(k => !(snap.summaries[k] || {}).deletedAt);
+  const nowSummaries = Object.keys(remote.summaries || {}).filter(k => !(remote.summaries[k] || {}).deletedAt);
+  const lostSummaries = thenSummaries.filter(k => !nowSummaries.includes(k));
+
+  const lines = [
+    date + " held " + then.length + " entries; the bucket now holds " + now.length + ".",
+    "",
+    added.length + " added since, " + gone.length + " gone since" +
+      (lostSummaries.length ? ", " + lostSummaries.length + " week summar" + (lostSummaries.length === 1 ? "y" : "ies") + " gone" : "") + "."
+  ];
+  if (gone.length) {
+    lines.push("", "— gone since " + date + " —", "");
+    for (const e of gone) {
+      lines.push("[" + day(e.createdAt) + "] " + (e.tags || []).join(", "));
+      lines.push((e.text || "").trim());
+      lines.push("");
+    }
+    lines.push("(select and copy the text above to put any of it back into the app — this page",
+               "never writes to the bucket, deliberately: a blind overwrite would fight the merge.)");
+  } else {
+    lines.push("", "nothing from that day has disappeared.");
+  }
+  show("since " + date, lines.join("\n"));
+}
+
+// ---------- backups ----------
+
+$("dlCloud").onclick = () => {
+  if (!remote) return;
+  download("deposits-cloud-" + new Date().toISOString().slice(0, 10) + ".json", JSON.stringify(remote, null, 2));
+  $("backupNote").textContent = "the bucket's copy, as it is now. no photo bytes — those are separate objects.";
+};
+
+$("dlLocal").onclick = async () => {
+  const btn = $("dlLocal");
+  btn.disabled = true;
+  btn.textContent = "reading photos…";
+  const images = {};
+  for (const id of imageIdsIn(local)) {
+    const b = imageBlob(id);
+    if (!b) continue;
+    images[id] = await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); });
+  }
+  const keys = {};
+  for (const k of Object.keys(localStorage)) {
+    // preferences and summaries, never the credential
+    if (k.startsWith("weekly-deposits") && !k.includes("cloud") && !k.includes("key")) keys[k] = localStorage.getItem(k);
+  }
+  const text = JSON.stringify({ savedAt: new Date().toISOString(), entries: local, images, keys });
+  download("deposits-backup-" + new Date().toISOString().slice(0, 10) + ".json", text);
+  btn.disabled = false;
+  btn.textContent = "download this device's copy (with photos)";
+  $("backupNote").textContent =
+    local.length + " entries and " + Object.keys(images).length + " photos · " + fmtBytes(text.length) + " · no key in the file.";
+};
+
+// ---------- controls ----------
+
+$("testBtn").onclick = async () => {
+  const b = $("testBtn");
+  b.disabled = true; b.textContent = "checking…";
+  const r = await cloudDiagnose();
+  b.disabled = false; b.textContent = "test connection";
+  $("conn").textContent = r.ok
+    ? "connected — " + r.entries + " entries in the bucket" + (r.deleted ? " (plus " + r.deleted + " deleted)." : ".")
+    : r.reason;
+  $("conn").className = r.ok ? "good" : "warn";
+};
+
+$("reloadBtn").onclick = () => location.reload();
+
+load();
+</script>
+</body>
+</html>

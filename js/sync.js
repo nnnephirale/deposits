@@ -272,6 +272,10 @@ export async function fetchState() {
     // absent by design on a bucket written by an older Worker — left undefined rather than
     // defaulted to an empty doc, so the app can tell "no taxonomy up there" from "no tags".
     taxonomy: body.taxonomy || null,
+    // when the bucket was last written, as the Worker stamped it — the dashboard shows it,
+    // and "written 9 days ago" next to a device that has been writing all week is the whole
+    // diagnosis in one line
+    writtenAt: body.writtenAt || null,
     etag: body.etag || res.headers.get("etag") || null
   };
 }

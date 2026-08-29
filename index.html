@@ -5941,6 +5941,13 @@ function openSettings() {
       sheet.appendChild(fixBtn);
     }
 
+    // The dashboard is the thing you want open when something has gone wrong, which is
+    // exactly when you will not remember it exists. Same origin, so it inherits this
+    // device's credential and needs nothing set up.
+    sheet.appendChild(el("button", { class: "lock-btn", onclick: () => {
+      window.open("dashboard.html", "_blank", "noopener");
+    } }, "open the dashboard"));
+
     storageReport().then(r => {
       const mb = n => (n / 1048576).toFixed(1) + "MB";
       const pct = r.quota ? Math.round((r.usage / r.quota) * 100) : null;
