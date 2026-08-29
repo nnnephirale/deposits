@@ -88,12 +88,13 @@
 // the bottom is the deliberate way in from the console.
 import {
   openStore, loadEntries, persistEntries, flushEntries, onStoreError,
-  migrateFromLocalStorage, storageReport, requestPersistence,
+  migrateFromLocalStorage, storageReport, requestPersistence, persistenceState,
   imageBlob, hasImage, putImage, imageUrl
 } from "./js/store.js";
 import {
   cloudConfig, cloudConfigured, setCloudConfig, cloudCheck, setupLink,
-  fetchState, pushState, pushImages, pullImages, imageIdsIn
+  fetchState, pushState, pushImages, pullImages, imageIdsIn,
+  syncHealth, onSyncHealth, cloudDiagnose, pendingUploads
 } from "./js/sync.js";
 
 // The status bar's height in real pixels. The page paints under it (black-translucent), so
@@ -1132,6 +1133,101 @@ function weekKey(year, week) { return year + "-" + pad2(week); }
 // free tier and paused the project.
 
 function syncActive() { return cloudConfigured(); }
+
+// ---------- is it actually working? ----------
+// The dot next to Settings used to be lit by having a config, which is not the same claim as
+// "your entries are reaching the cloud" — and on the device where those two came apart, it
+// said nothing. Green now means a request landed; amber means the last one didn't.
+
+function syncDotClass() {
+  if (!cloudConfigured()) return "";
+  return syncHealth().failing ? " warn" : " live";
+}
+// Repaint in place: health changes between renders, and a full render to move a 6px dot is
+// both wasteful and capable of stealing a caret out of the composer.
+function paintSyncDot() {
+  document.querySelectorAll(".ico-dot").forEach(d => { d.className = "ico-dot" + syncDotClass(); });
+}
+onSyncHealth(paintSyncDot);
+
+/** "just now" / "6 minutes ago" / "9 days ago" — the number that makes a stale sync obvious. */
+function agoText(iso) {
+  if (!iso) return null;
+  const then = Date.parse(iso);
+  if (!then) return null;
+  const mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + " minute" + (mins === 1 ? "" : "s") + " ago";
+  const hrs = Math.round(mins / 60);
+  if (hrs < 36) return hrs + " hour" + (hrs === 1 ? "" : "s") + " ago";
+  const days = Math.round(hrs / 24);
+  return days + " day" + (days === 1 ? "" : "s") + " ago";
+}
+
+// ---------- staying connected ----------
+// Why this phone kept ending up disconnected: WebKit deletes all script-writable storage —
+// localStorage and IndexedDB together — after seven days of Safari use without a visit, and
+// the Worker address and secret live in localStorage. requestPersistence() asks to be spared
+// and is usually refused in a plain tab.
+//
+// Rather than explain that to the one person who uses this, put the key somewhere the sweep
+// can't reach: the URL of the home-screen icon. A bookmark is not script-writable storage.
+// An icon whose URL carries #w=…&k=… re-seeds the config on every cold launch, so a wiped
+// device opens, reconnects and pulls all its entries back down without anyone noticing it
+// had been wiped. Set up once, and the failure mode is gone rather than described.
+
+let storageRisk = null;   // { persisted, standalone, webkit, atRisk } once resolved
+
+/** The one-time move, offered only on a device that is actually exposed. */
+function keepConnectedRow() {
+  const wrap = el("div", { style: { display: "none" } });
+  const line = el("p", { class: "settings-note", style: { margin: "6px 0 0" } });
+
+  const btn = el("button", { class: "lock-btn", style: { marginTop: "10px" }, onclick: async () => {
+    const link = setupLink();
+    if (!link) return;
+    // A home-screen app has no share button of its own, so from there the link has to travel
+    // back to Safari to be installed.
+    if (storageRisk && storageRisk.standalone) {
+      try {
+        await navigator.clipboard.writeText(link);
+        line.textContent = "copied. open Safari, paste it in, then Share \u2192 \u201cAdd to Home Screen\u201d. "
+          + "use that new icon from now on and it stays connected on its own.";
+      } catch (e) {
+        line.textContent = link;
+      }
+      return;
+    }
+    history.replaceState(null, "", link);
+    btn.textContent = "the address bar is ready";
+    line.textContent = "tap the share button, then \u201cAdd to Home Screen\u201d, and open deposits from that icon. "
+      + "it carries your key, so it reconnects itself \u2014 even if Safari clears everything.";
+  } }, "keep this device connected");
+
+  wrap.appendChild(btn);
+  wrap.appendChild(line);
+
+  const fill = st => {
+    // Persistent storage granted means the browser has already promised to keep this; there
+    // is nothing to fix and nothing to say.
+    if (st && st.webkit && !st.persisted) wrap.style.display = "";
+  };
+  if (storageRisk) fill(storageRisk);
+  else persistenceState().then(st => { storageRisk = st; fill(st); }).catch(() => {});
+  return wrap;
+}
+
+/** The line Settings shows under the address: what the last round-trip actually did. */
+function syncHealthText() {
+  const h = syncHealth();
+  const last = agoText(h.lastOkAt);
+  if (h.failing) {
+    return "not reaching it: " + h.lastError
+      + (last ? " — last synced " + last + "." : " — nothing has synced from this device yet.");
+  }
+  if (last) return "last synced " + last + ".";
+  return "nothing has synced from this device yet.";
+}
 
 // the etag of the bucket object we last read: sent back on write so a device that wrote in
 // between gets a 412 instead of being flattened.
@@ -2190,7 +2286,7 @@ function renderIconRail() {
     () => setLayout(layout === "day" ? "topic" : "day")));
   bar.appendChild(icoRow("Export markdown", ICO_EXPORT, false, () => doExport()));
   bar.appendChild(icoRow("Settings", ICO_SETTINGS, false, () => openSettings(),
-    el("span", { class: "ico-dot" + (cloudConfigured() ? " live" : "") })));
+    el("span", { class: "ico-dot" + syncDotClass() })));
 
   railL.appendChild(bar);
 }
@@ -5737,20 +5833,34 @@ function openSettings() {
       const note = el("p", { class: "settings-note", style: { margin: "0" } },
         "backing up to " + cc.url.replace(/^https?:\/\//, "") + " — entries and photos sync across your devices.");
       sheet.appendChild(note);
+      // The claim the dot is making, spelled out. A green dot with "last synced 9 days ago"
+      // under it is still bad news, but it is bad news you can see.
+      const healthNote = el("p", { class: "settings-note", style: { margin: "2px 0 0" } });
+      const paintHealthNote = (text, bad) => {
+        healthNote.textContent = text === undefined ? syncHealthText() : text;
+        healthNote.className = "settings-note" + ((bad === undefined ? syncHealth().failing : bad) ? " warn" : "");
+      };
+      paintHealthNote();
+      sheet.appendChild(healthNote);
       const syncBtn = el("button", { class: "lock-btn", onclick: async () => {
         syncBtn.disabled = true; syncBtn.textContent = "syncing…";
         await syncPull(); await pushEntriesNow();
-        syncBtn.disabled = false; syncBtn.textContent = "sync now"; render();
+        syncBtn.disabled = false; syncBtn.textContent = "sync now";
+        paintHealthNote();   // whatever just happened, say so rather than leaving the old line
+        render();
       } }, "sync now");
       sheet.appendChild(syncBtn);
+      // The result goes in the health line, not over the address: overwriting the address was
+      // how the panel ended up showing a failure with no mention of what it had failed to reach.
       const testBtn = el("button", { class: "lock-btn", onclick: async () => {
         testBtn.disabled = true; testBtn.textContent = "checking…";
-        const r = await cloudCheck();
+        paintHealthNote("checking…", false);
+        const r = await cloudDiagnose();
         testBtn.disabled = false; testBtn.textContent = "test connection";
-        note.textContent = r.ok
+        paintHealthNote(r.ok
           ? "connected — " + r.entries + " entries in the cloud" +
             (r.deleted ? " (plus " + r.deleted + " deleted)." : ".")
-          : "can't reach it: " + r.reason;
+          : r.reason, !r.ok);
       } }, "test connection");
       sheet.appendChild(testBtn);
       // Setting a device up by retyping a 48-character key is how keys end up mistyped.
@@ -5765,16 +5875,29 @@ function openSettings() {
       sheet.appendChild(linkBtn);
       sheet.appendChild(el("p", { class: "settings-note", style: { margin: "2px 0 0" } },
         "the link contains your key — treat it like a password, and it only needs to travel once."));
+      // Same link, aimed at this device rather than another one — see keepConnectedRow.
+      sheet.appendChild(keepConnectedRow());
       sheet.appendChild(el("button", { class: "lock-btn", style: { marginTop: "10px" }, onclick: () => {
         setCloudConfig(null); build();   // local entries are untouched; only the link goes
       } }, "disconnect"));
     } else {
-      const urlIn = el("input", { class: "key-input", type: "url", placeholder: "https://deposits.<you>.workers.dev", autocomplete: "off" });
-      const secretIn = el("input", { class: "key-input", type: "password", placeholder: "worker secret", autocomplete: "off" });
+      // A real <form> with a named password field, submitted rather than click-handled, so
+      // Safari offers to put the secret in the keychain — which is iCloud, which is every
+      // other device she owns, and which nothing on this phone can evict. `autocomplete:
+      // "off"` used to actively prevent that, leaving 48 characters to retype by hand.
+      const urlIn = el("input", { class: "key-input", type: "url", name: "url",
+        placeholder: "https://deposits.<you>.workers.dev", autocomplete: "url" });
+      const userIn = el("input", { type: "text", name: "username", value: "deposits",
+        autocomplete: "username", readonly: "readonly", "aria-hidden": "true", tabindex: "-1",
+        style: { position: "absolute", left: "-9999px", width: "1px", height: "1px" } });
+      const secretIn = el("input", { class: "key-input", type: "password", name: "password",
+        placeholder: "worker secret", autocomplete: "current-password" });
       const status = el("p", { class: "settings-note" },
         "paste the Worker's address and its secret. entries back up as one small file; " +
         "photos go up once each and are only ever downloaded once per device.");
-      const connect = el("button", { class: "lock-btn", onclick: async () => {
+      const connect = el("button", { class: "lock-btn", type: "submit" }, "connect");
+      const form = el("form", { style: { display: "contents" }, onsubmit: async ev => {
+        ev.preventDefault();
         const url = urlIn.value.trim(), secret = secretIn.value.trim();
         if (!url || !secret) return;
         connect.disabled = true; connect.textContent = "connecting…";
@@ -5784,11 +5907,8 @@ function openSettings() {
         if (!r.ok) { setCloudConfig(null); status.textContent = "couldn't connect: " + r.reason; return; }
         await syncPull(); render(); syncPushEntries();
         build();
-      } }, "connect");
-      sheet.appendChild(urlIn);
-      sheet.appendChild(secretIn);
-      sheet.appendChild(connect);
-      sheet.appendChild(status);
+      } }, urlIn, userIn, secretIn, connect, status);
+      sheet.appendChild(form);
     }
 
     // ---- storage ----
@@ -5821,13 +5941,27 @@ function openSettings() {
       sheet.appendChild(fixBtn);
     }
 
+    // The dashboard is the thing you want open when something has gone wrong, which is
+    // exactly when you will not remember it exists. Same origin, so it inherits this
+    // device's credential and needs nothing set up.
+    sheet.appendChild(el("button", { class: "lock-btn", onclick: () => {
+      window.open("dashboard.html", "_blank", "noopener");
+    } }, "open the dashboard"));
+
     storageReport().then(r => {
       const mb = n => (n / 1048576).toFixed(1) + "MB";
       const pct = r.quota ? Math.round((r.usage / r.quota) * 100) : null;
       storageNote.textContent =
         r.entries + " entries · " + r.images + " photos (" + mb(r.imageBytes) + ")" +
         (r.quota ? " · using " + mb(r.usage) + " of " + mb(r.quota) + " available (" + pct + "%)" : "") +
-        (r.legacyBytes > 100000 ? " · " + mb(r.legacyBytes) + " still in the old store" : "");
+        (r.legacyBytes > 100000 ? " · " + mb(r.legacyBytes) + " still in the old store" : "") +
+        // How many photos this device would still ask the bucket about. It used to be all of
+        // them, on every save.
+        (cloudConfigured() ? (() => {
+          const pending = pendingUploads(imageIdsIn(entries));
+          return pending ? " · " + pending + " photo" + (pending === 1 ? "" : "s") + " not backed up yet"
+                         : " · every photo is backed up";
+        })() : "");
     }).catch(() => { storageNote.textContent = "couldn't read storage stats"; });
 
     // ---- composer speed ----
@@ -6374,7 +6508,12 @@ document.addEventListener("keydown", ev => {
   entries = await loadEntries();
   render();
 
-  requestPersistence(); // ask Safari not to evict us after 7 idle days
+  // Ask first, then look: a granted request is exactly what takes this device off the clock,
+  // and asking after reading the answer would report a state one launch out of date.
+  requestPersistence()
+    .then(() => persistenceState())
+    .then(st => { storageRisk = st; })
+    .catch(() => {});
 
   // restore any existing session and reconcile with the cloud (async; local render already happened)
   initSync();

@@ -1,0 +1,67 @@
+name: Is deposits answering?
+
+# The outage this exists for was silent for days. deposits is local-first, so when the Worker
+# stops answering the app carries on working and simply stops syncing — nothing on screen
+# changes. It was noticed only because a "test connection" tap happened to be tried, and what
+# it said was "Load failed", because the failure (Cloudflare error 1027, the free plan's
+# 100,000 requests a day) came from the edge with no CORS headers and a browser is not allowed
+# to read it.
+#
+# This check runs outside Cloudflare, which is the whole point: the ssaved Worker's cron
+# watches deposits too, but it is on the same account, so the daily-limit rejection that takes
+# deposits down can take the watcher with it. curl has no CORS and sees the real status.
+#
+# A failed run emails whoever owns the repo, by GitHub's default notification settings.
+#
+# One caveat worth knowing: GitHub disables scheduled workflows after 60 days without a commit
+# to the repo. That is what killed SSaved's original keep-alive. If this repo ever goes quiet
+# for two months, this check goes quiet with it — so an external pinger (uptimerobot.com,
+# cron-job.org) on the same URL is still worth the five minutes.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # every half hour
+  workflow_dispatch:          # manual "Run workflow" button
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    env:
+      WORKER: https://deposits.nnnephirale.workers.dev
+      SECRET: ${{ secrets.DEPOSITS_SECRET }}
+    steps:
+      - name: GET /health
+        run: |
+          CODE=$(curl -sS -m 20 -o /tmp/health.json -w '%{http_code}' "$WORKER/health" || echo 000)
+          BODY=$(cat /tmp/health.json 2>/dev/null || true)
+          echo "HTTP $CODE — $BODY"
+          case "$CODE" in
+            200) ;;
+            429) echo "::error::429 — Cloudflare error 1027, the account's daily request limit. Resets at 00:00 UTC."; exit 1 ;;
+            000) echo "::error::no response at all — DNS, TLS, or the Worker is not serving."; exit 1 ;;
+            *)   echo "::error::unexpected HTTP $CODE from /health."; exit 1 ;;
+          esac
+          case "$BODY" in
+            *'"configured":true'*) echo "secret is set" ;;
+            *) echo "::error::the Worker is up but has no DEPOSITS_SECRET set."; exit 1 ;;
+          esac
+
+      # /health never touches R2, so it stays green through a bucket or credential problem.
+      # This proves the path the app actually uses: auth, then a read of entries.json. It is
+      # skipped unless a DEPOSITS_SECRET repo secret exists, so the check above still runs on
+      # its own if you would rather not keep the key in GitHub.
+      - name: GET /entries with the real secret
+        run: |
+          if [ -z "$SECRET" ]; then
+            echo "no DEPOSITS_SECRET repo secret set — skipping the authenticated check"
+            exit 0
+          fi
+          CODE=$(curl -sS -m 25 -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $SECRET" "$WORKER/entries" || echo 000)
+          echo "HTTP $CODE"
+          case "$CODE" in
+            200) echo "entries readable" ;;
+            401) echo "::error::401 — the secret in GitHub no longer matches the Worker's."; exit 1 ;;
+            000) echo "::error::no response reading /entries."; exit 1 ;;
+            *)   echo "::error::HTTP $CODE reading /entries — the Worker is up but the bucket path is not."; exit 1 ;;
+          esac

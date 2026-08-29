@@ -285,6 +285,9 @@
     background: var(--field); border-radius: 12px; padding: 12px 14px;
   }
   .settings-note { font-size: 12px; color: var(--subtle); line-height: 1.5; margin: 10px 0 0; }
+  /* A sync that isn't landing, or a device on the seven-day clock: dark enough to read as a
+     statement rather than the usual grey aside, short of the red the save alert owns. */
+  .settings-note.warn { color: #8A5A11; }
 
   /* the tag editor: one row per tag, and the row IS the name — no boxed field, no edit mode.
      Nothing here announces itself as a control until it's being used, which is why the input
@@ -2132,6 +2135,8 @@
       background: #CFCFD4; box-shadow: 0 0 0 2px var(--card);
     }
     .ico-dot.live { background: #55A862; }
+    /* configured, but the last request didn't land — see syncDotClass */
+    .ico-dot.warn { background: #D08A22; }
 
     .ico-row:hover .ico-label, .ico-row:focus-visible .ico-label {
       opacity: 1; transform: none; transition-delay: 0.04s;

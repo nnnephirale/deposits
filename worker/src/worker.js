@@ -32,14 +32,32 @@ export default {
       if (path === "/entries") {
         if (!authorized(request, env)) return cors(json({ error: "unauthorized" }, 401), env);
         if (request.method === "GET") return cors(await getEntries(env), env);
-        if (request.method === "PUT") return cors(await putEntries(request, env), env);
+        if (request.method === "PUT") return cors(await putEntries(request, env, ctx), env);
       }
-      // ---- SSaved ----
-      // Reads are public so share links keep working for people who do not have the secret;
-      // writes need it. That is strictly better than what SSaved has today, where the bucket
-      // is public and the tables have no row-level security, so anyone holding a share link
-      // can also delete the collection.
-      const ss = path.match(/^\/s\/([A-Za-z0-9_-]{1,64})(?:\/img\/([A-Za-z0-9._-]{1,128}))?$/);
+      // entries.json is rewritten whole on every push and R2 keeps no versions, so a bad
+      // merge overwrites the only copy up here — see 7a160f5, where a stale tombstone ate
+      // every summary written after it. These are the undo: one dated copy per day, and a
+      // dashboard that can show what changed between then and now.
+      if (path === "/snapshots") {
+        if (!authorized(request, env)) return cors(json({ error: "unauthorized" }, 401), env);
+        if (request.method === "GET") return cors(await listSnapshots(env), env);
+      }
+      if (path.startsWith("/snapshots/")) {
+        if (!authorized(request, env)) return cors(json({ error: "unauthorized" }, 401), env);
+        const date = path.slice("/snapshots/".length);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return cors(json({ error: "bad date" }, 400), env);
+        if (request.method === "GET") return cors(await getSnapshot(date, env), env);
+      }
+      // ---- SSaved (moving out; see ../worker-ssaved) ----
+      // These routes now live in their own Worker. They are still answered here until SSaved's
+      // client has been repointed, because removing them before that would take SSaved down —
+      // set SSAVED_ROUTES = "off" in wrangler.toml and redeploy once the new URL is live.
+      //
+      // Why they are leaving at all: one Worker meant one daily request budget for two apps,
+      // and SSaved's reads are unauthenticated by design. A crawled share link could spend the
+      // journal's quota, which is exactly how both apps went dark at once on 28 Aug 2026 —
+      // Cloudflare error 1027, and a browser can only see it as "Load failed".
+      const ss = env.SSAVED_ROUTES === "off" ? null : path.match(/^\/s\/([A-Za-z0-9_-]{1,64})(?:\/img\/([A-Za-z0-9._-]{1,128}))?$/);
       if (ss) {
         const [, collection, image] = ss;
         if (image) {
@@ -68,13 +86,10 @@ export default {
     }
   },
 
-  // Keeps the shared Supabase project awake on SSaved's behalf. SSaved has no local copy of
-  // its cards — when that project pauses, SSaved is simply down. Its own keep-alive lives in
-  // a GitHub workflow, and GitHub switches scheduled workflows off after 60 days of repo
-  // quiet, which is how it died the first time. This scheduler has no such rule.
-  async scheduled(event, env, ctx) {
-    ctx.waitUntil(pingSupabase(env));
-  }
+  // The Supabase keep-alive moved to the ssaved Worker along with the routes it serves — it
+  // was always SSaved's uptime, not this one's. This Worker has no schedule of its own; what
+  // watches *it* runs elsewhere on purpose (../worker-ssaved's cron, and the GitHub Actions
+  // check that sits outside Cloudflare entirely).
 };
 
 // ---------- auth ----------
@@ -117,7 +132,7 @@ async function getEntries(env) {
 // Conditional write. The client sends the etag it last read; a mismatch means the other
 // device wrote in between, and the client re-reads, re-merges and retries rather than
 // flattening whatever it never saw.
-async function putEntries(request, env) {
+async function putEntries(request, env, ctx) {
   const payload = await request.json();
   if (!payload || !Array.isArray(payload.entries)) {
     return json({ error: "expected { entries: [...] }" }, 400);
@@ -151,7 +166,44 @@ async function putEntries(request, env) {
     const current = await env.BUCKET.get(ENTRIES_KEY);
     return json({ error: "conflict", etag: current ? current.etag : null }, 412);
   }
+  // The first push of a day leaves a dated copy behind. One extra head and one extra put,
+  // once a day; at a few hundred KB a snapshot a year of them is under a percent of the free
+  // 10 GB, so nothing is pruned — an old snapshot is worth more than the space it holds.
+  // waitUntil, because the client is waiting on this response and the copy is not its problem.
+  if (ctx) ctx.waitUntil(snapshotDaily(body, env));
   return json({ ok: true, etag: put.etag, count: payload.entries.length });
+}
+
+const HISTORY_PREFIX = "history/";
+
+async function snapshotDaily(body, env) {
+  try {
+    const key = HISTORY_PREFIX + new Date().toISOString().slice(0, 10) + ".json";
+    if (await env.BUCKET.head(key)) return;        // today already has one
+    await env.BUCKET.put(key, body, { httpMetadata: { contentType: "application/json" } });
+  } catch (e) {
+    console.log("snapshot failed: " + (e && e.message));  // never fails the push
+  }
+}
+
+async function listSnapshots(env) {
+  const out = [];
+  let cursor;
+  do {
+    const page = await env.BUCKET.list({ prefix: HISTORY_PREFIX, cursor });
+    for (const o of page.objects) {
+      out.push({ date: o.key.slice(HISTORY_PREFIX.length).replace(/\.json$/, ""), size: o.size, uploaded: o.uploaded });
+    }
+    cursor = page.truncated ? page.cursor : null;
+  } while (cursor);
+  out.sort((a, b) => b.date.localeCompare(a.date));   // newest first: the one you want is at the top
+  return json({ snapshots: out });
+}
+
+async function getSnapshot(date, env) {
+  const obj = await env.BUCKET.get(HISTORY_PREFIX + date + ".json");
+  if (!obj) return json({ error: "no snapshot for " + date }, 404);
+  return new Response(obj.body, { headers: JSON_HEADERS });
 }
 
 // ---------- images ----------
@@ -239,20 +291,6 @@ async function putSsavedImage(collection, image, request, env) {
     httpMetadata: { contentType: request.headers.get("content-type") || "image/png" }
   });
   return json({ ok: true, size: body.byteLength });
-}
-
-// ---------- SSaved keep-alive ----------
-
-async function pingSupabase(env) {
-  const url = env.SUPABASE_PING_URL;
-  const key = env.SUPABASE_ANON_KEY;
-  if (!url || !key) return;
-  try {
-    const r = await fetch(url, { headers: { apikey: key, authorization: "Bearer " + key } });
-    console.log(`supabase ping: HTTP ${r.status}${r.ok ? " (alive)" : " (paused or over limit)"}`);
-  } catch (e) {
-    console.log("supabase ping failed: " + e.message);
-  }
 }
 
 // ---------- helpers ----------
