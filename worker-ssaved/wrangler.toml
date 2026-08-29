@@ -26,6 +26,14 @@ DEPOSITS_HEALTH_URL = "https://deposits.nnnephirale.workers.dev/health"
 # Left empty the check still logs to `wrangler tail`, it just doesn't reach you.
 ALERT_URL = ""
 
+# Set this and ntfy forwards the same message to that address, so the alert lands somewhere
+# that is still there when the phone isn't. Only works when ALERT_URL is an ntfy topic.
+ALERT_EMAIL = ""
+
+# Appended to the alert, because the next thing anyone reading one wants is to see whether
+# their entries are safe.
+DASHBOARD_URL = "https://nnnephirale.github.io/deposits/dashboard.html"
+
 [triggers]
 # Hourly. The Supabase ping only needs every few days, but the deposits watch is the reason
 # for the schedule, and 24 requests a day is nothing.
