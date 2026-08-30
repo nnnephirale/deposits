@@ -1122,6 +1122,9 @@
   .wsum-text.pending { color: var(--subtle); }
   /* a reading that failed says why, where the reading would have been */
   .wsum-text.recap-failed { color: #8A5A11; }
+  /* under the title card's "another name" — the count of names already rolled, or why one
+     didn't arrive. Quiet enough that a title with only one name shows nothing at all. */
+  .recap-title-note { margin: 6px 0 0; font-size: 11px; color: var(--subtle); }
   /* provenance pill: MINE (hand-written) / V1 (first AI take) / V2… (re-summarized).
      when a week holds several takes, all show — active one filled, tap another to switch. */
   .wsum-pill {
