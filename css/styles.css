@@ -1120,6 +1120,8 @@
     margin: 0; cursor: pointer;
   }
   .wsum-text.pending { color: var(--subtle); }
+  /* a reading that failed says why, where the reading would have been */
+  .wsum-text.recap-failed { color: #8A5A11; }
   /* provenance pill: MINE (hand-written) / V1 (first AI take) / V2… (re-summarized).
      when a week holds several takes, all show — active one filled, tap another to switch. */
   .wsum-pill {
@@ -1794,7 +1796,18 @@
   .recap-dashes { display: flex; gap: 5px; }
   .recap-dashes span { width: 13px; height: 2px; border-radius: 1px; background: rgba(28,28,30,0.13); transition: background 0.4s ease; }
   .recap-dashes span.on { background: rgba(28,28,30,0.5); }
+  .recap-acts { display: flex; align-items: center; gap: 2px; }
   .recap-x { background: none; border: none; padding: 0 6px; font-size: 22px; font-weight: 300; line-height: 1; color: var(--subtle); }
+  /* "read it again" — quieter than the ×, and it holds still while armed rather than
+     growing, so the word appearing is the whole of the feedback. */
+  .recap-again {
+    background: none; border: none; padding: 0 6px; line-height: 1; color: var(--subtle);
+    font-family: var(--mono); font-size: 17px; font-weight: 300;
+    transition: color 0.2s ease;
+  }
+  .recap-again.armed {
+    font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--ink);
+  }
 
   /* The stage scrolls when a card is taller than the screen. A long AI summary used to
      overflow both edges with no way to reach either end — the reading was simply cut off.
