@@ -5364,8 +5364,25 @@ function openRecap(year, month) {
     if (i === 0) {
       // intro: nothing arrives immediately
       c.appendChild(el("p", { class: "recap-head", style: { fontSize: "44px" } }, monthName + ","));
-      c.appendChild(el("p", { class: "recap-sub" }, "read back."));
+      c.appendChild(el("p", { class: "recap-sub" }, take.cut ? "what you kept." : "read back."));
       c.appendChild(el("p", { class: "recap-meta recap-ev-btn", style: { cursor: "pointer" } }, "tap to begin"));
+
+      // The cut and the readings are separate versions of the month, and either is one tap
+      // from the other. Both doors used to be on the LAST card, which meant swiping through
+      // a whole reading to reach the thing assembled from all of them.
+      const cutSize0 = keptCount(rec);
+      if (cutSize0) {
+        const swap = el("button", { class: "recap-ev-btn", style: { marginTop: "18px" }, onclick: ev => {
+          ev.stopPropagation();
+          rec.showCut = !take.cut;
+          saveMonthRecaps();
+          close();
+          openRecap(year, month);
+        } }, take.cut
+          ? "or the reading it came from"
+          : "or the " + cutSize0 + " you kept, from every reading");
+        c.appendChild(swap);
+      }
     } else if (i <= take.cards.length) {
       const cd = take.cards[i - 1], ci = i - 1;
       holdToEdit(c, ci); // long-press = reword + tell claude why
