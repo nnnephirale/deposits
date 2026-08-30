@@ -4857,7 +4857,73 @@ for (const [mk_, r_] of Object.entries(monthRecaps)) {
 function saveMonthRecaps() {
   try { localStorage.setItem(RECAP_KEY, JSON.stringify(monthRecaps)); } catch (e) {}
 }
-function currentRecapTake(rec) { return (rec && rec.takes && rec.takes[rec.cur]) || null; }
+// ---------- the takes, and the cut ----------
+// A reading is generated; the cut is chosen. Every card she kept, from every reading of the
+// month, gathered into one — which is the version worth keeping once three takes have each
+// found two good things and four she let go.
+
+function currentRecapTake(rec) {
+  if (!rec || !rec.takes) return null;
+  if (rec.showCut) { const cut = keptTake(rec); if (cut) return cut; }
+  return rec.takes[rec.cur] || null;
+}
+
+/** The month's kept cards, deduped, in the order they were written. Null when nothing has
+ *  been kept yet — there is no cut of an undecided month. */
+function keptTake(rec) {
+  if (!rec || !rec.takes) return null;
+  const cards = [], srcs = [], seen = new Set();
+  rec.takes.forEach(t => {
+    (t.cards || []).forEach((cd, ci) => {
+      if ((t.verdicts || {})[ci] !== "keep") return;
+      // the same observation kept in two readings is one card, not two. Her rewordings are
+      // already on the card object itself, so the cut shows her words, not the model's.
+      const key = (cd.headline || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      if (seen.has(key)) return;
+      seen.add(key);
+      cards.push(cd);
+      srcs.push({ take: t, ci });   // so a verdict changed here writes back to its reading
+    });
+  });
+  if (!cards.length) return null;
+  // A cut is not a reading and does not get a title of its own; it borrows the newest one.
+  const titled = [...rec.takes].reverse().find(t => takeTitle(t));
+  return { version: "kept", cut: true, cards, srcs, verdicts: {}, title: titled ? takeTitle(titled) : "" };
+}
+
+/** How many cards the cut would hold — for the pill, without building it. */
+function keptCount(rec) {
+  if (!rec || !rec.takes) return 0;
+  const seen = new Set();
+  rec.takes.forEach(t => (t.cards || []).forEach((cd, ci) => {
+    if ((t.verdicts || {})[ci] !== "keep") return;
+    seen.add((cd.headline || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim());
+  }));
+  return seen.size;
+}
+
+// ---------- the title, which is its own small thing ----------
+// The one-liner is the part most worth another roll and the part least worth waiting for a
+// whole re-reading to get. A take keeps every title it has been given; `title` stays in step
+// with the current one so nothing else has to know about the list.
+
+function takeTitle(take) {
+  if (!take) return "";
+  if (take.titles && take.titles.length) return take.titles[take.titleCur || 0] || "";
+  return take.title || "";
+}
+
+function setTakeTitle(take, i) {
+  if (!take.titles || !take.titles.length) return;
+  take.titleCur = ((i % take.titles.length) + take.titles.length) % take.titles.length;
+  take.title = take.titles[take.titleCur];
+}
+
+function addTakeTitle(take, title) {
+  if (!take.titles) take.titles = take.title ? [take.title] : [];
+  take.titles.push(title);
+  setTakeTitle(take, take.titles.length - 1);
+}
 function monthKey(year, month) { return year + "-M" + pad2(month + 1); }
 function monthNameOf(year, month) {
   return new Date(year, month, 1).toLocaleDateString("en-SG", { month: "long" });
@@ -4913,6 +4979,51 @@ function recapTakeLines(take, onlyReacted) {
 
 const recapInFlight = new Set();
 const recapErrors = {};   // month key -> why the last reading didn't happen
+
+// ---------- rerolling just the title ----------
+// A whole re-reading is a minute of waiting and a few cents; the one-liner is one sentence.
+// Same model as the reading it belongs to, so the voice matches — this is a second attempt
+// at one line of that reading, not a cheaper substitute for it.
+
+const TITLE_SCHEMA = {
+  type: "object",
+  properties: { title: { type: "string" } },
+  required: ["title"],
+  additionalProperties: false
+};
+
+const titleInFlight = new Set();
+
+/** Another name for the month. Returns the new title, or throws with something sayable. */
+async function rerollTitle(year, month, take) {
+  const k = monthKey(year, month);
+  if (!apiKey || titleInFlight.has(k)) return null;
+  titleInFlight.add(k);
+  try {
+    // the reading itself is the brief — the title has to be defensible from these cards,
+    // and they are a fraction of the month's text, so this call is small
+    const cards = take.cards.map(cd => "- " + cd.headline + (cd.support ? " — " + cd.support : "")).join("\n");
+    const past = (take.titles && take.titles.length ? take.titles : [take.title]).filter(Boolean);
+    const parsed = await anthropicJSON({
+      model: "claude-sonnet-5",
+      max_tokens: 2000,   // it thinks first, and that counts against this
+      output_config: { format: { type: "json_schema", schema: TITLE_SCHEMA } },
+      system: "You name one month of Marilyn's personal journal, given the observations already written about it. "
+        + "The title is what the month would be called if it had one: a short phrase, 2 to 6 words, that only this "
+        + "month could produce and that is defensible from the observations. Sentence case. Plain, concrete, warm "
+        + "but dry. Never use: quietly, gently, softly, simply, truly, journey, chapter, embrace, whirlwind. No "
+        + "exclamation marks, no horoscope vagueness. Reply with only the title.",
+      messages: [{ role: "user", content: "THE MONTH: " + monthNameOf(year, month) + " " + year
+        + "\n\nTHE OBSERVATIONS:\n" + cards
+        + (past.length ? "\n\nALREADY USED — write a different one, not a rewording of these:\n" + past.map(t => "- " + t).join("\n") : "") }]
+    }, 60000);
+    const title = String(parsed.title || "").trim();
+    if (!title) throw new Error("came back empty");
+    return title;
+  } finally {
+    titleInFlight.delete(k);
+  }
+}
 async function startMonthRecap(year, month) {
   const k = monthKey(year, month);
   if (!apiKey || recapInFlight.has(k)) return;
@@ -4983,8 +5094,10 @@ async function startMonthRecap(year, month) {
     // a new reading never replaces an old one — it lands as the next take (V2, V3…)
     const rec = monthRecaps[k];
     const version = rec ? Math.max(...rec.takes.map(t => t.version || 1)) + 1 : 1;
-    const take = { version, cards, title: String(parsed.title || "").trim(), createdAt: new Date().toISOString(), verdicts: {} };
-    if (rec) { rec.takes.push(take); rec.cur = rec.takes.length - 1; }
+    const t0 = String(parsed.title || "").trim();
+    const take = { version, cards, title: t0, titles: t0 ? [t0] : [], titleCur: 0,
+                   createdAt: new Date().toISOString(), verdicts: {} };
+    if (rec) { rec.takes.push(take); rec.cur = rec.takes.length - 1; rec.showCut = false; }
     else monthRecaps[k] = { cur: 0, takes: [take] };
     saveMonthRecaps();
     if (view === "month" && mo.year === year && mo.month === month) openRecap(year, month);
@@ -5171,7 +5284,9 @@ function openRecap(year, month) {
     rootClass: "recap", blobs: 3, total,
     // which reading this is, when there is more than one. The V pills are on the end card;
     // the number belongs where you can see it from the first.
-    label: monthName + " " + year + (rec.takes.length > 1 ? " \u00B7 V" + (take.version || rec.cur + 1) : ""),
+    label: monthName + " " + year
+      + (take.cut ? " \u00B7 kept"
+        : rec.takes.length > 1 ? " \u00B7 V" + (take.version || rec.cur + 1) : ""),
     buildCard: i => buildCard(i),
     // No key, no reading — startMonthRecap would return silently, and a control that does
     // nothing is worse than one that isn't there.
@@ -5268,17 +5383,22 @@ function openRecap(year, month) {
         }
       }, "from your words"));
       meta.appendChild(evWrap);
+      // On the cut, a card is a borrowed reference to the reading that produced it — so the
+      // verdict has to be written where it is actually stored, or letting one go here would
+      // be forgotten the moment the cut is rebuilt.
+      const vTake = take.srcs ? take.srcs[ci].take : take;
+      const vIdx = take.srcs ? take.srcs[ci].ci : ci;
       const verdicts = el("div", { class: "recap-verdicts" });
       [["keep", "keep"], ["letgo", "let it go"]].forEach(([id, label]) => {
         verdicts.appendChild(el("button", {
-          class: take.verdicts[ci] === id ? "on" : "",
+          class: vTake.verdicts[vIdx] === id ? "on" : "",
           onclick: ev => {
             ev.stopPropagation();
-            if (take.verdicts[ci] === id) delete take.verdicts[ci]; // tap again = undecided
-            else take.verdicts[ci] = id;
+            if (vTake.verdicts[vIdx] === id) delete vTake.verdicts[vIdx]; // tap again = undecided
+            else vTake.verdicts[vIdx] = id;
             saveMonthRecaps();
             Array.from(verdicts.children).forEach((b, j) =>
-              b.classList.toggle("on", take.verdicts[ci] === (j === 0 ? "keep" : "letgo")));
+              b.classList.toggle("on", vTake.verdicts[vIdx] === (j === 0 ? "keep" : "letgo")));
           }
         }, label));
       });
@@ -5292,11 +5412,58 @@ function openRecap(year, month) {
           if (!reduceMotion) dustBurst(c);
         }, 1000);
       }
-    } else if (i === take.cards.length + 1 && take.title) {
+    } else if (i === take.cards.length + 1 && takeTitle(take)) {
       c.appendChild(el("p", { class: "recap-sub", style: { margin: "0 0 14px" } }, "If " + monthName + " had a title…"));
       const t = el("p", { class: "recap-head" }, " ");
       c.appendChild(t);
-      if (reduceMotion) t.textContent = take.title;
+
+      // One line is the part most worth another roll and the part least worth waiting a
+      // whole re-reading for. Every title the take has had stays reachable — a name you
+      // rolled past is exactly the one you want back.
+      const titleMeta = el("div", { class: "recap-meta" });
+      const note = el("p", { class: "recap-title-note" });
+      const paintNote = () => {
+        const n = (take.titles || []).length;
+        note.textContent = n > 1 ? "tap the title for the other " + (n - 1) : "";
+      };
+      const roll = el("button", { class: "recap-ev-btn", onclick: async ev => {
+        ev.stopPropagation();
+        if (roll.disabled) return;
+        roll.disabled = true; roll.textContent = "naming…";
+        try {
+          const title = await rerollTitle(year, month, take);
+          if (title) {
+            addTakeTitle(take, title);
+            saveMonthRecaps();
+            clearInterval(titleTimer);
+            t.textContent = takeTitle(take);
+            paintNote();
+          } else {
+            note.textContent = "no key set on this device";
+          }
+        } catch (err) {
+          console.warn("title reroll failed", err);
+          note.textContent = "didn’t come back — " + ((err && err.message) || "try again");
+        }
+        roll.disabled = false; roll.textContent = "another name";
+      } }, "another name");
+      // the cut borrows its title from a reading; it is not the cut's to reroll
+      if (apiKey && !take.cut) titleMeta.appendChild(roll);
+      titleMeta.appendChild(note);
+      paintNote();
+      c.appendChild(titleMeta);
+
+      t.style.cursor = "pointer";
+      t.addEventListener("click", ev => {
+        if (!take.titles || take.titles.length < 2) return;
+        ev.stopPropagation();          // stepping through names is not stepping through cards
+        clearInterval(titleTimer);
+        setTakeTitle(take, (take.titleCur || 0) + 1);
+        saveMonthRecaps();
+        t.textContent = takeTitle(take);
+      });
+
+      if (reduceMotion) t.textContent = takeTitle(take);
       else {
         // a beat of silence, then the title types itself out. clearInterval works on
         // timeout ids too, so show()/close() cancel whichever phase is live; the
@@ -5306,37 +5473,43 @@ function openRecap(year, month) {
           titleTimer = setInterval(() => {
             if (!t.isConnected) { clearInterval(titleTimer); return; }
             pos++;
-            t.textContent = take.title.slice(0, pos);
-            if (pos >= take.title.length) clearInterval(titleTimer);
+            const full = takeTitle(take);
+            t.textContent = full.slice(0, pos);
+            if (pos >= full.length) clearInterval(titleTimer);
           }, 60);
         }, 900);
       }
-    } else if (i === take.cards.length + 1) {
+    } else if (i === take.cards.length + 1 && !takeTitle(take)) {
       // no title came back — jump the pacing straight to the end card's content
       return buildCard(i + 1);
     } else {
-      const kept = Object.values(take.verdicts).filter(v => v === "keep").length;
+      const cutSize = keptCount(rec);
       c.appendChild(el("p", { class: "recap-head" }, "That's " + monthName + "."));
-      c.appendChild(el("p", { class: "recap-sub" },
-        take.cards.length + " observations" + (kept ? " · " + kept + " kept" : "")
-        + "\nWhat you keep, let go, and reword shapes the next reading."));
+      c.appendChild(el("p", { class: "recap-sub" }, take.cut
+        ? cutSize + " kept, from " + rec.takes.length + " reading" + (rec.takes.length === 1 ? "" : "s")
+          + ".\nThis is the cut — what you chose, not what was generated."
+        : take.cards.length + " observations"
+          + (cutSize ? " · " + cutSize + " kept across the month" : "")
+          + "\nWhat you keep, let go, and reword shapes the next reading."));
       const meta = el("div", { class: "recap-meta" });
-      if (rec.takes.length > 1) {
-        // every take the month has had, like the weekly V1/V2 pills — tap to revisit one
+      if (rec.takes.length > 1 || cutSize) {
+        // every take the month has had, like the weekly V1/V2 pills — tap to revisit one.
+        // "kept" sits at the end because it is the one assembled from all of them.
         const pills = el("div", { style: { marginBottom: "14px" } });
-        rec.takes.forEach((t, ti) => {
+        const openAs = fn => ev => { ev.stopPropagation(); fn(); saveMonthRecaps(); close(); openRecap(year, month); };
+        if (rec.takes.length > 1) rec.takes.forEach((t, ti) => {
           pills.appendChild(el("span", {
-            class: "wsum-pill" + (ti === rec.cur ? " on" : ""),
-            onclick: ev => {
-              ev.stopPropagation();
-              if (ti === rec.cur) return;
-              rec.cur = ti; // the choice persists — the wand replays this take from now on
-              saveMonthRecaps();
-              close();
-              openRecap(year, month);
-            }
+            class: "wsum-pill" + (!take.cut && ti === rec.cur ? " on" : ""),
+            onclick: openAs(() => { rec.cur = ti; rec.showCut = false; })
           }, "V" + (t.version || ti + 1)));
         });
+        if (cutSize) {
+          // the choice persists: from here on the chevron opens the cut, not the last reading
+          pills.appendChild(el("span", {
+            class: "wsum-pill" + (take.cut ? " on" : ""),
+            onclick: openAs(() => { rec.showCut = true; })
+          }, "kept · " + cutSize));
+        }
         meta.appendChild(pills);
       }
       meta.appendChild(el("button", { class: "recap-ev-btn", style: { marginBottom: "8px" }, onclick: ev => { ev.stopPropagation(); close(); } }, "done"));
@@ -5347,7 +5520,7 @@ function openRecap(year, month) {
           close();
           startMonthRecap(year, month); // arrives as the next take — this one stays in the pills
         }
-      }, "read it again, fresh"));
+      }, take.cut ? "read the month again" : "read it again, fresh"));
       c.appendChild(meta);
     }
     return c;
@@ -6638,6 +6811,8 @@ window.__deposits = {
   // then a button on the deck's last card, which is a long way to go when what you want to
   // know is whether the call itself works. Defaults to the month on screen.
   recap: (year, month) => startMonthRecap(year == null ? mo.year : year, month == null ? mo.month : month),
+  // and the one that opens a reading already written, without the scrub gesture
+  read: (year, month) => openRecap(year == null ? mo.year : year, month == null ? mo.month : month),
   recapErrors: () => ({ ...recapErrors })
 };
 </script>
