@@ -5211,10 +5211,39 @@ function storyDeck(opts) {
   const stage = el("div", { class: "recap-stage" });
   root.appendChild(stage);
 
+  // The dashes are the one thing at the top of a stories deck that already means "where am
+  // I in this" — so they are also where "which of these am I reading" belongs. Tapping them
+  // drops the list of versions, the cut among them, without swiping to either end of a deck
+  // to find a pill. `versions` is optional: a deck that has only one never grows the affordance.
+  let verMenu = null;
+  function closeVersions() { if (verMenu) { verMenu.remove(); verMenu = null; dashes.classList.remove("open"); } }
+  function toggleVersions() {
+    if (verMenu) return closeVersions();
+    const items = (opts.versions && opts.versions()) || [];
+    if (!items.length) return;
+    dashes.classList.add("open");
+    verMenu = el("div", { class: "recap-vermenu", onclick: ev => ev.stopPropagation() });
+    items.forEach(it => verMenu.appendChild(el("button", {
+      class: "recap-verrow" + (it.on ? " on" : ""),
+      onclick: ev => { ev.stopPropagation(); closeVersions(); it.pick(); }
+    }, it.label)));
+    root.appendChild(verMenu);
+  }
+  if (opts.versions) {
+    dashes.classList.add("pickable");
+    dashes.setAttribute("role", "button");
+    dashes.setAttribute("tabindex", "0");
+    dashes.setAttribute("aria-label", "Which version");
+    dashes.addEventListener("click", ev => { ev.stopPropagation(); toggleVersions(); });
+    dashes.addEventListener("keydown", ev => {
+      if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleVersions(); }
+    });
+  }
+
   let idx = 0, card = null;
   const stopTimers = () => { if (opts.stopTimers) opts.stopTimers(); };
 
-  function close() { stopTimers(); root.remove(); unlockPageScroll(); }
+  function close() { stopTimers(); closeVersions(); root.remove(); unlockPageScroll(); }
   function setDashes() { Array.from(dashes.children).forEach((d, i) => d.classList.toggle("on", i <= idx)); }
   function show(i) {
     idx = Math.max(0, Math.min(opts.total - 1, i));
@@ -5242,6 +5271,7 @@ function storyDeck(opts) {
   });
   stage.addEventListener("click", ev => {
     if (tapDrag) { tapDrag = false; return; }
+    if (verMenu) { closeVersions(); return; }   // dismissing the list is not turning the page
     if (opts.tapGuard && opts.tapGuard()) return;
     const r = stage.getBoundingClientRect();
     if (ev.clientX - r.left < r.width * 0.22) { if (idx > 0) show(idx - 1); }
@@ -5288,6 +5318,22 @@ function openRecap(year, month) {
       + (take.cut ? " \u00B7 kept"
         : rec.takes.length > 1 ? " \u00B7 V" + (take.version || rec.cur + 1) : ""),
     buildCard: i => buildCard(i),
+    // Every version of this month, from the dashes. Built when the list is opened so a
+    // verdict changed a moment ago is already counted in "kept".
+    versions: () => {
+      const list = rec.takes.map((t, ti) => ({
+        label: "V" + (t.version || ti + 1),
+        on: !take.cut && ti === rec.cur,
+        pick: () => { rec.cur = ti; rec.showCut = false; saveMonthRecaps(); close(); openRecap(year, month); }
+      }));
+      const n = keptCount(rec);
+      if (n) list.push({
+        label: "kept \u00B7 " + n,
+        on: !!take.cut,
+        pick: () => { rec.showCut = true; saveMonthRecaps(); close(); openRecap(year, month); }
+      });
+      return list.length > 1 ? list : [];
+    },
     // No key, no reading — startMonthRecap would return silently, and a control that does
     // nothing is worse than one that isn't there.
     again: apiKey ? () => { close(); startMonthRecap(year, month); } : null,

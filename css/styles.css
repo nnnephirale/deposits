@@ -1799,6 +1799,27 @@
   .recap-dashes { display: flex; gap: 5px; }
   .recap-dashes span { width: 13px; height: 2px; border-radius: 1px; background: rgba(28,28,30,0.13); transition: background 0.4s ease; }
   .recap-dashes span.on { background: rgba(28,28,30,0.5); }
+  /* the dashes are also the version picker when a month has more than one reading. The row
+     itself is 2px tall, so the tap target is padding, not the marks. */
+  .recap-dashes.pickable { padding: 10px 8px; margin: -10px -8px; cursor: pointer; }
+  .recap-dashes.pickable.open span { background: rgba(28,28,30,0.5); }
+  /* the list drops from under the dashes, centred on them */
+  .recap-vermenu {
+    position: absolute; z-index: 3;
+    top: calc(env(safe-area-inset-top) + 44px); left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; min-width: 132px;
+    padding: 6px; border-radius: 14px;
+    background: rgba(255,255,255,0.92);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.14);
+  }
+  .recap-verrow {
+    background: none; border: 0; border-radius: 9px; padding: 9px 14px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.6px; text-transform: uppercase;
+    color: var(--subtle); text-align: left; white-space: nowrap; cursor: pointer;
+  }
+  .recap-verrow:hover { background: rgba(0,0,0,0.04); color: var(--ink); }
+  .recap-verrow.on { color: var(--ink); background: rgba(0,0,0,0.05); }
   .recap-acts { display: flex; align-items: center; gap: 2px; }
   .recap-x { background: none; border: none; padding: 0 6px; font-size: 22px; font-weight: 300; line-height: 1; color: var(--subtle); }
   /* "read it again" — quieter than the ×, and it holds still while armed rather than
