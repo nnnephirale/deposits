@@ -1460,27 +1460,70 @@ async function initSync() {
 // one call shape for all three AI features. returns the assistant's text.
 // note: find the text block rather than indexing content[0] — models that think before
 // writing put thinking blocks first, so [0] is not the reply.
-async function anthropic(body) {
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true"
-    },
-    body: JSON.stringify(body)
-  });
-  if (!r.ok) throw new Error("api " + r.status);
+// A reading of a whole month, with the model thinking first, is slow — but not unbounded.
+// Without a deadline a phone that loses signal mid-request leaves the promise pending for
+// ever, and the in-flight guard above it never clears: every later tap on "read it again"
+// then returns instantly and silently, and only a reload frees the month. That is exactly
+// how a re-read came to look like a button that does nothing.
+const TIMEOUT_AI = 180000;
+
+function aiDeadline(ms) {
+  if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) return AbortSignal.timeout(ms);
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+}
+
+async function anthropicRaw(body, ms = TIMEOUT_AI) {
+  let r;
+  try {
+    r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify(body),
+      signal: aiDeadline(ms)
+    });
+  } catch (e) {
+    if (e.name === "TimeoutError" || e.name === "AbortError") throw new Error("timed out after " + Math.round(ms / 1000) + "s");
+    throw new Error("couldn't reach the api — " + (e.message || "no connection"));
+  }
+  if (!r.ok) {
+    // The body says which it is: an expired key, a rate limit, a bad request. "api 400" on
+    // its own has sent us looking for a console more than once.
+    let detail = "";
+    try { detail = ((JSON.parse(await r.text()).error) || {}).message || ""; } catch (e) {}
+    throw new Error("api " + r.status + (detail ? ": " + detail : ""));
+  }
   const data = await r.json();
   const block = (data.content || []).find(b => b.type === "text");
-  return ((block && block.text) || "").trim();
+  return { text: ((block && block.text) || "").trim(), stop: data.stop_reason || null };
 }
+
+async function anthropic(body, ms) {
+  return (await anthropicRaw(body, ms)).text;
+}
+
 // for the features that want JSON back — tolerates a model that wraps its reply in a
 // ```json fence despite being told not to.
-async function anthropicJSON(body) {
-  const raw = await anthropic(body);
-  return JSON.parse(raw.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim());
+async function anthropicJSON(body, ms) {
+  const { text, stop } = await anthropicRaw(body, ms);
+  // Truncation is fatal here in a way it isn't for a prose summary: half a JSON document
+  // does not parse, and the parse error alone ("Unexpected end of JSON input") says nothing
+  // about the cause. The model thinks before it writes and that thinking counts against
+  // max_tokens, so this is what running out of room looks like — including the case where
+  // it never got as far as a text block at all.
+  if (stop === "max_tokens") throw new Error("ran out of room before it finished writing (max_tokens)");
+  if (!text) throw new Error("came back empty" + (stop ? " (" + stop + ")" : ""));
+  try {
+    return JSON.parse(text.replace(/^```(json)?\s*/i, "").replace(/```\s*$/, "").trim());
+  } catch (e) {
+    throw new Error("didn't come back as json: " + text.slice(0, 80));
+  }
 }
 
 const weekSumInFlight = new Set();
@@ -4869,9 +4912,11 @@ function recapTakeLines(take, onlyReacted) {
 }
 
 const recapInFlight = new Set();
+const recapErrors = {};   // month key -> why the last reading didn't happen
 async function startMonthRecap(year, month) {
   const k = monthKey(year, month);
   if (!apiKey || recapInFlight.has(k)) return;
+  delete recapErrors[k];
   recapInFlight.add(k);
   if (view === "month") render(); // the "reading…" line appears
   try {
@@ -4909,7 +4954,13 @@ async function startMonthRecap(year, month) {
 
     const parsed = await anthropicJSON({
       model: "claude-sonnet-5", // reads a month better than haiku; one call a month, a few cents
-      max_tokens: 6000, // headroom: sonnet 5 thinks before writing, and thinking counts against this
+      // Sonnet 5 thinks before it writes and that thinking counts against this, so the cap is
+      // not "how long is the reading" but "thinking plus the reading". 6000 was enough for a
+      // first take of a quiet month and not for August: a re-read carries every earlier take
+      // back in as feedback, so each version has more to read and more to avoid repeating,
+      // and V3 was the one that ran out. Truncated JSON does not parse, and the failure was a
+      // console warning on a phone.
+      max_tokens: 16000,
       output_config: { format: { type: "json_schema", schema: RECAP_SCHEMA } },
       system: RECAP_SYSTEM,
       messages: [{ role: "user", content: input }]
@@ -4938,7 +4989,11 @@ async function startMonthRecap(year, month) {
     saveMonthRecaps();
     if (view === "month" && mo.year === year && mo.month === month) openRecap(year, month);
   } catch (err) {
-    console.warn("month recap failed", err); // wand returns on re-render; tap to retry
+    console.warn("month recap failed", err);
+    // and say so on the screen she is looking at. Every failure here used to be a warning in
+    // a console she would need a Mac and a cable to read, so a reading that failed and a
+    // reading that never started looked identical: nothing happened.
+    recapErrors[k] = (err && err.message) || "something went wrong";
   } finally {
     recapInFlight.delete(k);
     if (view === "month" && mo.year === year && mo.month === month) render();
@@ -4957,6 +5012,16 @@ function monthRecapBlock(list) {
     tick();
     const t = setInterval(() => { if (!p.isConnected) { clearInterval(t); return; } tick(); }, 2200);
     wrap.appendChild(p);
+    return wrap;
+  }
+  const failed = recapErrors[k];
+  if (failed) {
+    const wrap = el("div", { class: "wsum" });
+    wrap.appendChild(el("p", { class: "wsum-text recap-failed" }, "the reading didn't come back \u2014 " + failed));
+    wrap.appendChild(el("button", { class: "wsum-pill", onclick: () => {
+      delete recapErrors[k];
+      startMonthRecap(mo.year, mo.month);
+    } }, "try again"));
     return wrap;
   }
   // the month's wand lived here; the chevron under the period is the door now. Nothing
@@ -4985,7 +5050,8 @@ function revealTextSize(text) {
 // the chrome both reveals share: blobs/veil/grain, the dash progress row with its label and
 // close ×, the stage, and the stories tap grammar (left 22% steps back, anywhere else
 // forward). the caller owns what a card looks like and what its timers are.
-//   opts: { rootClass, blobs, label, total, buildCard(i), stopTimers(), tapGuard() }
+//   opts: { rootClass, blobs, label, total, buildCard(i), stopTimers(), tapGuard(), again() }
+// again, when given, adds a second control beside the × — see the arming comment below.
 // tapGuard returns true to swallow a tap (a long-press that opened an editor, a count-up
 // that a tap should settle instead of advancing). the deck is NOT shown until show(0).
 function storyDeck(opts) {
@@ -4996,10 +5062,37 @@ function storyDeck(opts) {
 
   const dashes = el("div", { class: "recap-dashes" });
   for (let i = 0; i < opts.total; i++) dashes.appendChild(el("span"));
+  // The right-hand controls live in one group so the dashes stay centred however many
+  // there are. `again` is the month's "read it again, fresh", which until now existed only
+  // on the end card — three or four swipes in, which is a long way to go for a control you
+  // are looking for by name.
+  const acts = el("div", { class: "recap-acts" });
+  if (opts.again) {
+    // Two taps. It sits a thumb's width from the × and it spends an API call, so a single
+    // mis-tap must not start a reading. The arming lapses on its own rather than staying
+    // armed behind her while she reads.
+    let armed = null;
+    const again = el("button", { class: "recap-again", "aria-label": "Read it again, fresh",
+      onclick: ev => {
+        ev.stopPropagation();
+        if (armed) { clearTimeout(armed); opts.again(); return; }
+        again.textContent = "again?";
+        again.classList.add("armed");
+        armed = setTimeout(() => {
+          armed = null;
+          if (!again.isConnected) return;
+          again.textContent = "\u21BB";
+          again.classList.remove("armed");
+        }, 3200);
+      } }, "\u21BB");
+    acts.appendChild(again);
+  }
+  acts.appendChild(el("button", { class: "recap-x", "aria-label": "Close", onclick: ev => { ev.stopPropagation(); close(); } }, "\u00D7"));
+
   root.appendChild(el("div", { class: "recap-top" },
     el("span", { class: "recap-month" }, opts.label),
     dashes,
-    el("button", { class: "recap-x", "aria-label": "Close", onclick: ev => { ev.stopPropagation(); close(); } }, "×")
+    acts
   ));
 
   const stage = el("div", { class: "recap-stage" });
@@ -5075,8 +5168,14 @@ function openRecap(year, month) {
   const total = take.cards.length + 3; // intro + cards + title + end
   let titleTimer = null, editHeld = false;
   const deck = storyDeck({
-    rootClass: "recap", blobs: 3, label: monthName + " " + year, total,
+    rootClass: "recap", blobs: 3, total,
+    // which reading this is, when there is more than one. The V pills are on the end card;
+    // the number belongs where you can see it from the first.
+    label: monthName + " " + year + (rec.takes.length > 1 ? " \u00B7 V" + (take.version || rec.cur + 1) : ""),
     buildCard: i => buildCard(i),
+    // No key, no reading — startMonthRecap would return silently, and a control that does
+    // nothing is worse than one that isn't there.
+    again: apiKey ? () => { close(); startMonthRecap(year, month); } : null,
     stopTimers: () => clearInterval(titleTimer),
     tapGuard: () => { // the tap that ended a long-press isn't a step
       if (!editHeld) return false;
@@ -6534,7 +6633,12 @@ window.__deposits = {
   export: () => toMarkdown(activeEntries(), exportHeading()),
   cloud: cloudConfig,
   connect: cfg => { setCloudConfig(cfg); return cloudCheck(); },
-  sync: async () => { await syncPull(); await pushEntriesNow(); render(); }
+  sync: async () => { await syncPull(); await pushEntriesNow(); render(); },
+  // A month's reading, on demand. The door in the UI is a scrub gesture on the chevron and
+  // then a button on the deck's last card, which is a long way to go when what you want to
+  // know is whether the call itself works. Defaults to the month on screen.
+  recap: (year, month) => startMonthRecap(year == null ? mo.year : year, month == null ? mo.month : month),
+  recapErrors: () => ({ ...recapErrors })
 };
 </script>
 </body>
