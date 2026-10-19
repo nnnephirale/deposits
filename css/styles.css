@@ -919,23 +919,23 @@
     .img-size-rail { flex-direction: row; padding: 8px; }
     .img-size-title { display: none; }
   }
+  /* redacted text is still the real text, set in Redacted Script so every glyph is a scribble —
+     the line keeps its own length and rhythm instead of becoming a uniform block. display=block
+     on the font link means it never flashes as readable text while the font loads. tap swaps
+     back to the body face with a short fade so the reveal breathes rather than snaps. */
   .redacted {
-    color: transparent; border-radius: 4px; cursor: pointer;
-    background:
-      repeating-linear-gradient(0deg, rgba(28,28,30,0.30) 0 2px, rgba(28,28,30,0.10) 2px 4px),
-      repeating-linear-gradient(90deg, rgba(28,28,30,0.26) 0 2px, rgba(28,28,30,0.08) 2px 4px);
-    background-size: 4px 4px;
-    animation: sparkle 0.9s steps(2) infinite;
-    transition: color 0.25s ease;
+    font-family: 'Redacted Script', cursive; font-weight: 400;
+    color: var(--subtle); cursor: pointer;
+    transition: color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     user-select: none; -webkit-user-select: none;
   }
-  @keyframes sparkle {
-    0%   { background-position: 0 0, 0 0; }
-    50%  { background-position: 2px 1px, 1px 2px; }
-    100% { background-position: 0 0, 0 0; }
+  @media (hover: hover) { .redacted:not(.revealed):hover { color: #636366; } }
+  .redacted.revealed {
+    font-family: inherit; color: inherit; user-select: text; -webkit-user-select: text;
+    animation: unredact 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   }
-  .redacted.revealed { color: inherit; background: var(--field); animation: none; }
-  @media (prefers-reduced-motion: reduce) { .redacted { animation: none; } }
+  @keyframes unredact { from { opacity: 0.2; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .redacted.revealed { animation: none; } }
 
   /* the line-ops popover: one vertical list of labelled rows, so related controls collapse
      into a single button instead of a wall of glyphs. floats above the format row. */
