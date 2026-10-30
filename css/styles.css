@@ -13,6 +13,9 @@
     --card-0: rgba(255,255,255,0);
     --hairline: rgba(0,0,0,0.055);
     --field: #F4F4F6;
+    /* what sits ON an ink fill (selected cells, pressed buttons): white here, near-black in
+       dark mode, where the ink itself goes light */
+    --on-ink: #fff;
     --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
     /* the label face — meta rows, pills, rail heads, stepper labels. It WAS 'SF Mono'; with
        that declaration switched off in inspect the whole interface read better, so the labels
@@ -235,7 +238,7 @@
     background: var(--field); color: #6B6B70;
     transition: background 0.15s ease, color 0.15s ease;
   }
-  .ft-seg button.on { background: var(--ink); color: #fff; }
+  .ft-seg button.on { background: var(--ink); color: var(--on-ink); }
   /* where to look — the answer to "I pulled the sliders and nothing changed" */
   .ft-where {
     margin: 0 0 8px; font-size: 10.5px; line-height: 1.4; color: var(--subtle);
@@ -561,7 +564,7 @@
   .er-btn:active { background: #E9E9EC; }
   /* on-state for the two toggles: they say what the entry IS, so a pinned entry's rail opens
      with the pin already lit and the tap plainly reads as "turn this off" */
-  .er-pin.on, .er-lock.on { background: var(--ink); color: #fff; }
+  .er-pin.on, .er-lock.on { background: var(--ink); color: var(--on-ink); }
   .er-del { background: #FBE3E1; color: #C43C36; }
   .er-del:active { background: #F7D2CF; }
   /* the lock means what it says: delete stands down rather than disappearing, so the rail is
@@ -604,7 +607,7 @@
   .rt-check { display: flex; gap: 9px; align-items: flex-start; padding: 3px 0; }
   .rt-box {
     flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 50%;
-    border: 1.75px solid #C7C4BD; color: #fff; box-sizing: border-box;
+    border: 1.75px solid #C7C4BD; color: var(--on-ink); box-sizing: border-box;
     display: inline-flex; align-items: center; justify-content: center;
     transition: background 0.15s ease, border-color 0.15s ease;
   }
@@ -645,7 +648,7 @@
     transition: background 0.15s ease, color 0.15s ease;
   }
   .mp-day sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
-  .mp-day.on { background: var(--ink); color: #fff; }
+  .mp-day.on { background: var(--ink); color: var(--on-ink); }
   .mp-day svg { width: 13px; height: 13px; }
   @media (hover: hover) { .mp-day:not(.on):hover { background: #E9E9EC; color: var(--ink); } }
   .mp-day:active { transform: scale(0.94); }
@@ -751,7 +754,7 @@
     .rt-gal-wrap:hover.show-right .gn-next {
       opacity: 1; pointer-events: auto; transform: translateY(-50%) scale(1);
     }
-    .rt-gal-nav:active { transform: translateY(-50%) scale(0.92); background: #fff; }
+    .rt-gal-nav:active { transform: translateY(-50%) scale(0.92); background: var(--card); }
     /* a fanned deck isn't a scroller — nothing to page through */
     .rt-gallery.stacked ~ .rt-gal-nav { display: none; }
   }
@@ -907,7 +910,7 @@
     transition: background 0.16s ease, transform 0.12s ease;
   }
   .img-size-btn:active { transform: scale(0.96); }
-  .img-size-btn.active { background: var(--ink); color: #fff; }
+  .img-size-btn.active { background: var(--ink); color: var(--on-ink); }
   @media (max-width: 560px) {
     .img-preview-stage { flex-direction: column; gap: 12px; }
     /* stacked: the rail claims its row first and the photo shrinks into whatever height is
@@ -1025,7 +1028,7 @@
     position: relative;
     display: flex; gap: 2px; pointer-events: auto;
     flex: 1; max-width: 520px; justify-content: space-around;
-    background: #fff; border-radius: 999px; padding: 6px;
+    background: var(--card); border-radius: 999px; padding: 6px;
     box-shadow: 0 2px 10px rgba(0,0,0,0.08), 0 10px 28px rgba(0,0,0,0.10);
     border: 1px solid rgba(0,0,0,0.04);
     overflow: visible;
@@ -1059,9 +1062,9 @@
   .fmt-btn svg { display: block; }
   /* line ops (bullet/indent/outdent): the muted grey of the topic chips below, same as before */
   .fmt-btn.line-only { color: #6B6B70; }
-  .fmt-btn.line-only:active { color: #fff; } /* keep the press invert (specificity beats the rest colour) */
+  .fmt-btn.line-only:active { color: var(--on-ink); } /* keep the press invert (specificity beats the rest colour) */
   .fmt-btn.line-only svg { width: 16.5px; height: 16.5px; }
-  .fmt-btn:active { background: var(--ink); color: #fff; }
+  .fmt-btn:active { background: var(--ink); color: var(--on-ink); }
   .fmt-b { font-weight: 700; }
   .fmt-i { font-style: italic; }
   .fmt-u { text-decoration: underline; text-underline-offset: 2px; }
@@ -1070,7 +1073,7 @@
      B/I/U; link stays full ink, matching how it reads in the screenshot. */
   .fmt-btn.fmt-icon svg { width: 18px; height: 18px; }
   .fmt-r { color: var(--subtle); }
-  .fmt-r:active { color: #fff; }
+  .fmt-r:active { color: var(--on-ink); }
   .entry-meta {
     display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center;
   }
@@ -1138,7 +1141,7 @@
      target. horizontal slop is kept small so adjacent pills' zones don't overlap. */
   .wsum-pill::after { content: ""; position: absolute; inset: -12px -2px -10px; }
   .wsum-pill + .wsum-pill { margin-left: 6px; }
-  .wsum-pill.on { background: var(--ink); color: #fff; }
+  .wsum-pill.on { background: var(--ink); color: var(--on-ink); }
   /* the two ways to start a summary, side by side */
   .wsum-add {
     font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
@@ -1529,7 +1532,7 @@
   }
   .head-tag svg { width: 16px; height: 16px; display: block; }
   /* carrying tags is the notable state, so it takes the ink; empty stays quiet */
-  .head-tag.has-tags { background: var(--ink); color: #fff; }
+  .head-tag.has-tags { background: var(--ink); color: var(--on-ink); }
   /* the pin sits beside the tag lozenge and borrows its whole shape, so the head reads as one
      row of controls rather than a lozenge and a stray button. Square rather than the tag's
      padded oval: it carries a glyph and no count, and an oval around a single 16px icon reads
@@ -1538,7 +1541,7 @@
   .head-pin svg { width: 16px; height: 16px; }
   /* off is quiet, on is ink — the same on/off pair .head-tag already uses, so "carrying
      something" looks the same whether it is tags or a pin */
-  .head-pin.on { background: var(--ink); color: #fff; }
+  .head-pin.on { background: var(--ink); color: var(--on-ink); }
   .head-tag .ht-count { line-height: 1; }
   /* the two ring buttons. The ring is here, not in the SVGs, so both are the same circle and only
      their glyph differs — and so the disabled/active states have one thing to restyle. */
@@ -1591,7 +1594,7 @@
     padding: 9px 0; border-radius: 999px; color: var(--subtle);
     user-select: none; -webkit-user-select: none; cursor: pointer;
   }
-  .day-strip span.hot { background: var(--ink); color: #fff; font-weight: 600; }
+  .day-strip span.hot { background: var(--ink); color: var(--on-ink); font-weight: 600; }
   .day-strip span.today::after {
     content: ""; display: inline-block; width: 4px; height: 4px;
     margin-left: 3px; border-radius: 50%; background: #FF3B30; vertical-align: middle;
@@ -1612,7 +1615,7 @@
   .cal-pop.closing { animation: calRise 0.18s cubic-bezier(0.4, 0, 1, 1) forwards; pointer-events: none; }
   @keyframes calRise { to { opacity: 0; transform: translateY(-10px) scale(0.97); } }
   @media (prefers-reduced-motion: reduce) { .cal-pop, .cal-pop.closing { animation: none; } }
-  .cal-sel { background: var(--ink); color: #fff !important; border-radius: 8px; font-weight: 700; }
+  .cal-sel { background: var(--ink); color: var(--on-ink) !important; border-radius: 8px; font-weight: 700; }
 
   /* the caret mirror (see caretLineIn): an off-screen copy of the composer's field used only to
      find out which line the caret is on. Everything that decides a line break is copied from the
@@ -1649,7 +1652,7 @@
     transition: all 0.15s ease; white-space: nowrap;
   }
   .chip.mode { background: transparent; color: var(--subtle); border-color: var(--hairline); }
-  .chip.mode.on { background: var(--ink); color: #fff; border-color: var(--ink); font-weight: 600; }
+  .chip.mode.on { background: var(--ink); color: var(--on-ink); border-color: var(--ink); font-weight: 600; }
 
   .back-link {
     font-size: 13px; color: var(--subtle); background: none; border: none;
@@ -1701,7 +1704,7 @@
     font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
     transition: background 0.15s ease, color 0.15s ease;
   }
-  .speed-cell.on { background: var(--ink); color: #fff; }
+  .speed-cell.on { background: var(--ink); color: var(--on-ink); }
   .speed-cell svg { width: 18px; height: 18px; }
   @media (hover: hover) {
     .speed-cell:not(.on):hover { background: #E9E9EC; color: var(--ink); }
@@ -1715,7 +1718,7 @@
     background: var(--field); border-radius: 12px; padding: 12px 0;
   }
   .verify-btn {
-    flex: none; font-size: 15px; color: #fff; background: var(--ink);
+    flex: none; font-size: 15px; color: var(--on-ink); background: var(--ink);
     border: none; border-radius: 12px; padding: 12px 18px;
   }
   .lock-btn + .delete-btn { margin-top: 10px; }
@@ -1756,7 +1759,7 @@
   .confirm-actions { display: flex; gap: 10px; }
   .confirm-actions button { flex: 1; padding: 10px 0; border-radius: 10px; border: none; font-size: 15px; }
   .confirm-cancel { background: var(--field); color: var(--ink); }
-  .confirm-ok { background: var(--ink); color: #fff; font-weight: 600; }
+  .confirm-ok { background: var(--ink); color: var(--on-ink); font-weight: 600; }
 
   /* ---------- monthly recap: a full-screen reveal, not a sheet ----------
      the one surface in the app allowed to take a beat. alive background
@@ -1901,7 +1904,7 @@
     padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(28,28,30,0.12);
     background: transparent; color: var(--subtle); transition: all 0.15s ease;
   }
-  .recap-verdicts button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .recap-verdicts button.on { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
   /* dust catching sunlight — reserved for earned cards, never confetti */
   .recap-dust {
     position: absolute; width: 3px; height: 3px; border-radius: 50%;
@@ -2283,7 +2286,7 @@
       transition: background 0.15s ease, color 0.15s ease;
     }
     .rail-scope:active { transform: scale(0.96); }
-    .rail-scope.open { background: var(--ink); color: #fff; }
+    .rail-scope.open { background: var(--ink); color: var(--on-ink); }
 
     /* the pull-down. grid-template-rows 0fr→1fr is the one way to transition to a content
        height without measuring it, so TOPICS below is pushed down by the real height of the
@@ -2322,7 +2325,7 @@
     @media (hover: hover) {
       .rail-row:hover { color: var(--ink); background: rgba(0,0,0,0.028); }
       .rail-scope:hover { color: var(--ink); background: rgba(0,0,0,0.085); }
-      .rail-scope.open:hover { color: #fff; background: var(--ink); }
+      .rail-scope.open:hover { color: var(--on-ink); background: var(--ink); }
       .rail-scope-opt:hover { color: var(--ink); background: rgba(0,0,0,0.032); }
       .entry:hover { background: rgba(0,0,0,0.016); }
       .stepper-btn:hover { background: #EAEAED; color: var(--ink); }
@@ -2413,4 +2416,214 @@
 .save-alert span { opacity: .92; }
 @media (min-width: 1080px) {
   .save-alert { left: auto; right: 24px; bottom: 24px; max-width: 340px; }
+}
+
+/* ===================================================================================
+   DARK MODE (31 Oct 2026)
+   data-theme on <html> is always resolved to "light" or "dark" — set before first paint
+   by the inline script in <head>, then kept current by applyTheme() (Settings: system /
+   light / dark, "system" following prefers-color-scheme live). So nothing here needs a
+   media-query twin. The light rules above are untouched; everything below only re-points
+   them. Same structure as light: the canvas is the deepest surface, cards sit one step
+   lighter on it, fields one more. Greys stay neutral, no hue.
+   =================================================================================== */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #ECECEE;
+  --subtle: #8C8C92;
+  --canvas: #0E0E0F;
+  --canvas-a: rgba(14,14,15,0.82);
+  --canvas-0: rgba(14,14,15,0);
+  --card: #1B1B1D;
+  --card-0: rgba(27,27,29,0);
+  --hairline: rgba(255,255,255,0.07);
+  --field: #252528;
+  --on-ink: #141416;
+  --act-grey: #3A3A3F;
+  --lock-stroke: #55555B;
+}
+/* faint text (dividers, empty days, counts) — dark enough to recede, light enough to find */
+:root[data-theme="dark"] .snip-mask,
+:root[data-theme="dark"] .rt-dot,
+:root[data-theme="dark"] .wsum-add,
+:root[data-theme="dark"] .save:disabled,
+:root[data-theme="dark"] .head-act.act-save:disabled,
+:root[data-theme="dark"] .cal-dow span,
+:root[data-theme="dark"] .cal-out,
+:root[data-theme="dark"] .period-sep,
+:root[data-theme="dark"] .er-del:disabled { color: #48484D; }
+:root[data-theme="dark"] .period-tab:not(.on),
+:root[data-theme="dark"] .stepper-btn,
+:root[data-theme="dark"] .wsum-nokey,
+:root[data-theme="dark"] .wsum-eye { color: #55555B; }
+:root[data-theme="dark"] .wc-chev,
+:root[data-theme="dark"] .wk-range,
+:root[data-theme="dark"] .entry-day,
+:root[data-theme="dark"] .recap-ev-btn,
+:root[data-theme="dark"] .menu-search svg { color: #66666C; }
+:root[data-theme="dark"] .menu-search input::placeholder,
+:root[data-theme="dark"] .sheet.expanse textarea.ta-entry::placeholder { color: #5E5E64; }
+/* mid greys (secondary labels, muted icons) */
+:root[data-theme="dark"] .ft-seg button:not(.on),
+:root[data-theme="dark"] .mp-day:not(.on),
+:root[data-theme="dark"] .line-pop-row .lp-icon,
+:root[data-theme="dark"] .fmt-btn.line-only,
+:root[data-theme="dark"] .chip:not(.mode),
+:root[data-theme="dark"] .speed-cell:not(.on),
+:root[data-theme="dark"] .recap-ev p { color: #A2A2A8; }
+:root[data-theme="dark"] .menu-row svg,
+:root[data-theme="dark"] .compose-icon { color: #8E8E94; }
+:root[data-theme="dark"] .compose-lozenge span { background: #8E8E94; }
+:root[data-theme="dark"] .rt-line.rt-quote,
+:root[data-theme="dark"] .recap-sub,
+:root[data-theme="dark"] .wk-still-stat { color: #B4B4BA; }
+@media (hover: hover) {
+  :root[data-theme="dark"] .wc-chev:hover,
+  :root[data-theme="dark"] .redacted:not(.revealed):hover { color: #A2A2A8; }
+  :root[data-theme="dark"] .mp-day:not(.on):hover,
+  :root[data-theme="dark"] .speed-cell:not(.on):hover,
+  :root[data-theme="dark"] .wsum-ai:hover { background: #2E2E32; }
+  :root[data-theme="dark"] .mp-day:not(.on):hover,
+  :root[data-theme="dark"] .speed-cell:not(.on):hover { color: var(--ink); }
+  :root[data-theme="dark"] .wsum-add:not(.wsum-ai):hover,
+  :root[data-theme="dark"] .wsum-nokey:hover { color: var(--subtle); }
+}
+/* the press-invert keeps its contrast once ink goes light (specificity beats the rest colour) */
+:root[data-theme="dark"] .fmt-btn.line-only:active,
+:root[data-theme="dark"] .fmt-r:active { color: var(--on-ink); }
+:root[data-theme="dark"] .cal-sel { color: var(--on-ink) !important; }
+
+/* flat surfaces */
+:root[data-theme="dark"] .day-badge { background: #2A2A2D; color: #9A9AA0; }
+:root[data-theme="dark"] .er-btn:active { background: #2E2E32; }
+:root[data-theme="dark"] .ft-fill { background: #2E2E32; }
+:root[data-theme="dark"] .compose-bar:not(.copied) { background: #232326; color: #85858B; }
+:root[data-theme="dark"] .compose-bar:not(.copied):active { background: #2A2A2E; }
+:root[data-theme="dark"] .sheet.expanse.folded { background-color: #232326; }
+:root[data-theme="dark"] .compose-divider { background: rgba(255,255,255,0.12); }
+:root[data-theme="dark"] .scope-div { background: rgba(255,255,255,0.14); }
+:root[data-theme="dark"] .compose-icon:active,
+:root[data-theme="dark"] .compose-lozenge:active { background: rgba(255,255,255,0.08); }
+:root[data-theme="dark"] .compose-icon:active { color: var(--ink); }
+:root[data-theme="dark"] .head-act.act-save:not(:disabled):active { background: #4A4A50; }
+:root[data-theme="dark"] .shimmer { background-image: linear-gradient(100deg, #6A6A70 34%, #C8C8CE 50%, #6A6A70 66%); }
+@media (prefers-reduced-motion: reduce) { :root[data-theme="dark"] .shimmer { background-image: none; color: #85858B; } }
+:root[data-theme="dark"] .rt-hr { border-top-color: #333337; }
+:root[data-theme="dark"] .rt-line.rt-quote { border-left-color: #3E3E43; }
+:root[data-theme="dark"] .rt-box,
+:root[data-theme="dark"] .mp-clear { border-color: #55555B; }
+:root[data-theme="dark"] .rt-box.on { border-color: var(--ink); }
+:root[data-theme="dark"] .rt-check.done .rt-body { text-decoration-color: #55555B; }
+
+/* destructive and warning states: muted, never loud */
+:root[data-theme="dark"] .ft-reset,
+:root[data-theme="dark"] .tax-undo,
+:root[data-theme="dark"] .er-del,
+:root[data-theme="dark"] .delete-btn { background: rgba(255,105,97,0.13); color: #FF8A82; }
+:root[data-theme="dark"] .er-del:active { background: rgba(255,105,97,0.2); }
+:root[data-theme="dark"] .er-del:disabled { background: var(--field); }
+@media (hover: hover) { :root[data-theme="dark"] .tax-del:hover { background: rgba(255,105,97,0.13); color: #FF8A82; } }
+:root[data-theme="dark"] .wsum-restore { color: #FF8A82; }
+:root[data-theme="dark"] .settings-note.warn,
+:root[data-theme="dark"] .wsum-text.recap-failed { color: #E2AC55; }
+
+/* floating things: shadows vanish on a dark ground, so each also gets a hairline ring */
+:root[data-theme="dark"] .fade-tuner,
+:root[data-theme="dark"] .recap-vermenu { background: rgba(36,36,39,0.92); border-color: rgba(255,255,255,0.06); box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 12px 34px rgba(0,0,0,0.5); }
+:root[data-theme="dark"] .mark-pop,
+:root[data-theme="dark"] .line-pop,
+:root[data-theme="dark"] .tag-pop,
+:root[data-theme="dark"] .cal-pop,
+:root[data-theme="dark"] .day-strip,
+:root[data-theme="dark"] .confirm-box,
+:root[data-theme="dark"] .read-modal,
+:root[data-theme="dark"] .menu-modal { box-shadow: 0 0 0 1px rgba(255,255,255,0.07), 0 18px 50px rgba(0,0,0,0.55); border-color: rgba(255,255,255,0.06); }
+:root[data-theme="dark"] .fmt-bar-pill { border-color: rgba(255,255,255,0.07); box-shadow: 0 2px 10px rgba(0,0,0,0.35), 0 10px 28px rgba(0,0,0,0.4); }
+:root[data-theme="dark"] .sheet { box-shadow: 0 0 0 1px rgba(255,255,255,0.05), 0 -8px 40px rgba(0,0,0,0.5); }
+:root[data-theme="dark"] .group-card { box-shadow: 0 0 0 1px rgba(255,255,255,0.035); }
+:root[data-theme="dark"] .stepper-btn { box-shadow: 0 0 0 1px rgba(255,255,255,0.05); }
+:root[data-theme="dark"] .img-size-rail { background: rgba(36,36,39,0.9); box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 10px 40px rgba(0,0,0,0.5); }
+:root[data-theme="dark"] .rt-gallery.stacked .rt-img { box-shadow: 0 0 0 3px var(--card), 0 6px 16px rgba(0,0,0,0.5); }
+:root[data-theme="dark"] .read-back,
+:root[data-theme="dark"] .overlay,
+:root[data-theme="dark"] .confirm-overlay { background: rgba(0,0,0,0.6); }
+:root[data-theme="dark"] body.composing .overlay { background: rgba(0,0,0,0.35); }
+:root[data-theme="dark"] .img-preview-back { background: rgba(0,0,0,0.6); }
+
+/* fades that used to end in white now end in the card */
+:root[data-theme="dark"] .rt-gal-wrap::before { background: linear-gradient(to left, var(--card-0), rgba(27,27,29,0.5)); }
+:root[data-theme="dark"] .rt-gal-wrap::after { background: linear-gradient(to right, var(--card-0), rgba(27,27,29,0.5)); }
+:root[data-theme="dark"] .bottom-frost { background: linear-gradient(to top, rgba(27,27,29,0.98) var(--lfade-hold, 34%), rgba(27,27,29,0.72) var(--lfade-mid, 66%), rgba(27,27,29,0)); }
+
+/* the bloom and the deck: dark paper, the same topic fields glowing on it */
+:root[data-theme="dark"] .heat-wash { background: #121213; }
+:root[data-theme="dark"] .recap-blob.b1 { background: #3A3024; }
+:root[data-theme="dark"] .recap-blob.b2 { background: #22323A; }
+:root[data-theme="dark"] .recap-blob.b3 { background: #352638; }
+:root[data-theme="dark"] .recap-veil { background: rgba(14,14,15,0.55); }
+:root[data-theme="dark"] .recap.lit .recap-veil { background: rgba(14,14,15,0.25); }
+:root[data-theme="dark"] .recap-top::after { background: linear-gradient(to bottom, rgba(14,14,15,0.5), rgba(14,14,15,0)); }
+:root[data-theme="dark"] .recap-dashes span { background: rgba(236,236,238,0.16); }
+:root[data-theme="dark"] .recap-dashes span.on,
+:root[data-theme="dark"] .recap-dashes.pickable.open span { background: rgba(236,236,238,0.6); }
+:root[data-theme="dark"] .recap-verrow:hover { background: rgba(255,255,255,0.05); }
+:root[data-theme="dark"] .recap-verrow.on { background: rgba(255,255,255,0.07); }
+:root[data-theme="dark"] .recap-ev p { border-left-color: rgba(236,236,238,0.14); }
+:root[data-theme="dark"] .recap-verdicts button { border-color: rgba(236,236,238,0.16); }
+:root[data-theme="dark"] .recap-dust { background: rgba(236,236,238,0.35); }
+:root[data-theme="dark"] .wk-days span { color: rgba(236,236,238,0.16); }
+:root[data-theme="dark"] .wk-still { background: rgba(27,27,29,0.6); border-color: rgba(255,255,255,0.06); box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
+
+/* desktop: wash, mat, cards — still darkest outward */
+@media (min-width: 1080px) {
+  :root[data-theme="dark"] {
+    --mat: #131315;
+    --mat-a: rgba(19,19,21,0.88);
+    --mat-0: rgba(19,19,21,0);
+  }
+  :root[data-theme="dark"] body {
+    background:
+      radial-gradient(115% 85% at 8% -8%,   #0D0D0E 0%, rgba(13,13,14,0) 60%),
+      radial-gradient(95% 75%  at 96% 4%,   #0C0C0D 0%, rgba(12,12,13,0) 55%),
+      radial-gradient(90% 75%  at 84% 108%, #050506 0%, rgba(5,5,6,0) 64%),
+      radial-gradient(75% 65%  at -4% 96%,  #070708 0%, rgba(7,7,8,0) 60%),
+      #09090A;
+  }
+  :root[data-theme="dark"] .deck-main { box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 24px 56px rgba(0,0,0,0.4); }
+  :root[data-theme="dark"] .stepper-btn { box-shadow: 0 0 0 1px rgba(255,255,255,0.05); }
+  :root[data-theme="dark"] .ico-row:not(.on) .ico-glyph { color: #6A6A70; }
+  :root[data-theme="dark"] .ico-label { box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 4px 14px rgba(0,0,0,0.4); }
+  :root[data-theme="dark"] .ico-row.on .ico-glyph,
+  :root[data-theme="dark"] .ico-row.on:hover .ico-glyph,
+  :root[data-theme="dark"] .ico-row.on:focus-visible .ico-glyph { box-shadow: 0 0 0 1px rgba(255,255,255,0.06); }
+  :root[data-theme="dark"] .ico-row:hover .ico-glyph,
+  :root[data-theme="dark"] .ico-row:focus-visible .ico-glyph { background: rgba(255,255,255,0.06); }
+  :root[data-theme="dark"] .ico-dot:not(.live):not(.warn),
+  :root[data-theme="dark"] .rr-mark { background: #3E3E43; }
+  :root[data-theme="dark"] .rail-row:not(.on) .rr-count,
+  :root[data-theme="dark"] .rail-scope-opt:not(.on) .so-key,
+  :root[data-theme="dark"] .rail-empty,
+  :root[data-theme="dark"] .rail-cal .cal-out { color: #55555B; }
+  :root[data-theme="dark"] .rail-cal .cal-day.has-dep::after { background: #55555B; }
+  :root[data-theme="dark"] .rail-search { background: rgba(255,255,255,0.05); }
+  :root[data-theme="dark"] .rail-search:focus-within { background: rgba(255,255,255,0.09); }
+  :root[data-theme="dark"] .rail-scope:not(.open) { background: rgba(255,255,255,0.07); }
+  :root[data-theme="dark"] .rt-gal-nav { background: rgba(36,36,39,0.82); box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 6px 18px rgba(0,0,0,0.4); }
+}
+@media (min-width: 1080px) and (hover: hover) {
+  :root[data-theme="dark"] .rail-cal .cal-day:hover,
+  :root[data-theme="dark"] .rail-cal button.cal-wk:hover { background: rgba(255,255,255,0.07); }
+  :root[data-theme="dark"] .rail-cal .cal-row.wk-row:hover { background: rgba(255,255,255,0.03); }
+  :root[data-theme="dark"] .rail-row:hover { background: rgba(255,255,255,0.04); }
+  :root[data-theme="dark"] .rail-scope:not(.open):hover { background: rgba(255,255,255,0.11); }
+  :root[data-theme="dark"] .rail-scope.open:hover { background: var(--ink); }
+  :root[data-theme="dark"] .rail-scope-opt:hover { background: rgba(255,255,255,0.045); }
+  :root[data-theme="dark"] .entry:hover { background: rgba(255,255,255,0.02); }
+  :root[data-theme="dark"] .stepper-btn:hover { background: #26262A; color: var(--ink); }
+  :root[data-theme="dark"] .ico-row:not(.on):hover .ico-glyph,
+  :root[data-theme="dark"] .ico-row:not(.on):focus-visible .ico-glyph { color: var(--ink); }
+  :root[data-theme="dark"] .compose-bar:not(.copied):hover { background: #2A2A2E; }
+  :root[data-theme="dark"] .compose-icon:hover,
+  :root[data-theme="dark"] .compose-lozenge:hover { background: rgba(255,255,255,0.07); }
+  :root[data-theme="dark"] .compose-icon:hover { color: var(--ink); }
 }

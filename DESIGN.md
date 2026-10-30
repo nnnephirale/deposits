@@ -40,6 +40,20 @@ changing the background meant hunting them down.
 arrow buttons and the compose bar all use it or a slightly deeper variant. Nothing has a
 hard border.
 
+**Dark mode** (31 Oct 2026). Settings → appearance: system / light / dark, stored under
+`weekly-deposits-theme`; "system" follows `prefers-color-scheme` live and re-checks on
+`visibilitychange`. `data-theme` on `<html>` is always resolved to `light` or `dark`, first by
+the inline script in `<head>` (so a dark open never flashes the light canvas), then by
+`applyTheme()`. All dark CSS is one block at the end of `styles.css`; the light rules above it
+are untouched apart from `--on-ink` (what sits on an ink fill: `#fff`, near-black in dark).
+Same structure as light: canvas `#0E0E0F` deepest, cards `#1B1B1D` one step up, fields
+`#252528`; on desktop the wash stays darkest outward. Floating things get a faint white ring,
+since shadows vanish on a dark ground. Topic pills don't store a dark set: `tone(t)` derives
+one from the hue at render (deep tinted fill L 0.315, light label L 0.85), so the taxonomy
+that syncs stays one set of colours. **When adding a rule with a literal colour**, add its
+dark twin to that block, and guard it (`:not(.on)` etc.) if a state variant recolours it,
+because `:root[data-theme="dark"] .x` outranks `.x.on`.
+
 ---
 
 ## 2. The layout as built (mobile — desktop is §5)
