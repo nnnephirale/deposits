@@ -289,7 +289,7 @@ export async function startMonthRecap(year, month) {
 }
 
 // month view: nothing but the "still reading…" line while one is being written. The control
-// itself moved out to the chevron under the period — see syncWrappedCue.
+// itself moved out to the chevron under the period — see syncWrappedCue in bloom.js.
 export function monthRecapBlock(list) {
   const k = monthKey(S.mo.year, S.mo.month);
   if (recapInFlight.has(k)) {

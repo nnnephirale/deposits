@@ -315,7 +315,7 @@ export async function pushEntriesNow(retrying) {
     };
     // Only once she has edited it on THIS device. Sending the untouched defaults would give a
     // device that has never been near Settings a say in the taxonomy, and its say would be
-    // "everything back to the seed" — see taxonomyUpdatedAt.
+    // "everything back to the seed" — see taxonomyUpdatedAt in taxonomy.js.
     if (taxonomyUpdatedAt) state.taxonomy = taxonomyDoc();
     const res = await pushState(state, cloudEtag || undefined);
     if (res.conflict) {

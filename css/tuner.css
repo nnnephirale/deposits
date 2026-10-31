@@ -1,5 +1,5 @@
   /* ---- the gradient tuner (TEMPORARY) ---- */
-  /* Scratch UI for dialling in the composer's fade — see the FADE_SPECS block in index.html.
+  /* Scratch UI for dialling in the composer's fade — see the FADE_SPECS block in js/tuner.js.
      Goes out with it once the numbers are settled.
      z-index above the format pill (55) because it has to be usable while the composer is open
      with the keyboard up, which is the only state where the thing it tunes is on screen.

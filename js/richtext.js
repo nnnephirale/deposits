@@ -282,7 +282,7 @@ export function renderRichBlocks(text, images, onResize, onCheck) {
         const idx = li; // captured per row so the right line toggles
         box.classList.add("live");
         box.addEventListener("click", ev => { ev.stopPropagation(); onCheck(idx, on ? " " : "x"); });
-        // long-press the circle for the day strip — see attachMarkPress
+        // long-press the circle for the day strip — see attachMarkPress in widgets.js
         attachMarkPress(box, mark => onCheck(idx, mark), check[1]);
       }
       row.appendChild(box);

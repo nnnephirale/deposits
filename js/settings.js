@@ -206,7 +206,7 @@ export function openSettings() {
       sheet.appendChild(linkBtn);
       sheet.appendChild(el("p", { class: "settings-note", style: { margin: "2px 0 0" } },
         "the link contains your key — treat it like a password, and it only needs to travel once."));
-      // Same link, aimed at this device rather than another one — see keepConnectedRow.
+      // Same link, aimed at this device rather than another one — see keepConnectedRow in sync-ui.js.
       sheet.appendChild(keepConnectedRow());
       sheet.appendChild(el("button", { class: "lock-btn", style: { marginTop: "10px" }, onclick: () => {
         setCloudConfig(null); build();   // local entries are untouched; only the link goes

@@ -80,7 +80,7 @@ applyUnfoldSpeed();
 // ---------- appearance ----------
 // "system" follows the OS live; light and dark pin it. The <head> script has already written
 // data-theme before first paint — this keeps it current and redraws, because topic pills carry
-// their colours inline (see tone()) and have to be rebuilt to change them.
+// their colours inline (see tone() in taxonomy.js) and have to be rebuilt to change them.
 const THEME_KEY = "weekly-deposits-theme";
 export const THEME_MODES = ["system", "light", "dark"];
 export let themeMode = "system";

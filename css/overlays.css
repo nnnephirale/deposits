@@ -1,0 +1,133 @@
+  /* read-more reading modal — a centred float: dark blurred backdrop, white card.
+     Also the ⋮ menu's backdrop, which holds a search field — so it needs the visual-viewport
+     anchoring for the same reason .overlay does, or the keyboard drags the menu off the top. */
+  .read-back {
+    position: fixed; left: 0; right: 0; z-index: 88;
+    /* to the screen bottom so the frost covers the keyboard's region too (iOS paints its
+       accessory bar there), with the band as padding so `align-items: center` still centres
+       the card in the part she can actually see rather than behind the keyboard */
+    top: var(--vvt); bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    /* the page paints under the status bar now, so every full-screen overlay has to
+       keep its own content out from under the clock itself */
+    padding: calc(env(safe-area-inset-top) + 22px) 22px
+             calc(env(safe-area-inset-bottom) + 22px + var(--kb) + var(--kbr));
+    background: rgba(0,0,0,0.4);
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+    opacity: 0; transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .read-back.show { opacity: 1; }
+  .read-modal {
+    position: relative; width: 100%; max-width: 560px; max-height: 82vh; overflow: auto;
+    background: var(--card); border-radius: 20px; padding: 26px 24px 24px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.28), 0 8px 24px rgba(0,0,0,0.12);
+    transform: translateY(8px) scale(0.99); transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .read-back.show .read-modal { transform: none; }
+  .read-x {
+    position: absolute; top: 12px; right: 14px;
+    background: none; border: none; font-size: 22px; line-height: 1;
+    color: var(--subtle); cursor: pointer; padding: 4px;
+  }
+  .read-body { font-size: 15px; line-height: 1.55; white-space: pre-wrap; color: var(--ink); }
+  .read-body .rt-img { cursor: zoom-in; }
+
+  /* the menu: a centred floating modal. search sits at the top; typing turns the body below
+     it into results, and with the field empty it's the settings list instead. */
+  .menu-modal {
+    position: relative; width: 100%; max-width: 460px;
+    max-height: 78vh; display: flex; flex-direction: column; overflow: hidden;
+    background: var(--card); border-radius: 22px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.28), 0 8px 24px rgba(0,0,0,0.12);
+    transform: translateY(8px) scale(0.99); transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .read-back.show .menu-modal { transform: none; }
+  .menu-search {
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 16px 18px; border-bottom: 1px solid var(--hairline);
+  }
+  .menu-search svg { flex: none; width: 17px; height: 17px; color: #B0B0B5; }
+  .menu-search input {
+    flex: 1; min-width: 0; border: none; outline: none; background: none;
+    font-family: var(--font); font-size: 16px; color: var(--ink);
+  }
+  .menu-search input::placeholder { color: #B4B4B9; }
+  .menu-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px; }
+  .menu-row {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 13px 14px; border-radius: 14px;
+    background: none; border: none; text-align: left;
+    font-family: var(--font); font-size: 15px; color: var(--ink);
+  }
+  .menu-row:active { background: var(--field); }
+  .menu-row .mr-label { flex: 1; min-width: 0; }
+  .menu-row .mr-state { font-family: var(--mono); font-size: 11px; letter-spacing: 0.5px;
+    text-transform: uppercase; color: var(--subtle); }
+  .menu-row.on .mr-state { color: var(--ink); font-weight: 700; }
+  .menu-row svg { flex: none; width: 18px; height: 18px; color: #8A8A90; }
+  .menu-count { font-family: var(--mono); font-size: 11px; letter-spacing: 0.5px;
+    text-transform: uppercase; color: var(--subtle); padding: 8px 14px 4px; margin: 0; }
+  .menu-body .group-card { box-shadow: none; border-radius: 16px; background: var(--field); }
+
+  /* full-screen image preview — frosted, blurred backdrop with an optional size rail.
+     No text field of its own, but it can be opened from the composer with the keyboard already
+     up, so it takes the same visual-viewport anchoring rather than trusting 100dvh. */
+  .img-preview-back {
+    position: fixed; left: 0; right: 0; z-index: 90;
+    top: var(--vvt); bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: calc(env(safe-area-inset-top) + 20px) 20px
+             calc(env(safe-area-inset-bottom) + 20px + var(--kb) + var(--kbr));
+    background: rgba(28,28,30,0.34);
+    -webkit-backdrop-filter: blur(18px) saturate(1.1); backdrop-filter: blur(18px) saturate(1.1);
+    opacity: 0; transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .img-preview-back.show { opacity: 1; }
+  /* stage fills the backdrop, so the photo is measured against the room actually there —
+     88vh guessed, and a long screenshot spent the guess plus the size rail's share of it */
+  .img-preview-stage {
+    display: flex; align-items: center; justify-content: center; gap: 16px;
+    width: 100%; height: 100%; min-width: 0; min-height: 0;
+    transform: scale(0.985); transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .img-preview-back.show .img-preview-stage { transform: none; }
+  /* side-by-side: the photo is a direct flex item so it stays hugging the rail (a wrapper
+     box would reserve its untrimmed width and push the rail away). mobile stacks — below */
+  .img-preview-frame { display: contents; }
+  .img-preview-img {
+    flex: 0 1 auto; min-width: 0;
+    max-width: min(100%, 900px); max-height: 100%;
+    border-radius: 18px; box-shadow: 0 24px 70px rgba(0,0,0,0.4);
+    object-fit: contain;
+  }
+  .img-size-rail {
+    flex: none;
+    display: flex; flex-direction: column; gap: 6px;
+    background: rgba(255,255,255,0.9);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    padding: 12px 10px; border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.18);
+  }
+  .img-size-title {
+    font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+    color: var(--subtle); text-align: center; margin-bottom: 2px;
+  }
+  .img-size-btn {
+    border: none; background: var(--field); color: var(--ink);
+    font-size: 13px; font-family: var(--font);
+    padding: 8px 14px; border-radius: 10px; cursor: pointer;
+    transition: background 0.16s ease, transform 0.12s ease;
+  }
+  .img-size-btn:active { transform: scale(0.96); }
+  .img-size-btn.active { background: var(--ink); color: var(--on-ink); }
+  @media (max-width: 560px) {
+    .img-preview-stage { flex-direction: column; gap: 12px; }
+    /* stacked: the rail claims its row first and the photo shrinks into whatever height is
+       left, so the size buttons are always reachable however long the screenshot is */
+    .img-preview-frame {
+      display: flex; flex: 0 1 auto; min-height: 0; min-width: 0;
+      align-items: center; justify-content: center;
+    }
+    .img-size-rail { flex-direction: row; padding: 8px; }
+    .img-size-title { display: none; }
+  }
