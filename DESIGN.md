@@ -1,8 +1,71 @@
 # Deposits — design notes
 
 State of the interface as of 30 Jul 2026, written for a future session (desktop upgrade in
-particular). Everything here is *as built*, not aspirational. The app is one file,
-`index.html`; there is no build step.
+particular). Everything here is *as built*, not aspirational. No build step; §0 maps the files.
+
+---
+
+## 0. Where the code lives (31 Oct 2026)
+
+`index.html` is the page's markup only. It loads the CSS files, a tiny inline script that sets
+`data-theme` before first paint, and `js/main.js`. Still no build step: plain ES modules and
+plain stylesheets, served as they are.
+
+**CSS** (`css/`), loaded in this order: base · bloom · tuner · settings · list · richtext · format-bar · summary · composer · recap · desktop · dark. These files are the old `styles.css` cut at
+top-level boundaries, so **load order is the cascade**. A rule that wins over another of equal
+specificity has to stay in a later file. `desktop.css` (≥1080px) and `dark.css` depend on this.
+
+**JS** (`js/`). `store.js` (IndexedDB) and `sync.js` (the Worker transport) were already
+separate files. The rest was one inline module, cut by section into:
+
+| file | what's in it |
+|---|---|
+| `main.js` | Entry point: hide-on-scroll header, wiring, desktop shortcuts and boot |
+| `state.js` | Shared state that more than one module reassigns |
+| `dom.js` | Small DOM helpers: el(), the confirm dialog, the status-bar probe, and where sheets mount |
+| `dates.js` | ISO weeks, months and the date labels built from them |
+| `taxonomy.js` | Topics and modes: the seed, her edits to it, and the colours each topic is drawn in (tone() gives the dark-mode set) |
+| `prefs.js` | Preferences: layout, order, composer unfold speed, appearance (system / light / dark) |
+| `save.js` | Saving entries, and the alert that stays up when a save fails |
+| `sync-ui.js` | Cloud sync as the app sees it: tombstones, push and pull, the health dot, staying connected |
+| `anthropic.js` | Talking to Claude: the API key, short entry summaries, and cutting a ramble into deposits |
+| `richtext.js` | The inline marker dialect (bold, links, redaction, checklists, photos…): parsed while editing, rendered into cards |
+| `widgets.js` | Pieces that live inside an entry card: the day-strip mark picker, photo galleries and the full-screen image preview |
+| `grouping.js` | Grouping entries for the list, and the markdown export |
+| `render.js` | The main render: period header, the list, keeping your place across a re-render, pinch to zoom the list |
+| `entries.js` | Entry cards: an entry and its groups, the swipe-open action rail and the read-more modal |
+| `rails.js` | Desktop rails (>=1080px): the icon rail, the topics rail and its search, the rail calendar, and crossing the breakpoint |
+| `week-summary.js` | The weekly AI summary: its stored readings and the block at the top of a week |
+| `composer.js` | The composer (openComposer) and the ramble view |
+| `viewport.js` | What a phone composer measures against: the visual viewport, the caret's position, the keyboard's remembered height, page-scroll lock, the sheet's saved height |
+| `calendar.js` | The calendar picker |
+| `tuner.js` | TEMPORARY: the gradient tuner for the composer's fade |
+| `recap.js` | The monthly recap: the takes, the title, the story deck and the reveal |
+| `week-reveal.js` | The weekly reveal: the monthly recap's lighter sibling |
+| `bloom.js` | The wrapped cue: the chevron under the period, the heat bloom it opens, and the status-bar tint while it's open |
+| `search.js` | Search |
+| `menu.js` | The menu behind the compose bar's lozenge |
+| `settings.js` | The Settings sheet |
+| `compose-bar.js` | The compose bar: tap for a new entry, long-press to swap to export |
+
+**Shared state.** An imported binding is read-only, so the 15 values that more than one file
+*reassigns* live on one object, `S` in `state.js`: `S.entries`, `S.view`, `S.wk`, `S.mo`,
+`S.compactView`, `S.apiKey`, `S.RETIRED`, `S.showWeekSummary`, `S.deskTopic`,
+`S.deskScopeOpen`, `S.storageRisk`, `S.onPhotoProgress`, `S.sheetViewportSync`,
+`S.composerFmtReattach`, `S.titleLongFired`. Each one is still initialised in the module it
+belongs to (`S.apiKey = null` sits in `anthropic.js`). Everything else is a normal export.
+Importers see a reassignment by the owning module; they just can't make one. When a new value
+needs writing from a second file, move it onto `S` rather than adding a setter per value.
+
+**Load order.** Modules import each other in cycles (`render()` is called from everywhere), so
+the browser evaluates them depth-first rather than in the old top-to-bottom order. Calling a
+function across modules at load time is fine, because function declarations are ready before
+any module runs. Reading another module's `const`/`let` at load time is not: if that module
+hasn't run yet, it throws. Top-level code that runs at load should only touch its own module,
+`state.js` and the leaf helpers (`dates`, `dom`). Anything else goes inside a function that
+runs later (a listener, `render`, boot in `main.js`). The one place this already bit:
+`bloom.js` set the status-bar colour at load by asking `prefs.js`, which hadn't run yet; that
+now happens in `applyTheme()`.
 
 ---
 
@@ -44,7 +107,7 @@ hard border.
 `weekly-deposits-theme`; "system" follows `prefers-color-scheme` live and re-checks on
 `visibilitychange`. `data-theme` on `<html>` is always resolved to `light` or `dark`, first by
 the inline script in `<head>` (so a dark open never flashes the light canvas), then by
-`applyTheme()`. All dark CSS is one block at the end of `styles.css`; the light rules above it
+`applyTheme()`. All dark CSS is `css/dark.css`, loaded last; the light rules before it
 are untouched apart from `--on-ink` (what sits on an ink fill: `#fff`, near-black in dark).
 Same structure as light: canvas `#0E0E0F` deepest, cards `#1B1B1D` one step up, fields
 `#252528`; on desktop the wash stays darkest outward. Floating things get a faint white ring,
