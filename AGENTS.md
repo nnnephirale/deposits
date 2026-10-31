@@ -53,6 +53,26 @@ Every JS file opens with a comment saying what's in it.
   first). A synthetic `.click()` in a test won't fire them; use real taps.
 - **Topic colours aren't stored per theme.** Render pills through `tone(t)`, never `t.bg` directly.
 
+## Keep the docs true (every change, same commit)
+
+These two files are only useful while they match the code, so updating them is part of the
+change, not a follow-up. Before committing, look at `git diff --stat`. If `css/` or `js/`
+changed and no `.md` did, decide on purpose whether one should have. A plain bug fix that
+taught nothing new needs no doc change.
+
+| if the change… | update |
+|---|---|
+| adds, moves or renames a file, or moves a feature to a different file | the "Where to change what" table above, and the file's header comment |
+| adds a CSS file | its `<link>` in `index.html` (in cascade order) and the table above |
+| makes another file reassign a module's `let` | move it onto `S`, and add it to the list in DESIGN.md §0 |
+| reveals a trap the next agent will walk into | a line in "Rules that will bite" above |
+| settles a decision, a tuned value, or a call she made | DESIGN.md, in the section for that area, dated; a new topic gets its own *Files:* line |
+| fixes a bug worth remembering | DESIGN.md: what she saw, the real cause, the fix |
+| removes a feature or a rule | delete its row or paragraph; don't leave it to rot |
+
+Say it once: the *where* goes here, the *why* goes in DESIGN.md, and each links to the other
+rather than copying. A code comment that says "see X" names X's file when X lives elsewhere.
+
 ## Checking a change
 
 - Preview: `.claude/launch.json` → `deposits` (http-server on port 4173).

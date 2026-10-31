@@ -1,7 +1,7 @@
 # Deposits — design notes
 
-State of the interface as of 30 Jul 2026, written for a future session (desktop upgrade in
-particular). Everything here is *as built*, not aspirational. No build step; §0 maps the files.
+The interface *as built*, not aspirational, kept current with every change (see "Keep the docs
+true" in [AGENTS.md](AGENTS.md)). Each entry is dated. No build step; §0 maps the files.
 
 **Contents:** §0 where the code lives · §1 tokens (incl. dark mode) · §2 the mobile layout
 (day badges, day view) · §3 interaction rules learned the hard way · §4 signature motion
