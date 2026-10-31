@@ -1,0 +1,210 @@
+  /* ---------- monthly recap: a full-screen reveal, not a sheet ----------
+     the one surface in the app allowed to take a beat. alive background
+     (slow warm blobs + faint grain), text arrives after the card, spectacle
+     reserved for at most two "earned" moments. */
+  .recap {
+    position: fixed; inset: 0; z-index: 70;
+    background: var(--canvas); overflow: hidden;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  /* opened by dragging the chevron: the bloom that drag built stays as the deck's own sky,
+     so there is nothing to cut to. The deck's stock blobs stand down and its opaque canvas
+     goes transparent — .heat is the layer directly beneath (z 60 vs 70). The veil and grain
+     stay, and are what keep the text legible over her more saturated colours. */
+  .recap.on-heat { background: transparent; }
+  .recap.on-heat .recap-blob { display: none; }
+
+  .recap-blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: 0.55; }
+  .recap-blob.b1 { width: 60vmax; height: 60vmax; top: -25vmax; left: -18vmax; background: #EDE4D8; animation: blobDrift1 52s ease-in-out infinite alternate; }
+  .recap-blob.b2 { width: 50vmax; height: 50vmax; bottom: -20vmax; right: -15vmax; background: #DFE7EA; animation: blobDrift2 64s ease-in-out infinite alternate; }
+  .recap-blob.b3 { width: 36vmax; height: 36vmax; top: 30%; left: 55%; background: #EAE0EA; animation: blobDrift3 47s ease-in-out infinite alternate; }
+  @keyframes blobDrift1 { to { transform: translate(9vmax, 7vmax) scale(1.12); } }
+  @keyframes blobDrift2 { to { transform: translate(-8vmax, -6vmax) scale(1.08); } }
+  @keyframes blobDrift3 { to { transform: translate(-10vmax, 5vmax) scale(0.92); } }
+  /* the veil keeps the blobs a whisper; an earned card brightens the whole world instead of animating the text */
+  .recap-veil { position: absolute; inset: 0; background: rgba(242,242,247,0.55); transition: background 2.2s ease; }
+  .recap.lit .recap-veil { background: rgba(250,250,252,0.22); }
+  .recap-grain {
+    position: absolute; inset: 0; opacity: 0.05; pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  }
+  @media (prefers-reduced-motion: reduce) { .recap-blob { animation: none; } .recap-veil { transition: none; } }
+
+  .recap-top {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: calc(env(safe-area-inset-top) + 16px) 20px 0;
+  }
+  .recap-month { font-family: var(--mono); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--subtle); }
+  .recap-dashes { display: flex; gap: 5px; }
+  .recap-dashes span { width: 13px; height: 2px; border-radius: 1px; background: rgba(28,28,30,0.13); transition: background 0.4s ease; }
+  .recap-dashes span.on { background: rgba(28,28,30,0.5); }
+  /* the dashes are also the version picker when a month has more than one reading. The row
+     itself is 2px tall, so the tap target is padding, not the marks. */
+  .recap-dashes.pickable { padding: 10px 8px; margin: -10px -8px; cursor: pointer; }
+  .recap-dashes.pickable.open span { background: rgba(28,28,30,0.5); }
+  /* the list drops from under the dashes, centred on them */
+  .recap-vermenu {
+    position: absolute; z-index: 3;
+    top: calc(env(safe-area-inset-top) + 44px); left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; min-width: 132px;
+    padding: 6px; border-radius: 14px;
+    background: rgba(255,255,255,0.92);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.14);
+  }
+  .recap-verrow {
+    background: none; border: 0; border-radius: 9px; padding: 9px 14px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.6px; text-transform: uppercase;
+    color: var(--subtle); text-align: left; white-space: nowrap; cursor: pointer;
+  }
+  .recap-verrow:hover { background: rgba(0,0,0,0.04); color: var(--ink); }
+  .recap-verrow.on { color: var(--ink); background: rgba(0,0,0,0.05); }
+  .recap-acts { display: flex; align-items: center; gap: 2px; }
+  .recap-x { background: none; border: none; padding: 0 6px; font-size: 22px; font-weight: 300; line-height: 1; color: var(--subtle); }
+  /* "read it again" — quieter than the ×, and it holds still while armed rather than
+     growing, so the word appearing is the whole of the feedback. */
+  .recap-again {
+    background: none; border: none; padding: 0 6px; line-height: 1; color: var(--subtle);
+    font-family: var(--mono); font-size: 17px; font-weight: 300;
+    transition: color 0.2s ease;
+  }
+  .recap-again.armed {
+    font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--ink);
+  }
+
+  /* The stage scrolls when a card is taller than the screen. A long AI summary used to
+     overflow both edges with no way to reach either end — the reading was simply cut off.
+
+     Vertical centring is done with `margin: auto` on the CARD, not `align-items: center` on
+     the stage. That is the whole trick: in a scrolling flex container, `align-items: center`
+     centres an oversized item too, which pushes its top out through the container's start
+     edge where scrolling can never reach it. Auto margins resolve to 0 once the item is
+     bigger than the box, so a short card sits centred and a long one starts at the top and
+     scrolls — which is exactly the behaviour wanted, from one declaration. */
+  .recap-stage {
+    position: absolute; inset: 0; z-index: 1;
+    display: flex; justify-content: center;
+    overflow-y: auto; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: calc(env(safe-area-inset-top) + 84px) 30px calc(env(safe-area-inset-bottom) + 84px);
+    cursor: pointer;
+  }
+  .recap-stage { scrollbar-width: none; }
+  .recap-stage::-webkit-scrollbar { width: 0; height: 0; }
+  .recap-card { max-width: 460px; width: 100%; margin: auto 0; }
+  .recap.scrolled .recap-top::after { opacity: 1; }
+  /* text that scrolls up has to pass UNDER the label/dashes/×, not through them.
+     A masked white wash, not the grey canvas one: over the bloom a grey would read as
+     exactly the band at the top of the screen this app is trying not to have. And it is
+     only there while something is actually scrolling under it — at rest even a soft haze
+     is one more thing across the top of a screen that is supposed to be uninterrupted. */
+  .recap-top::after {
+    content: ""; position: absolute; inset: 0 0 auto; height: calc(env(safe-area-inset-top) + 54px);
+    opacity: 0; transition: opacity 0.2s ease;
+    background: linear-gradient(to bottom, rgba(255,255,255,0.5), rgba(255,255,255,0));
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent);
+    mask-image: linear-gradient(to bottom, black 55%, transparent);
+    pointer-events: none; z-index: -1;
+  }
+  .recap-head {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-size: 32px; line-height: 1.22; color: var(--ink); margin: 0;
+    animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .recap-sub {
+    font-size: 15px; line-height: 1.65; color: #55555A; margin: 18px 0 0;
+    white-space: pre-wrap;
+    animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.55s both;
+  }
+  .recap-meta { margin-top: 26px; animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 1.15s both; }
+  @keyframes recapRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  .recap-card.out { animation: recapSink 0.35s ease forwards; pointer-events: none; position: absolute; max-width: 460px; }
+  @keyframes recapSink { to { opacity: 0; transform: translateY(-10px) scale(0.97); } }
+  @media (prefers-reduced-motion: reduce) {
+    .recap-head, .recap-sub, .recap-meta { animation: none; }
+    .recap-card.out { animation: none; opacity: 0; }
+  }
+  .recap-ev-btn {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+    background: none; border: none; padding: 4px 0; color: #A9A9AD; display: block;
+  }
+  .recap-ev { margin: 10px 0 4px; }
+  .recap-ev p {
+    margin: 0 0 8px; font-size: 13px; line-height: 1.55; color: #6B6B70;
+    padding-left: 12px; border-left: 2px solid rgba(28,28,30,0.10);
+  }
+  .recap-verdicts { display: flex; gap: 8px; margin-top: 16px; }
+  .recap-verdicts button {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+    padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(28,28,30,0.12);
+    background: transparent; color: var(--subtle); transition: all 0.15s ease;
+  }
+  .recap-verdicts button.on { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+  /* dust catching sunlight — reserved for earned cards, never confetti */
+  .recap-dust {
+    position: absolute; width: 3px; height: 3px; border-radius: 50%;
+    background: rgba(28,28,30,0.35); pointer-events: none;
+    animation: dust 1.9s ease-out forwards;
+  }
+  @keyframes dust {
+    from { opacity: 0; }
+    15%  { opacity: 1; }
+    to   { opacity: 0; transform: translate(var(--dx), var(--dy)); }
+  }
+
+  /* ---------- weekly reveal: the monthly recap's lighter sibling ----------
+     a polaroid developing in the hand, not a feature film. reuses the .recap shell
+     with two quieter blobs and a handful of week-only faces. */
+  .recap.week .recap-blob.b3 { display: none; }
+  .recap.week .recap-blob { opacity: 0.42; }
+  .wk-count {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-size: 88px; line-height: 1; color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .wk-count-label {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--subtle); margin-top: 10px;
+  }
+  .wk-days { display: flex; gap: 12px; margin-top: 34px; }
+  .wk-days span {
+    font-family: var(--mono); font-size: 14px; color: rgba(28,28,30,0.14);
+    opacity: 0.55; transition: color 0.55s ease, opacity 0.55s ease;
+  }
+  .wk-days span.on { color: var(--ink); opacity: 1; }
+  .wk-chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; align-items: center; }
+  .wk-chip {
+    font-family: var(--mono); font-size: 13px; border-radius: 999px; padding: 8px 16px;
+    animation: recapRise 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .wk-chip.lead { font-size: 17px; padding: 11px 22px; }
+  /* the keepable still — a quiet frame you'd want to screenshot */
+  .wk-still {
+    border-radius: 20px; padding: 26px 24px;
+    background: rgba(255,255,255,0.55); border: 1px solid rgba(0,0,0,0.04);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.06);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  .wk-still-num {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-size: 40px; line-height: 1; color: var(--ink); margin: 0;
+  }
+  .wk-still-range {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--subtle); margin: 6px 0 0;
+  }
+  .wk-still-stat { font-family: var(--mono); font-size: 12px; color: #55555A; margin: 16px 0 0; }
+  .wk-still-dots { display: flex; gap: 6px; margin-top: 14px; }
+  .wk-still-dots i { width: 9px; height: 9px; border-radius: 50%; display: block; }
+  .wk-still-line {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-size: 19px; line-height: 1.4; color: var(--ink); margin: 16px 0 0;
+  }
+
+  .export-area {
+    width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.5;
+    background: var(--field); border: none; border-radius: 12px; padding: 12px;
+    resize: none;
+  }
+  .export-note { font-size: 13px; color: var(--subtle); margin: 0 0 10px; }

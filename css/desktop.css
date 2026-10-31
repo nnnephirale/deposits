@@ -1,0 +1,445 @@
+  /* ============================================================================
+     DESKTOP — icon rail · mat · topics
+     ----------------------------------------------------------------------------
+     Below the breakpoint .deck and .deck-main are `display: contents`: they leave
+     the box tree entirely, so .wrap / .bottom-frost / .compose-dock lay out as the
+     body children they used to be. Nothing above this block is touched.
+
+     There is no window frame. The deck is a bare transparent grid; the one painted
+     surface is the centre MAT, a rounded card floating on the canvas wash. Both
+     rails sit directly on that wash and paint nothing of their own.
+
+     Three greys, darkest outward: the wash the rails sit on, then the mat, then the
+     white cards on top of it. On the phone the cards are white on grey and that
+     reads; a white mat left them invisible, so the mat steps down to --mat and the
+     wash steps down again below it. Every value stays in the --canvas family —
+     lightness only, no hue introduced, and no text colour that mobile doesn't have.
+     ============================================================================ */
+  .deck, .deck-main { display: contents; }
+  .rail { display: none; }
+
+  @media (min-width: 1080px) {
+    :root {
+      --rail-i: 64px;    /* icon rail — one 38px glyph plus its gutters, at every state:
+                            the hover label is a pill that overflows it, not a wider rail */
+      --rail-t: 248px;   /* topics rail */
+      --deck-x: 20px;    /* viewport inset */
+      --deck-cap: 1400px;
+      /* no vertical inset: the mat takes the deck's full height and only steps in from the
+         rails. Compared with the 14px it had, floor-to-ceiling is the one that reads as a
+         window — the inset just made the wash above and below look like a missed edge. */
+      --mat-y: 0px; --mat-x: 12px;
+      /* the middle grey. Far enough under #FFF that a card has an edge without the
+         mat itself reading as a tinted panel. The frosts over it are tinted to match.
+         Every value below is its first cut with 20% of its distance from #FFF taken
+         back out — the three steps still read, they just sit closer together. */
+      --mat: #F4F4F5;
+      --mat-a: rgba(244,244,245,0.88);
+      --mat-0: rgba(244,244,245,0);
+    }
+    html, body { height: 100%; overflow: hidden; }
+    /* the wash, one step below the mat everywhere including its own highlights, so the
+       rails always read as the deepest surface no matter which corner you look at */
+    body {
+      background:
+        radial-gradient(115% 85% at 8% -8%,   #EEEEF0 0%, rgba(238,238,240,0) 60%),
+        radial-gradient(95% 75%  at 96% 4%,   #EDEDEE 0%, rgba(237,237,238,0) 55%),
+        radial-gradient(90% 75%  at 84% 108%, #DFDFE2 0%, rgba(223,223,226,0) 64%),
+        radial-gradient(75% 65%  at -4% 96%,  #E3E3E6 0%, rgba(227,227,230,0) 60%),
+        #E9E9EC;
+    }
+
+    /* the scroll affordance is the content moving; a grey bar in each pane is three
+       vertical lines the design doesn't have anywhere else — and the centre one was
+       stealing 15px off the reading column's right, knocking it off axis */
+    .wrap, .rail-scroll { scrollbar-width: none; }
+    .wrap::-webkit-scrollbar, .rail-scroll::-webkit-scrollbar { width: 0; height: 0; }
+
+    .deck {
+      display: grid;
+      grid-template-columns: var(--rail-i) minmax(0, 1fr) var(--rail-t);
+      /* the implicit row defaults to auto = max-content, which any tall rail blows
+         straight past; pin it to the deck's own height so the panes scroll internally */
+      grid-template-rows: minmax(0, 1fr);
+      /* capped and centred rather than edge-to-edge: past the cap the extra width
+         becomes field the mat floats on, instead of white margin growing around a
+         fixed reading column — which is the problem the rails were meant to solve. */
+      position: fixed; inset: var(--deck-x); z-index: 1;
+      max-width: var(--deck-cap); margin: 0 auto;
+      /* NO background, NO shadow, NO overflow clip. The deck is pure layout: the mat
+         carries the elevation, and the icon rail has to be able to expand over it. */
+      transform-origin: center center;
+      transition: transform calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1),
+                  opacity calc(0.62s * var(--unfold-k)) cubic-bezier(0.77, 0.006, 0.078, 1);
+    }
+    /* everything recedes behind the composer together — mat and both rails */
+    body.composing .deck { transform: scale(0.965); opacity: 0.4; }
+    body.composing .wrap { transform: none; opacity: 1; }
+    @media (prefers-reduced-motion: reduce) { .deck { transition: none; } }
+
+    /* ---- the mat: the one painted surface, floating on the wash ---- */
+    .deck-main {
+      display: block; position: relative; min-width: 0; min-height: 0;
+      margin: var(--mat-y) var(--mat-x);
+      background: var(--mat);
+      border-radius: 24px; overflow: hidden;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 6px 18px rgba(0,0,0,0.045),
+                  0 24px 56px rgba(0,0,0,0.05);
+    }
+    /* the scroller. the page itself no longer scrolls, so the frost and the compose
+       bar can be absolute siblings that simply don't move. */
+    .wrap {
+      position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain;
+      max-width: none; margin: 0; padding: 0 24px 176px;
+    }
+    /* the reading column. 600 is the measure; the compose bar below matches it exactly so
+       the bar's edges line up with the cards' — change one, change the other. */
+    .wrap > .header, .wrapped-cue, #entriesRoot { max-width: 600px; margin: 0 auto; }
+    .wrap > .header { padding: 34px 0 44px; }
+    .wrap.has-cue > .header { padding-bottom: 10px; }
+    /* the frost is tinted to the surface it sits on, or it reads as a band: on the phone
+       that's the canvas, here it's the mat */
+    .header, .header::after {
+      background: var(--mat-a);
+      -webkit-backdrop-filter: blur(14px) saturate(150%);
+      backdrop-filter: blur(14px) saturate(150%);
+    }
+    .header.hidden { transform: none; } /* hide-on-scroll is a phone pattern */
+    /* white, like the cards — --field is #F4F4F6 and the mat is #F4F4F5, i.e. the same
+       colour, so anything --field that sits DIRECTLY on the mat disappears into it. The
+       stepper arrows and the week summary's provenance pills are the two that do; every
+       other --field surface lives inside a white card or sheet and is unaffected. */
+    .stepper-btn {
+      background: var(--card);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 2px 6px rgba(0,0,0,0.035);
+    }
+    .wsum-pill:not(.on) { background: var(--card); }
+
+    .bottom-frost, .compose-dock { position: absolute; }
+    /* inside the mat there is nothing behind this worth seeing through — on the phone the
+       0.94 base let the grey canvas glow through, here it just let entries peek out under
+       the compose bar. Same recipe, opaque at the base. */
+    .bottom-frost {
+      height: 172px;
+      background: linear-gradient(to top, var(--mat) 30%, var(--mat-a) 66%, var(--mat-0));
+    }
+    .compose-dock { left: 24px; right: 24px; max-width: 600px; padding: 0 0 22px; }
+    /* the ⋮ menu held search, day view, export and settings — all four now have a visible
+       home in the rails, so the button is a second route to nothing. + is the whole bar. */
+    .compose-lozenge, .compose-divider { display: none; }
+
+    /* ---- rails: no surface of their own, they sit straight on the wash ---- */
+    .rail {
+      display: flex; flex-direction: column; min-width: 0; min-height: 0;
+      background: none;
+    }
+
+    /* ---- left: the icon rail ----
+       A column of glyphs on the wash. On hover (or when tabbed into) the row under the
+       pointer names itself. The bar is ABSOLUTELY positioned so the name is an overlay,
+       never a reflow — anything that widened in the grid would re-wrap every line of
+       every entry as the pointer crossed it. */
+    .rail-l { position: relative; overflow: visible; }
+    /* No panel. The bar is just a column of glyphs on the wash; the row under the pointer
+       names itself with a white pill beside the glyph, and nothing else moves. Opening a
+       whole panel to answer one question meant four blank rows came along for the ride. */
+    .iconbar {
+      position: absolute; left: 0; top: var(--mat-y);
+      width: var(--rail-i); z-index: 5;
+      display: flex; flex-direction: column; gap: 2px;
+      padding: 8px 0;
+      overflow: visible;  /* the hovered label pill extends past the rail, over the mat */
+    }
+    /* the row never changes size or paints anything: it stays exactly the rail's width and
+       lets the label pill overflow it to the right. Nothing reflows, and the pill's shadow
+       isn't clipped the way an overflow:hidden lozenge would clip it. */
+    .ico-row {
+      /* 2px, not a gap: the pill reads as sitting against the circle. It can't be 0 —
+         on an active row the circle is white too, and flush they merge back into the
+         one-piece lozenge this replaced. */
+      flex: none; display: flex; align-items: center; gap: 2px;
+      width: var(--rail-i); padding: 0 13px; height: 42px;
+      background: none; border: none; text-align: left;
+      border-radius: 999px; overflow: visible; white-space: nowrap;
+    }
+    .ico-glyph {
+      position: relative; flex: none;
+      width: 38px; height: 38px; border-radius: 999px;
+      display: flex; align-items: center; justify-content: center; line-height: 0;
+      color: #B0B0B6;
+      transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .ico-glyph svg { width: 18px; height: 18px; }
+    /* the label IS the pill: a white lozenge the height of the glyph's circle, cut to the
+       length of the word. Decoration only — pointer-events off, so the 64px row stays the
+       hit target and the pill never sits over the mat catching clicks meant for a card. */
+    .ico-label {
+      flex: none; white-space: nowrap;
+      height: 38px; padding: 0 15px; border-radius: 999px;
+      display: flex; align-items: center;
+      font-size: 13px; color: var(--subtle);
+      background: var(--card);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.035), 0 4px 14px rgba(0,0,0,0.06);
+      pointer-events: none;
+      /* 4px of travel, not 6: any further and the pill starts at rest *underneath* the
+         circle it sits 2px from, and slides out over its edge */
+      opacity: 0; transform: translateX(-4px);
+      transition: opacity 0.16s ease,
+                  transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @media (prefers-reduced-motion: reduce) { .ico-label { transition: none; transform: none; } }
+    .ico-row.on .ico-glyph {
+      background: var(--card); color: var(--ink);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .ico-row.on .ico-label { color: var(--ink); font-weight: 600; }
+    .ico-div { flex: none; height: 1px; margin: 7px 21px; background: var(--hairline); }
+    /* sync state, on the control that already owns it — one route, state still visible */
+    .ico-dot {
+      position: absolute; top: 6px; right: 6px;
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #CFCFD4; box-shadow: 0 0 0 2px var(--card);
+    }
+    .ico-dot.live { background: #55A862; }
+    /* configured, but the last request didn't land — see syncDotClass */
+    .ico-dot.warn { background: #D08A22; }
+
+    .ico-row:hover .ico-label, .ico-row:focus-visible .ico-label {
+      opacity: 1; transform: none; transition-delay: 0.04s;
+    }
+    /* under the pointer the glyph takes a soft grey circle of its own; an active glyph keeps
+       its white one — there's no white lozenge behind it any more to hide against */
+    .ico-row:hover .ico-glyph, .ico-row:focus-visible .ico-glyph {
+      color: var(--ink); background: rgba(0,0,0,0.05); box-shadow: none;
+    }
+    .ico-row.on:hover .ico-glyph, .ico-row.on:focus-visible .ico-glyph {
+      background: var(--card);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.04);
+    }
+
+    /* ---- right: topics ---- */
+    .rail-r { padding: var(--mat-y) 0 16px; }
+    .rail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
+    /* the room above TOPICS is the point: the search sits at the top edge, and the
+       list starts well down the rail so it reads as its own thing, not a second row */
+    .rail-r .rail-scroll { padding-top: 58px; }
+    .rail-head {
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+      text-transform: uppercase; color: var(--subtle);
+      margin: 0 0 10px; padding: 0 22px;
+    }
+
+    .rail-row {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; text-align: left; background: none; border: none;
+      padding: 7px 22px; font-family: var(--font); font-size: 13px;
+      color: var(--subtle); line-height: 1.3;
+      transition: color 0.15s ease, background 0.15s ease;
+    }
+    .rail-row .rr-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rail-row .rr-count { flex: none; margin-left: auto; font-family: var(--mono); font-size: 11px; color: #C2C2C7; }
+    .rail-row.on { color: var(--ink); font-weight: 600; }
+    .rail-row.on .rr-count { color: var(--ink); }
+    /* the topic pill, truncating rather than pushing the count off the rail */
+    .rail-row > .pill { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* a filter is on: the chosen pill keeps its colour, the rest step back */
+    .rail-scroll:has(.rail-row.on) .rail-row:not(.on) > .pill { opacity: 0.45; }
+    .rail-row > .pill { transition: opacity 0.18s ease; }
+    .rr-mark { flex: none; width: 5px; height: 5px; border-radius: 50%; background: #D4D4D9; }
+
+    /* ---- the rail calendar ---- */
+    /* The composer's picker, living in the rail. It borrows .cal-row / .cal-wk / .cal-dow
+       wholesale so the two calendars are the same object in two places rather than a pair that
+       drift; only what the rail changes is written here — tighter cells, real buttons in place
+       of the popover's spans, and the deposit dot the popover has no room for. */
+    .rail-cal { padding: 0 14px; margin-bottom: 4px; }
+    .rail-cal .cal-head { margin-bottom: 4px; }
+    .rail-cal .cal-title { font-size: 13px; padding: 4px 8px; }
+    .rail-cal .cal-row { padding: 2px 2px; border-radius: 8px; }
+    .rail-cal .cal-row span, .rail-cal .cal-row button { font-size: 11px; }
+    .rail-cal .cal-wk { flex: 0 0 30px; font-size: 10px; padding-left: 2px; }
+    .rail-cal .cal-dow span { font-size: 9px; }
+    /* every cell is a real button now: the week takes you to that week and so does any day in
+       it, so the whole row has to be reachable from a keyboard as well as a pointer */
+    .rail-cal button.cal-wk, .rail-cal .cal-day {
+      background: none; border: none; padding: 3px 0; color: inherit;
+      font-family: var(--mono); border-radius: 6px;
+    }
+    .rail-cal .cal-day { position: relative; flex: 1; text-align: center; color: var(--ink); }
+    .rail-cal button.cal-wk { text-align: left; color: var(--subtle); cursor: pointer; }
+    @media (hover: hover) {
+      .rail-cal .cal-day:hover, .rail-cal button.cal-wk:hover { background: rgba(0,0,0,0.05); color: var(--ink); }
+      .rail-cal .cal-row.wk-row:hover { background: rgba(0,0,0,0.022); }
+    }
+    /* the week the panel is actually showing */
+    .rail-cal .cal-row.wk-row.current { background: var(--field); }
+    .rail-cal .cal-row.wk-row.current button.cal-wk { color: var(--ink); font-weight: 700; }
+    .rail-cal .cal-out { color: #C7C7CC; }
+    .rail-cal .cal-today { color: #FF3B30; font-weight: 700; }
+    /* a day that carries deposits. A dot rather than a number: the rail is a map of where the
+       month has weight, and an exact count at 9px would be read as a date. */
+    .rail-cal .cal-day.has-dep::after {
+      content: ""; position: absolute; left: 50%; bottom: 0;
+      width: 3px; height: 3px; margin-left: -1.5px;
+      border-radius: 50%; background: #C2C2C7;
+    }
+    .rail-cal .cal-day.cal-today.has-dep::after { background: #FF3B30; }
+    /* the topics heading, once the calendar is standing above it */
+    .rail-head-gap { margin-top: 22px; }
+
+    .rail-search {
+      display: flex; align-items: center; gap: 8px;
+      margin: 0 14px; padding: 9px 12px;
+      /* on the wash rather than on a panel, so it needs its own lift to read as a field */
+      background: rgba(255,255,255,0.72); border-radius: 12px;
+      color: var(--subtle);
+      transition: background 0.15s ease;
+    }
+    .rail-search svg { width: 14px; height: 14px; flex: none; }
+    .rail-search input {
+      flex: 1; min-width: 0; border: none; outline: none; background: none;
+      font-family: var(--font); font-size: 13px; color: var(--ink);
+    }
+    /* ghost input: reads as label until she's in it */
+    .rail-search input::placeholder { color: var(--subtle); }
+    .rail-search:focus-within { background: rgba(255,255,255,0.95); }
+    /* the scope flips week → month → all. It names itself in the app's own tokens (W31 / 7月)
+       rather than in words, so it reads as the same object as the header's identity. */
+    .rail-scope {
+      flex: none; font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+      background: rgba(0,0,0,0.055); border: none; border-radius: 999px;
+      padding: 3px 7px; color: var(--subtle); line-height: 1.35;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .rail-scope:active { transform: scale(0.96); }
+    .rail-scope.open { background: var(--ink); color: var(--on-ink); }
+
+    /* the pull-down. grid-template-rows 0fr→1fr is the one way to transition to a content
+       height without measuring it, so TOPICS below is pushed down by the real height of the
+       list rather than by a guessed max-height that would ease at the wrong rate. */
+    .rail-scope-wrap {
+      display: grid; grid-template-rows: 0fr;
+      transition: grid-template-rows 0.42s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .rail-scope-wrap.open { grid-template-rows: 1fr; }
+    .rail-scope-inner { overflow: hidden; min-height: 0; }
+    .rail-scope-list { padding: 6px 14px 0; }
+    .rail-scope-opt {
+      display: flex; align-items: center; gap: 8px;
+      width: 100%; text-align: left; background: none; border: none;
+      padding: 7px 8px; border-radius: 10px;
+      font-family: var(--font); font-size: 13px; color: var(--subtle);
+      /* the rows arrive a beat after the box starts opening, so it reads as unfolding
+         rather than as a block appearing at full strength */
+      opacity: 0; transform: translateY(-4px);
+      transition: opacity 0.28s ease 0.08s, transform 0.28s cubic-bezier(0.16, 1, 0.3, 1) 0.08s,
+                  background 0.15s ease, color 0.15s ease;
+    }
+    .rail-scope-wrap.open .rail-scope-opt { opacity: 1; transform: none; }
+    .rail-scope-opt .so-key {
+      flex: none; font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+      min-width: 34px; color: #C2C2C7;
+    }
+    .rail-scope-opt.on { color: var(--ink); font-weight: 600; }
+    .rail-scope-opt.on .so-key { color: var(--ink); }
+    @media (prefers-reduced-motion: reduce) {
+      .rail-scope-wrap, .rail-scope-opt { transition: none; }
+    }
+    .rail-empty { font-size: 12px; color: #C2C2C7; padding: 2px 22px 0; margin: 0; }
+
+    /* ---- hover, finally: the invisible interface has something to be invisible in ---- */
+    @media (hover: hover) {
+      .rail-row:hover { color: var(--ink); background: rgba(0,0,0,0.028); }
+      .rail-scope:hover { color: var(--ink); background: rgba(0,0,0,0.085); }
+      .rail-scope.open:hover { color: var(--on-ink); background: var(--ink); }
+      .rail-scope-opt:hover { color: var(--ink); background: rgba(0,0,0,0.032); }
+      .entry:hover { background: rgba(0,0,0,0.016); }
+      .stepper-btn:hover { background: #EAEAED; color: var(--ink); }
+      .compose-bar:hover { background: #E4E4E7; }
+      .compose-icon:hover, .compose-lozenge:hover { background: rgba(0,0,0,0.05); }
+      .compose-icon:hover { color: var(--ink); }
+    }
+    .entry { transition: background 0.15s ease; }
+
+    /* ---- composer ----
+       The sheet is a VIEWPORT-level overlay but the compose bar now lives in the mat,
+       which is off-centre (64px rail one side, 248px the other). Pad the overlay by the
+       real gutters so `justify-content: center` lands the sheet on the mat's axis —
+       otherwise the unfold opens lopsided. --deck-x here is the deck's own left edge,
+       which is the inset until the cap kicks in and starts centring it. */
+    .overlay {
+      --gutter: max(var(--deck-x), (100vw - var(--deck-cap)) / 2);
+      padding-left: calc(var(--gutter) + var(--rail-i));
+      padding-right: calc(var(--gutter) + var(--rail-t));
+      padding-bottom: calc(var(--deck-x) + var(--mat-y));
+    }
+    /* wider than the 600px compose bar ON PURPOSE. The unfold clips the sheet to the bar's
+       measured rect, and inset() can't go negative — a bar wider than the sheet clamps
+       --ml/--mr to 0 and the box only opens vertically. 680 leaves 40px of travel a side. */
+    .sheet { border-radius: 20px; max-width: 680px; }
+    .sheet.expanse {
+      /* top and bottom both land on the mat's edges. --sheet-ceil is redefined rather than just
+         max-height, so the 85% default is 85% of THIS ceiling — otherwise the desktop deck would
+         size itself off the phone's safe-area formula and land somewhere arbitrary. Desktop had
+         the same no-headroom problem in miniature: 828px default against an 860px cap. */
+      --sheet-ceil: calc(100dvh - (var(--deck-x) + var(--mat-y)) * 2);
+      max-height: var(--sheet-ceil);
+      clip-path: inset(0 round 20px);
+    }
+    /* No keyboard-docked pill on desktop: there is no soft keyboard to dock to (SOFT_KB gates
+       --kb/--kbr off entirely, so they are permanently 0), and the composer here is a centred
+       window rather than a phone sheet. Straight back to the in-flow row it has always been —
+       the pill's own chrome is unwound too, so the buttons get their grey chips back instead of
+       floating on a white capsule that would now be sitting on white. The bar is also RE-HOMED
+       in the DOM at this breakpoint (see attachFmtBar): in-flow means it has to be inside the
+       sheet, not parked in sheetRoot. */
+    .fmt-bar {
+      position: static; z-index: auto; bottom: auto;
+      padding: 0; pointer-events: auto; transition: none;
+      margin: 2px 0 6px;
+    }
+    .fmt-bar-pill {
+      background: none; box-shadow: none; border: none; border-radius: 0;
+      padding: 0; gap: 8px; width: 100%; overflow: visible;
+      position: relative; /* keep it the popover's containing block here too — see .line-pop */
+    }
+    .fmt-btn { flex: 1; width: auto; height: 31px; background: var(--field); border-radius: 999px; }
+    /* and the popover goes back to opening DOWNWARD here. Up is right on the phone, where the row
+       is docked to the keyboard at the bottom of the screen; on desktop the same row sits directly
+       under the head at the TOP of the composer, so opening up would run it off the top edge. */
+    .line-pop { top: calc(100% + 8px); bottom: auto; animation-name: lpDrop; }
+    /* and no clearance to reserve, since nothing is floating over the content any more */
+    .sheet.expanse.has-fmt { padding-bottom: calc(env(safe-area-inset-bottom) + 28px + var(--kb) + var(--kbr)); }
+    .sheet { scrollbar-width: none; }
+    .sheet::-webkit-scrollbar { width: 0; height: 0; }
+    .sheet.expanse.folded { clip-path: inset(var(--mt) var(--mr) var(--mb) var(--ml) round 18px); }
+    .sheet.expanse textarea.ta-entry { min-height: calc(var(--sheet-h, var(--sheet-default)) - 250px); }
+  }
+
+  /* between the phone column and the three-pane window, just let the column breathe */
+  @media (min-width: 700px) and (max-width: 1079px) {
+    .wrap { max-width: 600px; }
+    .compose-dock { max-width: 600px; }
+  }
+
+/* ---------- the save alert ----------
+   A failed write used to be silent: the entry stayed on screen, looked saved, and was gone
+   at the next reload. This is deliberately not a toast — it does not time out, because the
+   thing it is reporting does not resolve on its own. */
+.save-alert {
+  position: fixed; left: 12px; right: 12px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+  z-index: 9000;
+  display: none; flex-direction: column; gap: 3px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #B3261E; color: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.18);
+  font-size: 13px; line-height: 1.35;
+}
+.save-alert.show { display: flex; }
+.save-alert strong { font-size: 13px; font-weight: 600; }
+.save-alert span { opacity: .92; }
+@media (min-width: 1080px) {
+  .save-alert { left: auto; right: 24px; bottom: 24px; max-width: 340px; }
+}

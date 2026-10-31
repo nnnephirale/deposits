@@ -1,12 +1,55 @@
 # Deposits — design notes
 
-State of the interface as of 30 Jul 2026, written for a future session (desktop upgrade in
-particular). Everything here is *as built*, not aspirational. The app is one file,
-`index.html`; there is no build step.
+The interface *as built*, not aspirational, kept current with every change (see "Keep the docs
+true" in [AGENTS.md](AGENTS.md)). Each entry is dated. No build step; §0 maps the files.
+
+**Contents:** §0 where the code lives · §1 tokens (incl. dark mode) · §2 the mobile layout
+(day badges, day view) · §3 interaction rules learned the hard way · §4 signature motion
+(bloom, status bar, composer unfold, keyboard) · §5 desktop · §6 verification habits.
+
+---
+
+## 0. Where the code lives (31 Oct 2026)
+
+`index.html` is the page's markup only. It loads the CSS files, a tiny inline script that sets
+`data-theme` before first paint, and `js/main.js`. Still no build step: plain ES modules and
+plain stylesheets, served as they are.
+
+**Which file holds what:** the table in [AGENTS.md](AGENTS.md) ("Where to change what"), which
+agents load automatically. Each JS file also opens with a comment saying what's in it. Each
+section below starts with a *Files:* line.
+
+**CSS** (`css/`) is the old `styles.css` cut at top-level boundaries, plus `overlays.css` lifted
+out of `richtext.css`. **Load order is the cascade**: a rule that wins over another of equal
+specificity has to stay in a later file. `desktop.css` (≥1080px) and `dark.css` depend on this.
+
+**JS** (`js/`): `store.js` (IndexedDB) and `sync.js` (Worker transport) were always separate. The
+rest is the old inline module cut by section into 26 files plus `main.js`.
+
+**Shared state.** An imported binding is read-only, so the 15 values that more than one file
+*reassigns* live on one object, `S` in `state.js`: `S.entries`, `S.view`, `S.wk`, `S.mo`,
+`S.compactView`, `S.apiKey`, `S.RETIRED`, `S.showWeekSummary`, `S.deskTopic`,
+`S.deskScopeOpen`, `S.storageRisk`, `S.onPhotoProgress`, `S.sheetViewportSync`,
+`S.composerFmtReattach`, `S.titleLongFired`. Each one is still initialised in the module it
+belongs to (`S.apiKey = null` sits in `anthropic.js`). Everything else is a normal export.
+Importers see a reassignment by the owning module; they just can't make one. When a new value
+needs writing from a second file, move it onto `S` rather than adding a setter per value.
+
+**Load order.** Modules import each other in cycles (`render()` is called from everywhere), so
+the browser evaluates them depth-first rather than in the old top-to-bottom order. Calling a
+function across modules at load time is fine, because function declarations are ready before
+any module runs. Reading another module's `const`/`let` at load time is not: if that module
+hasn't run yet, it throws. Top-level code that runs at load should only touch its own module,
+`state.js` and the leaf helpers (`dates`, `dom`). Anything else goes inside a function that
+runs later (a listener, `render`, boot in `main.js`). The one place this already bit:
+`bloom.js` set the status-bar colour at load by asking `prefs.js`, which hadn't run yet; that
+now happens in `applyTheme()`.
 
 ---
 
 ## 1. Tokens
+
+*Files: `css/base.css` · `css/desktop.css` · `css/dark.css` · `js/prefs.js` · `js/taxonomy.js`*
 
 ```
 --canvas   #F0F0F1   light neutral grey — the page. NOT warm; a warm cream was tried and rejected.
@@ -44,7 +87,7 @@ hard border.
 `weekly-deposits-theme`; "system" follows `prefers-color-scheme` live and re-checks on
 `visibilitychange`. `data-theme` on `<html>` is always resolved to `light` or `dark`, first by
 the inline script in `<head>` (so a dark open never flashes the light canvas), then by
-`applyTheme()`. All dark CSS is one block at the end of `styles.css`; the light rules above it
+`applyTheme()`. All dark CSS is `css/dark.css`, loaded last; the light rules before it
 are untouched apart from `--on-ink` (what sits on an ink fill: `#fff`, near-black in dark).
 Same structure as light: canvas `#0E0E0F` deepest, cards `#1B1B1D` one step up, fields
 `#252528`; on desktop the wash stays darkest outward. Floating things get a faint white ring,
@@ -57,6 +100,8 @@ because `:root[data-theme="dark"] .x` outranks `.x.on`.
 ---
 
 ## 2. The layout as built (mobile — desktop is §5)
+
+*Files: `css/base.css` · `css/list.css` · `css/summary.css` · `js/render.js` · `js/entries.js`*
 
 ```
 ┌─────────────────────────────┐
@@ -80,6 +125,8 @@ week/month segmented control — the title was spending the best real estate on 
 already knows. Tap the *other* token to switch view; tap the one you're already in to open
 the picker. That puts all period navigation on plain taps.
 
+*Files: `css/list.css` · `js/render.js`*
+
 **A green dot marks the live week** (31 Jul 2026), on the date range under the stepper and
 nowhere else — `W31` reads identically whichever week you've stepped to, so the dates are the
 only thing on screen that can say "you're in this one". Green `#55A862` with a 2px white ring,
@@ -92,13 +139,19 @@ empty flex item pushes it *below* the text and stretches the row to 16.8px, beca
 flex item has no baseline of its own and the synthesised one is its bottom edge. Use
 `align-self: flex-start`. Re-measure if `.wk-range` ever leaves 13px.
 
+*Files: `css/composer.css` · `js/compose-bar.js` · `js/composer.js`*
+
 **The compose bar is not a dock.** It's a resting text field. Tapping it unfolds the
 composer *out of that same rectangle* (see §4). `+` opens the composer too; `⋮` opens the
 menu, fenced off by a hairline so it doesn't read as part of the typing affordance.
 
+*Files: `css/overlays.css` · `js/menu.js`*
+
 **The menu (`⋮`)** is a centred floating modal holding what used to crowd the header:
 a search field at the top — typing morphs the body below into matching entries — and
 otherwise the settings list (Day view toggle, Export markdown, Settings).
+
+*Files: `js/prefs.js` · `js/rails.js`*
 
 **Layouts:** only two. The default topic grouping, and a "Day view" toggle. `mix` and
 `dense` were experiments and are gone; "nothing selected" is a real, reachable state. **Day view
@@ -120,6 +173,8 @@ negated one. Same for weeks: descending uses `weekSortKey` (−1), ascending nee
 (999), or month-scoped entries jump to the top of month view.
 
 ### The day says itself once (30 Jul 2026)
+
+*Files: `css/list.css` · `js/entries.js`*
 
 A run of entries on the same day used to stamp the same badge on every one of them. Now the
 run states the day once and the gutter thread carries it:
@@ -164,6 +219,8 @@ construction rather than by eye. Three details that matter:
 
 ### Day view (30 Jul 2026)
 
+*Files: `css/summary.css` · `js/entries.js` · `js/prefs.js`*
+
 Day buckets have **no heading**. The day was being said twice — mono black text in the
 heading and the grey badge in every entry's gutter — and the badge won: it's the same object
 topic view uses, and it's the one that can sit centred on the first line beside the topic
@@ -189,6 +246,8 @@ or line-height and `--line-box` is the one number to update.
 ---
 
 ## 3. Interaction rules learned the hard way
+
+*Files: everywhere. Most of the examples are in `js/composer.js`, `js/viewport.js` and `css/composer.css`.*
 
 These cost real debugging. Don't re-derive them.
 
@@ -319,6 +378,8 @@ under the day/week/Save row.
 
 ## 4. Signature motion
 
+*Files: `css/bloom.css` · `css/recap.css` · `js/bloom.js` · `js/recap.js`*
+
 **The heat bloom — the door to the wrapped** (30 Jul 2026). One small `v` under the period,
 dragged down. It replaced two magic wands (`weekSummaryBlock` and `monthRecapBlock`) that were
 absolutely positioned over the *first entry card's* top-right corner, where they read as a
@@ -357,6 +418,8 @@ its own stock blobs off — and the bloom stays for the deck's whole life, retre
 she closes it. A deck opened any other way (the auto-reveal when a summary lands) never gets
 that class and keeps its stock background.
 
+*Files: `index.html` · `js/bloom.js` · `js/prefs.js`*
+
 **The status bar: `black-translucent`, and the clock goes white** (30 Jul 2026). Installed to
 the home screen, `apple-mobile-web-app-status-bar-style` has exactly one value that lets the
 page paint under the clock, and that is `black-translucent`. Every other value makes iOS
@@ -390,6 +453,8 @@ there. Simulate it by injecting a stylesheet that substitutes a literal `59px` e
 `env(safe-area-inset-top)` appears, plus a tinted `body::after` strip marking where the real
 status bar would sit — then check nothing lands under it.
 
+*Files: `css/composer.css` · `js/composer.js`*
+
 **The composer unfold.** The sheet is `clip-path`-ed to the compose bar's *measured*
 rectangle — same grey, same 18px rounding — then released, so the box physically opens
 outward while the grey turns white and the content fades in behind it. 0.62s on
@@ -403,6 +468,8 @@ The list behind it recedes in the same gesture:
 `scale(0.93)` + `0.4` opacity from a top origin. That recede required *lightening* the
 backdrop to `rgba(0,0,0,.18)` / `blur(2px)` — at 0.4 opacity it was happening behind
 something too opaque to see through.
+
+*Files: `js/prefs.js` · `js/settings.js`*
 
 **Composer speed is a setting** (31 Jul 2026): four levels in one shared Settings sheet (the
 desktop rail's Settings glyph and the mobile `⋮` → Settings both land in `openSettings`, so the
@@ -426,6 +493,8 @@ that had to move with it:
 - **`620` in `unfoldNote()` is the `k = 1` baseline**, the same number as the CSS `0.62s`. It
   only stays honest because level 1 is still `k = 1`; rescale by editing the CSS base durations
   instead and this constant has to follow, or the sheet misreports its own duration.
+
+*Files: `js/viewport.js` · `js/composer.js` · `css/composer.css` · `css/format-bar.css`*
 
 **The keyboard must not move the composer** (31 Jul 2026). Reported as *"when I tap and the
 keyboard comes in, it pushes the composer all the way up and I can't even see what I type."*
@@ -554,9 +623,13 @@ and caching that would over-reserve next time. The key is versioned (`-v2`) so t
 dropped. Consequence for testing: with `SOFT_KB` false in a desktop preview pane, the reserve
 path can only be exercised on a real device — drive `--kb`/`--kbr` by hand to check the geometry.
 
+*Files: `css/richtext.css` · `js/widgets.js`*
+
 **Pinch a photo run** closed and it fans into a deck (white ring per card so they stay
 distinct); spread it back to a row. State is keyed by the run's markers so it survives the
 re-render that follows an unrelated edit.
+
+*Files: `css/composer.css` · `js/widgets.js`*
 
 **Shimmering placeholder.** `background-clip: text` sweep, 3.6s, on both the compose bar's
 hint and the composer's own. Three things it needs:
@@ -573,6 +646,8 @@ hint and the composer's own. Three things it needs:
 ---
 
 ## 5. Desktop — icon rail · mat · topics (30 Jul 2026)
+
+*Files: `css/desktop.css` · `js/rails.js`*
 
 At `min-width: 1080px` the app becomes an icon rail, a floating mat, and a topics rail.
 Adapted from references she picked, the AI client most of all: a narrow column of glyphs on
@@ -713,6 +788,8 @@ that sits directly on the mat disappears entirely.* Two things do, and both are 
 (the week summary has no card of its own — it sits straight on the mat, and its MINE/V1/V2
 pills went invisible). Every other `--field` surface in the app lives inside a white card or a
 sheet and is unaffected — that's the list to re-check if the mat value ever moves again.
+
+*Files: `js/render.js`*
 
 **A re-render must not lose your place** (31 Jul 2026). Reported as *"when viewing by days,
 deleting or creating new entries causes the screen to jump up back to the top."*

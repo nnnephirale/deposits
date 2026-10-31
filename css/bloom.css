@@ -1,0 +1,71 @@
+  /* ---------- the heat bloom ----------
+     Her topics for this period, blurred into fields and grown from the chevron. Everything
+     is driven by ONE custom property, --p (0 → 1), set from JS each frame: during the drag
+     it tracks the finger, on release it's animated to 0 or 1. No CSS transition on --p —
+     an un-registered custom property can't interpolate anyway, and the scrub needs to be
+     able to reverse mid-flight, which a transition would fight. */
+  .heat {
+    position: fixed; inset: 0; z-index: 60; pointer-events: none;
+    visibility: hidden; --p: 0;
+    /* its own stacking + paint context: the fields multiply against THIS box's wash,
+       not against the entries showing through from underneath */
+    isolation: isolate;
+  }
+  .heat.live { visibility: visible; }
+  /* paper for the ink. It comes in first so the fields always have something to multiply
+     into — over the bare list they'd read as stains on the text. */
+  .heat-wash {
+    position: absolute; inset: 0; background: #FCFCFB;
+    opacity: calc(var(--p) * 1.35);   /* opaque by p≈0.74, before the fields are at full */
+  }
+  /* Each field is a soft radial falloff, NOT a hard disc, and it blends normally.
+     multiply was tried first and it is wrong here: six large fields all overlapping meant
+     every pixel was multiplied five or six times, and the whole top half collapsed into
+     grey-green mud — the opposite of "saturated". Alpha-blending soft-edged fields over a
+     near-white wash keeps each hue readable and lets overlaps average into a new colour
+     instead of darkening toward black. The gradient also removes the need for a big blur. */
+  .heat-field {
+    position: absolute; border-radius: 50%;
+    background: radial-gradient(circle closest-side, var(--c) 0%, color-mix(in oklab, var(--c) 55%, transparent) 46%, transparent 78%);
+    filter: blur(var(--blur, 26px));
+    /* --x/--y are where this field ends up, as a fraction of the viewport; the field starts
+       at the chevron (--ox/--oy) and travels out. Scale from ~0 so it BLOOMS rather than
+       slides in already-formed. */
+    left: 0; top: 0; width: var(--d); height: var(--d);
+    margin-left: calc(var(--d) / -2); margin-top: calc(var(--d) / -2);
+    transform:
+      translate(
+        calc(var(--ox) + (var(--x) - var(--ox)) * var(--p)),
+        calc(var(--oy) + (var(--y) - var(--oy)) * var(--p))
+      )
+      scale(calc(0.04 + 0.96 * var(--p)));
+    opacity: calc(var(--p) * var(--w));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wc-chev { transition: none; }
+  }
+
+  /* search sheet */
+  .sheet.search-sheet {
+    height: 76vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .search-results { flex: 1; overflow-y: auto; min-height: 0; margin-top: 14px; }
+  .search-snippet {
+    margin: 0; font-size: 15px; line-height: 1.5; white-space: normal;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  }
+  .hl { font-weight: 700; }
+  .rt-b.hl-b { text-decoration: underline; text-underline-offset: 2px; } /* match inside already-bold text */
+  .snip-mask { color: #C7C7CC; }
+  .search-input {
+    width: 100%; font-family: var(--font); font-size: 16px;
+    color: var(--ink); border: none; outline: none;
+    background: var(--field); border-radius: 12px; padding: 12px 14px;
+    margin-bottom: 12px;
+  }
+  .search-count {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; color: var(--subtle); margin: 0 0 8px 4px;
+  }
+  .search-hint { font-size: 13px; color: var(--subtle); margin: 8px 4px; }

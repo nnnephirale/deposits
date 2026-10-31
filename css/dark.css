@@ -1,0 +1,212 @@
+/* ===================================================================================
+   DARK MODE (31 Oct 2026)
+   data-theme on <html> is always resolved to "light" or "dark" — set before first paint
+   by the inline script in <head>, then kept current by applyTheme() (Settings: system /
+   light / dark, "system" following prefers-color-scheme live). So nothing here needs a
+   media-query twin. Loaded last; the light rules in the other files are untouched and
+   everything here only re-points them. Same structure as light: the canvas is the deepest surface, cards sit one step
+   lighter on it, fields one more. Greys stay neutral, no hue.
+   =================================================================================== */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #ECECEE;
+  --subtle: #8C8C92;
+  --canvas: #0E0E0F;
+  --canvas-a: rgba(14,14,15,0.82);
+  --canvas-0: rgba(14,14,15,0);
+  --card: #1B1B1D;
+  --card-0: rgba(27,27,29,0);
+  --hairline: rgba(255,255,255,0.07);
+  --field: #252528;
+  --on-ink: #141416;
+  --act-grey: #3A3A3F;
+  --lock-stroke: #55555B;
+}
+/* faint text (dividers, empty days, counts) — dark enough to recede, light enough to find */
+:root[data-theme="dark"] .snip-mask,
+:root[data-theme="dark"] .rt-dot,
+:root[data-theme="dark"] .wsum-add,
+:root[data-theme="dark"] .save:disabled,
+:root[data-theme="dark"] .head-act.act-save:disabled,
+:root[data-theme="dark"] .cal-dow span,
+:root[data-theme="dark"] .cal-out,
+:root[data-theme="dark"] .period-sep,
+:root[data-theme="dark"] .er-del:disabled { color: #48484D; }
+:root[data-theme="dark"] .period-tab:not(.on),
+:root[data-theme="dark"] .stepper-btn,
+:root[data-theme="dark"] .wsum-nokey,
+:root[data-theme="dark"] .wsum-eye { color: #55555B; }
+:root[data-theme="dark"] .wc-chev,
+:root[data-theme="dark"] .wk-range,
+:root[data-theme="dark"] .entry-day,
+:root[data-theme="dark"] .recap-ev-btn,
+:root[data-theme="dark"] .menu-search svg { color: #66666C; }
+:root[data-theme="dark"] .menu-search input::placeholder,
+:root[data-theme="dark"] .sheet.expanse textarea.ta-entry::placeholder { color: #5E5E64; }
+/* mid greys (secondary labels, muted icons) */
+:root[data-theme="dark"] .ft-seg button:not(.on),
+:root[data-theme="dark"] .mp-day:not(.on),
+:root[data-theme="dark"] .line-pop-row .lp-icon,
+:root[data-theme="dark"] .fmt-btn.line-only,
+:root[data-theme="dark"] .chip:not(.mode),
+:root[data-theme="dark"] .speed-cell:not(.on),
+:root[data-theme="dark"] .recap-ev p { color: #A2A2A8; }
+:root[data-theme="dark"] .menu-row svg,
+:root[data-theme="dark"] .compose-icon { color: #8E8E94; }
+:root[data-theme="dark"] .compose-lozenge span { background: #8E8E94; }
+:root[data-theme="dark"] .rt-line.rt-quote,
+:root[data-theme="dark"] .recap-sub,
+:root[data-theme="dark"] .wk-still-stat { color: #B4B4BA; }
+@media (hover: hover) {
+  :root[data-theme="dark"] .wc-chev:hover,
+  :root[data-theme="dark"] .redacted:not(.revealed):hover { color: #A2A2A8; }
+  :root[data-theme="dark"] .mp-day:not(.on):hover,
+  :root[data-theme="dark"] .speed-cell:not(.on):hover,
+  :root[data-theme="dark"] .wsum-ai:hover { background: #2E2E32; }
+  :root[data-theme="dark"] .mp-day:not(.on):hover,
+  :root[data-theme="dark"] .speed-cell:not(.on):hover { color: var(--ink); }
+  :root[data-theme="dark"] .wsum-add:not(.wsum-ai):hover,
+  :root[data-theme="dark"] .wsum-nokey:hover { color: var(--subtle); }
+}
+/* the press-invert keeps its contrast once ink goes light (specificity beats the rest colour) */
+:root[data-theme="dark"] .fmt-btn.line-only:active,
+:root[data-theme="dark"] .fmt-r:active { color: var(--on-ink); }
+:root[data-theme="dark"] .cal-sel { color: var(--on-ink) !important; }
+
+/* flat surfaces */
+:root[data-theme="dark"] .day-badge { background: #2A2A2D; color: #9A9AA0; }
+:root[data-theme="dark"] .er-btn:active { background: #2E2E32; }
+:root[data-theme="dark"] .ft-fill { background: #2E2E32; }
+:root[data-theme="dark"] .compose-bar:not(.copied) { background: #232326; color: #85858B; }
+:root[data-theme="dark"] .compose-bar:not(.copied):active { background: #2A2A2E; }
+:root[data-theme="dark"] .sheet.expanse.folded { background-color: #232326; }
+:root[data-theme="dark"] .compose-divider { background: rgba(255,255,255,0.12); }
+:root[data-theme="dark"] .scope-div { background: rgba(255,255,255,0.14); }
+:root[data-theme="dark"] .compose-icon:active,
+:root[data-theme="dark"] .compose-lozenge:active { background: rgba(255,255,255,0.08); }
+:root[data-theme="dark"] .compose-icon:active { color: var(--ink); }
+:root[data-theme="dark"] .head-act.act-save:not(:disabled):active { background: #4A4A50; }
+:root[data-theme="dark"] .shimmer { background-image: linear-gradient(100deg, #6A6A70 34%, #C8C8CE 50%, #6A6A70 66%); }
+@media (prefers-reduced-motion: reduce) { :root[data-theme="dark"] .shimmer { background-image: none; color: #85858B; } }
+:root[data-theme="dark"] .rt-hr { border-top-color: #333337; }
+:root[data-theme="dark"] .rt-line.rt-quote { border-left-color: #3E3E43; }
+:root[data-theme="dark"] .rt-box,
+:root[data-theme="dark"] .mp-clear { border-color: #55555B; }
+:root[data-theme="dark"] .rt-box.on { border-color: var(--ink); }
+:root[data-theme="dark"] .rt-check.done .rt-body { text-decoration-color: #55555B; }
+
+/* destructive and warning states: muted, never loud */
+:root[data-theme="dark"] .ft-reset,
+:root[data-theme="dark"] .tax-undo,
+:root[data-theme="dark"] .er-del,
+:root[data-theme="dark"] .delete-btn { background: rgba(255,105,97,0.13); color: #FF8A82; }
+:root[data-theme="dark"] .er-del:active { background: rgba(255,105,97,0.2); }
+:root[data-theme="dark"] .er-del:disabled { background: var(--field); }
+@media (hover: hover) { :root[data-theme="dark"] .tax-del:hover { background: rgba(255,105,97,0.13); color: #FF8A82; } }
+:root[data-theme="dark"] .wsum-restore { color: #FF8A82; }
+:root[data-theme="dark"] .settings-note.warn,
+:root[data-theme="dark"] .wsum-text.recap-failed { color: #E2AC55; }
+
+/* floating things: shadows vanish on a dark ground, so each also gets a hairline ring */
+:root[data-theme="dark"] .fade-tuner,
+:root[data-theme="dark"] .recap-vermenu { background: rgba(36,36,39,0.92); border-color: rgba(255,255,255,0.06); box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 12px 34px rgba(0,0,0,0.24); }
+:root[data-theme="dark"] .mark-pop,
+:root[data-theme="dark"] .line-pop,
+:root[data-theme="dark"] .tag-pop,
+:root[data-theme="dark"] .cal-pop,
+:root[data-theme="dark"] .day-strip,
+:root[data-theme="dark"] .confirm-box,
+:root[data-theme="dark"] .read-modal,
+:root[data-theme="dark"] .menu-modal { box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 16px 44px rgba(0,0,0,0.28); border-color: rgba(255,255,255,0.06); }
+/* phone only: on desktop the pill's chrome is unwound into an in-flow row (see desktop.css), and a dark-mode shadow here would outrank that and come back clipped by the sheet */
+@media (max-width: 1079px) {
+  :root[data-theme="dark"] .fmt-bar-pill { border-color: rgba(255,255,255,0.06); box-shadow: 0 2px 8px rgba(0,0,0,0.16), 0 10px 26px rgba(0,0,0,0.2); }
+}
+:root[data-theme="dark"] .sheet { box-shadow: 0 0 0 1px rgba(255,255,255,0.05), 0 -8px 40px rgba(0,0,0,0.24); }
+:root[data-theme="dark"] .group-card { box-shadow: 0 0 0 1px rgba(255,255,255,0.035); }
+:root[data-theme="dark"] .stepper-btn { box-shadow: 0 0 0 1px rgba(255,255,255,0.05); }
+:root[data-theme="dark"] .img-size-rail { background: rgba(36,36,39,0.9); box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 10px 40px rgba(0,0,0,0.24); }
+:root[data-theme="dark"] .rt-gallery.stacked .rt-img { box-shadow: 0 0 0 3px var(--card), 0 6px 16px rgba(0,0,0,0.28); }
+:root[data-theme="dark"] .read-back,
+:root[data-theme="dark"] .overlay,
+:root[data-theme="dark"] .confirm-overlay { background: rgba(0,0,0,0.6); }
+:root[data-theme="dark"] body.composing .overlay { background: rgba(0,0,0,0.35); }
+:root[data-theme="dark"] .img-preview-back { background: rgba(0,0,0,0.6); }
+
+/* fades that used to end in white now end in the card */
+:root[data-theme="dark"] .rt-gal-wrap::before { background: linear-gradient(to left, var(--card-0), rgba(27,27,29,0.5)); }
+:root[data-theme="dark"] .rt-gal-wrap::after { background: linear-gradient(to right, var(--card-0), rgba(27,27,29,0.5)); }
+:root[data-theme="dark"] .bottom-frost { background: linear-gradient(to top, rgba(27,27,29,0.98) var(--lfade-hold, 34%), rgba(27,27,29,0.72) var(--lfade-mid, 66%), rgba(27,27,29,0)); }
+
+/* the bloom and the deck: dark paper, the same topic fields glowing on it */
+:root[data-theme="dark"] .heat-wash { background: #121213; }
+:root[data-theme="dark"] .recap-blob.b1 { background: #3A3024; }
+:root[data-theme="dark"] .recap-blob.b2 { background: #22323A; }
+:root[data-theme="dark"] .recap-blob.b3 { background: #352638; }
+:root[data-theme="dark"] .recap-veil { background: rgba(14,14,15,0.55); }
+:root[data-theme="dark"] .recap.lit .recap-veil { background: rgba(14,14,15,0.25); }
+:root[data-theme="dark"] .recap-top::after { background: linear-gradient(to bottom, rgba(14,14,15,0.5), rgba(14,14,15,0)); }
+:root[data-theme="dark"] .recap-dashes span { background: rgba(236,236,238,0.16); }
+:root[data-theme="dark"] .recap-dashes span.on,
+:root[data-theme="dark"] .recap-dashes.pickable.open span { background: rgba(236,236,238,0.6); }
+:root[data-theme="dark"] .recap-verrow:hover { background: rgba(255,255,255,0.05); }
+:root[data-theme="dark"] .recap-verrow.on { background: rgba(255,255,255,0.07); }
+:root[data-theme="dark"] .recap-ev p { border-left-color: rgba(236,236,238,0.14); }
+:root[data-theme="dark"] .recap-verdicts button { border-color: rgba(236,236,238,0.16); }
+:root[data-theme="dark"] .recap-dust { background: rgba(236,236,238,0.35); }
+:root[data-theme="dark"] .wk-days span { color: rgba(236,236,238,0.16); }
+:root[data-theme="dark"] .wk-still { background: rgba(27,27,29,0.6); border-color: rgba(255,255,255,0.06); box-shadow: 0 12px 40px rgba(0,0,0,0.2); }
+
+/* desktop: wash, mat, cards — still darkest outward */
+@media (min-width: 1080px) {
+  :root[data-theme="dark"] {
+    --mat: #131315;
+    --mat-a: rgba(19,19,21,0.88);
+    --mat-0: rgba(19,19,21,0);
+  }
+  :root[data-theme="dark"] body {
+    background:
+      radial-gradient(115% 85% at 8% -8%,   #0D0D0E 0%, rgba(13,13,14,0) 60%),
+      radial-gradient(95% 75%  at 96% 4%,   #0C0C0D 0%, rgba(12,12,13,0) 55%),
+      radial-gradient(90% 75%  at 84% 108%, #050506 0%, rgba(5,5,6,0) 64%),
+      radial-gradient(75% 65%  at -4% 96%,  #070708 0%, rgba(7,7,8,0) 60%),
+      #09090A;
+  }
+  :root[data-theme="dark"] .deck-main { box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 24px 56px rgba(0,0,0,0.22); }
+  :root[data-theme="dark"] .stepper-btn { box-shadow: 0 0 0 1px rgba(255,255,255,0.05); }
+  :root[data-theme="dark"] .ico-row:not(.on) .ico-glyph { color: #6A6A70; }
+  :root[data-theme="dark"] .ico-label { box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 4px 14px rgba(0,0,0,0.2); }
+  :root[data-theme="dark"] .ico-row.on .ico-glyph,
+  :root[data-theme="dark"] .ico-row.on:hover .ico-glyph,
+  :root[data-theme="dark"] .ico-row.on:focus-visible .ico-glyph { box-shadow: 0 0 0 1px rgba(255,255,255,0.06); }
+  :root[data-theme="dark"] .ico-row:hover .ico-glyph,
+  :root[data-theme="dark"] .ico-row:focus-visible .ico-glyph { background: rgba(255,255,255,0.06); }
+  :root[data-theme="dark"] .ico-dot:not(.live):not(.warn),
+  :root[data-theme="dark"] .rr-mark { background: #3E3E43; }
+  :root[data-theme="dark"] .rail-row:not(.on) .rr-count,
+  :root[data-theme="dark"] .rail-scope-opt:not(.on) .so-key,
+  :root[data-theme="dark"] .rail-empty,
+  :root[data-theme="dark"] .rail-cal .cal-out { color: #55555B; }
+  :root[data-theme="dark"] .rail-cal .cal-day.has-dep::after { background: #55555B; }
+  :root[data-theme="dark"] .rail-search { background: rgba(255,255,255,0.05); }
+  :root[data-theme="dark"] .rail-search:focus-within { background: rgba(255,255,255,0.09); }
+  :root[data-theme="dark"] .rail-scope:not(.open) { background: rgba(255,255,255,0.07); }
+  :root[data-theme="dark"] .rt-gal-nav { background: rgba(36,36,39,0.82); box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 6px 18px rgba(0,0,0,0.2); }
+}
+@media (min-width: 1080px) and (hover: hover) {
+  :root[data-theme="dark"] .rail-cal .cal-day:hover,
+  :root[data-theme="dark"] .rail-cal button.cal-wk:hover { background: rgba(255,255,255,0.07); }
+  :root[data-theme="dark"] .rail-cal .cal-row.wk-row:hover { background: rgba(255,255,255,0.03); }
+  :root[data-theme="dark"] .rail-row:hover { background: rgba(255,255,255,0.04); }
+  :root[data-theme="dark"] .rail-scope:not(.open):hover { background: rgba(255,255,255,0.11); }
+  :root[data-theme="dark"] .rail-scope.open:hover { background: var(--ink); }
+  :root[data-theme="dark"] .rail-scope-opt:hover { background: rgba(255,255,255,0.045); }
+  :root[data-theme="dark"] .entry:hover { background: rgba(255,255,255,0.02); }
+  :root[data-theme="dark"] .stepper-btn:hover { background: #26262A; color: var(--ink); }
+  :root[data-theme="dark"] .ico-row:not(.on):hover .ico-glyph,
+  :root[data-theme="dark"] .ico-row:not(.on):focus-visible .ico-glyph { color: var(--ink); }
+  :root[data-theme="dark"] .compose-bar:not(.copied):hover { background: #2A2A2E; }
+  :root[data-theme="dark"] .compose-icon:hover,
+  :root[data-theme="dark"] .compose-lozenge:hover { background: rgba(255,255,255,0.07); }
+  :root[data-theme="dark"] .compose-icon:hover { color: var(--ink); }
+}

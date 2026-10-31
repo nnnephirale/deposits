@@ -1,0 +1,130 @@
+  :root {
+    --ink: #1C1C1E;
+    --subtle: #8A8A8E;
+    /* light neutral grey canvas, pure white blocks floating on it — the reference she
+       picked reads neutral, not the warm cream of the other one. --canvas-a is the same
+       colour with alpha, for the frosted header/dock/bottom fade. */
+    --canvas: #F0F0F1;
+    --canvas-a: rgba(240,240,241,0.82);
+    --canvas-0: rgba(240,240,241,0);
+    --card: #FFFFFF;
+    /* the same white with no alpha, for fades that end in nothing — written out rather than
+       using `transparent`, which is rgba(0,0,0,0) and can grey the middle of a gradient */
+    --card-0: rgba(255,255,255,0);
+    --hairline: rgba(0,0,0,0.055);
+    --field: #F4F4F6;
+    /* what sits ON an ink fill (selected cells, pressed buttons): white here, near-black in
+       dark mode, where the ink itself goes light */
+    --on-ink: #fff;
+    --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+    /* the label face — meta rows, pills, rail heads, stepper labels. It WAS 'SF Mono'; with
+       that declaration switched off in inspect the whole interface read better, so the labels
+       now share the body's sans and the only faces that differ anywhere are the day badge's
+       Lexend Exa and the weekly summary's serif. Kept as its own token so the label layer
+       stays one edit away from a face of its own again. */
+    --mono: var(--font);
+    --day: 'Lexend Exa', var(--mono);
+    /* Composer-unfold speed, as ONE multiplier over every duration in the gesture, set from
+       Settings (see UNFOLD_STEPS). 1 is the tuned default; 0 collapses every duration to 0s,
+       which is the "no animation" end of the scale. Because it multiplies rather than
+       replaces, the ratios between the four transitions survive any setting — which is the
+       whole reason they read as one move. */
+    --unfold-k: 1;
+    /* The VISUAL viewport — what she can actually see — published from JS (syncViewportVars).
+       iOS does not shrink the layout viewport for the keyboard: 100dvh stays exactly as it was,
+       and Safari instead scrolls the visual viewport up to chase the caret, dragging every
+       position:fixed overlay with it. These two are the only honest numbers while a keyboard is
+       open. The fallbacks are what desktop and any browser without visualViewport get. */
+    --vvh: 100dvh;
+    --vvt: 0px;
+    /* the raw, ungated version of the band below — see syncViewportVars. Anything that needs to
+       SIT ON TOP of the keyboard (rather than reserve space for it) wants this one. */
+    --vvb: 0px;
+    /* the keyboard's band, in two halves that are never both set: --kb is the LIVE one, measured
+       as innerHeight - (--vvh + --vvt), and --kbr is the one PREDICTED from last time while the
+       keyboard is still on its way (see reserveForKeyboard). Overlays run to the screen bottom
+       and lift their content by the sum, so the sum staying constant across the keyboard's
+       arrival is what keeps anything from moving. */
+    --kb: 0px;
+    --kbr: 0px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--canvas);
+    font-family: var(--font);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  button { font-family: var(--font); cursor: pointer; }
+
+  .wrap { max-width: 520px; margin: 0 auto; padding: 0 16px 150px; }
+
+  /* header */
+  .header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--canvas-a);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    /* the extra bottom padding is the breathing room between W31 and the first card */
+    padding: calc(env(safe-area-inset-top) + 28px) 0 52px;
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* scrolling down tucks the header away; any scroll up brings it back */
+  .header.hidden { transform: translateY(-100%); }
+  @media (prefers-reduced-motion: reduce) { .header { transition: none; } }
+  .header::after { /* frosted gradient hanging under the header instead of a hard edge */
+    content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 22px;
+    background: var(--canvas-a);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    -webkit-mask-image: linear-gradient(to bottom, black, transparent);
+    mask-image: linear-gradient(to bottom, black, transparent);
+    pointer-events: none;
+  }
+  /* nothing but the centred date line — anything flanking it crowded the row */
+  .header-top { display: flex; justify-content: center; align-items: center; min-height: 22px; }
+
+  /* ---------- the wrapped cue: one small 'v' under the period ----------
+     It replaced a magic wand that sat absolutely-positioned over the first card's top
+     right corner, where it read as a smudge on the entry rather than a control of its own.
+     Down here it belongs to the PERIOD — the thing the wrapped is actually about.
+
+     It is not sticky, on purpose. The header is (z-index 10), so this can never sit inside
+     the header's padding: it would be painted over by the frost. Instead the header gives
+     up most of its bottom padding whenever the cue is showing, and the cue takes that room. */
+  /* env() cannot be read from JS: an unregistered custom property is substituted as raw
+     tokens, so `--sat: env(safe-area-inset-top)` comes back out of getComputedStyle as the
+     literal string. A zero-size probe whose PADDING is the inset resolves to real pixels. */
+  #satProbe {
+    position: fixed; top: 0; left: 0; width: 0; height: 0;
+    padding-top: env(safe-area-inset-top);
+    visibility: hidden; pointer-events: none;
+  }
+
+  .wrapped-cue { display: flex; justify-content: center; padding: 0 0 18px; }
+  .wrapped-cue[hidden] { display: none; }
+  .wrap.has-cue > .header { padding-bottom: 12px; }
+  .wc-chev {
+    background: none; border: none; padding: 6px 26px; line-height: 0;
+    /* The old #C4C4C9 was 1.5:1 against the canvas and read as simply not there. This sits at
+       about 2.1:1 — quiet, but findable. It can afford to stay quiet BECAUSE it is no longer
+       the only way in: "summarize with ai" is a labelled control in the summary block, and
+       this is the shortcut beside it rather than the whole path. */
+    color: #A8A8AD;
+    touch-action: none;             /* the drag is ours — don't let it scroll the list */
+    -webkit-tap-highlight-color: transparent;
+    transition: color 0.2s ease, transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* the glyph shrinks; the padding does NOT, so the tap target stays a comfortable ~34px
+     even though the mark itself is small */
+  .wc-chev svg { width: 17px; height: 17px; display: block; }
+  @media (hover: hover) { .wc-chev:hover { color: #6E6E73; } }
+  /* while dragging, the chevron follows the finger a little and darkens with the pull —
+     the control itself is the progress indicator, so nothing extra has to appear */
+  .wc-chev.pulling { transition: none; }
+  /* the whole cue fades out as the list scrolls up under the header. Driven by --cue-o
+     from the scroll handler rather than by a class, so it's continuous, not a snap.
+     Deliberately NO transition: scroll already delivers a value every frame, so a
+     transition on top of it only makes the fade lag behind the finger. */
+  .wrapped-cue { opacity: var(--cue-o, 1); }

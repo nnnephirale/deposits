@@ -1,0 +1,233 @@
+  /* inline formatting */
+  .rt-b { font-weight: 600; }
+  .rt-i { font-style: italic; }
+  .rt-u { text-decoration: underline; text-underline-offset: 2px; }
+  .rt-m {
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--field); padding: 1px 5px; border-radius: 5px;
+  }
+  /* line formatting: "- " lines render as bullets, leading two-space units as indent */
+  .rt-line { padding-left: calc(var(--ind, 0) * 16px); }
+  .rt-line:empty::before { content: "\00a0"; }
+  /* indented (non-bullet) lines read as a blockquote: a quiet warm bar down the left.
+     no vertical padding, so consecutive quoted lines share one continuous bar. the level
+     offsets the whole thing right, so a single bar nests instead of stacking. */
+  .rt-line.rt-quote {
+    margin-left: calc((var(--ind, 1) - 1) * 16px);
+    padding-left: 12px;
+    border-left: 2.5px solid #D8D4CC;
+    color: #5B5B60;
+  }
+  /* "---" divider: a quiet full-width warm rule, breathing room above and below */
+  .rt-hr {
+    border: none; border-top: 1.5px solid #E0DCD3;
+    margin: 12px 0; height: 0;
+  }
+  .rt-bullet { display: flex; gap: 7px; }
+  .rt-dot { flex: none; color: #C7C7CC; user-select: none; -webkit-user-select: none; }
+  .rt-body { flex: 1; min-width: 0; }
+  /* checklist item: a tappable circle in place of the bullet dot. checked = filled + struck.
+     roomier vertical rhythm than a plain paragraph — items want to breathe. */
+  .rt-check { display: flex; gap: 9px; align-items: flex-start; padding: 3px 0; }
+  .rt-box {
+    flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 50%;
+    border: 1.75px solid #C7C4BD; color: var(--on-ink); box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background 0.15s ease, border-color 0.15s ease;
+  }
+  .rt-box.live { cursor: pointer; touch-action: manipulation; -webkit-touch-callout: none; }
+  .rt-box.on { background: var(--ink); border-color: var(--ink); }
+  .rt-box svg { width: 12px; height: 12px; }
+  /* a day takes the tick's place inside the same filled circle: same box, same fill, a letter
+     instead of a glyph. The face and the raised digit are the day badge's, so Tuesday looks
+     like Tuesday wherever it appears. */
+  .rt-box-day {
+    font-family: var(--day); font-weight: 500; font-size: 9px; letter-spacing: 0;
+    user-select: none; -webkit-user-select: none;
+  }
+  .rt-box-day sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
+
+  /* the day strip, on a long press of the circle */
+  .mark-pop {
+    position: fixed; z-index: 60; display: flex; align-items: center; gap: 3px;
+    padding: 5px; border-radius: 999px;
+    background: var(--card);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 12px 34px rgba(0,0,0,0.16);
+    border: 1px solid rgba(0,0,0,0.04);
+    opacity: 0; transform: scale(0.96);
+    transition: opacity 0.16s ease, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .mark-pop.show { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) {
+    .mark-pop { transition: none; }
+  }
+  /* every cell is the checklist circle at a tappable size — the strip is a row of the thing it
+     is going to put in the box, so what you pick is what you get */
+  .mp-day {
+    flex: none; width: 30px; height: 30px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1.75px solid transparent; border-radius: 50%;
+    background: var(--field); color: #6B6B70;
+    font-family: var(--day); font-weight: 500; font-size: 10px; letter-spacing: 0;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .mp-day sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
+  .mp-day.on { background: var(--ink); color: var(--on-ink); }
+  .mp-day svg { width: 13px; height: 13px; }
+  @media (hover: hover) { .mp-day:not(.on):hover { background: #E9E9EC; color: var(--ink); } }
+  .mp-day:active { transform: scale(0.94); }
+  /* the two that aren't days stand apart from the seven that are */
+  .mp-div { flex: none; width: 1px; height: 18px; background: var(--hairline); margin: 0 2px; }
+  /* empty reads as the unchecked box itself — an outline with nothing in it */
+  .mp-clear { background: none; border-color: #C7C4BD; }
+  .rt-check.done .rt-body { color: var(--subtle); text-decoration: line-through; text-decoration-color: #C7C4BD; }
+  /* read-more: the pill that floats the folded entry in a centred modal */
+  .read-more {
+    display: inline-flex; align-items: center; margin-top: 8px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.4px;
+    color: var(--subtle); background: var(--field);
+    border: none; border-radius: 999px; padding: 5px 12px; cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .read-more:active { transform: scale(0.98); }
+  .read-more:hover { color: var(--ink); }
+  /* inline link — a tappable mono pill; label defaults to the domain, editable in raw text.
+     display:inline + box-decoration-break:clone so a long label wraps across lines and each
+     line fragment still gets the pill's padding/rounding, instead of overflowing/clipping. */
+  .rt-link {
+    display: inline;
+    -webkit-box-decoration-break: clone; box-decoration-break: clone;
+    font-family: var(--mono); font-size: 0.8em; letter-spacing: 0.2px;
+    background: var(--field); color: var(--ink); text-decoration: none;
+    padding: 1px 7px 1px 6px; border-radius: 6px;
+    vertical-align: 1px; overflow-wrap: anywhere; cursor: pointer;
+  }
+  .rt-link svg { opacity: 0.45; vertical-align: -1px; margin-right: 3px; }
+  /* pasted images — stored on the entry, referenced in text by a short ![photo:id] marker */
+  .rt-img {
+    display: block; max-width: 100%; border-radius: 12px; margin: 6px 0; cursor: zoom-in;
+    -webkit-touch-callout: none; user-select: none; -webkit-user-select: none;
+  }
+  /* photos added back to back: a scrollable row of equal rounded cards, so a burst of
+     images reads as a set instead of a stack that buries the text under it */
+  .rt-gallery {
+    position: relative;
+    display: flex; gap: 8px; margin: 8px 0;
+    overflow-x: auto; scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .rt-gallery::-webkit-scrollbar { display: none; }
+  /* the grab cursor only appears where there is actually somewhere to drag to: the wrapper
+     carries show-left/show-right from the same overflow measurement the edge fades use. It
+     overrides the images' own zoom-in, because at that moment the row is the thing you're
+     holding — a click without a drag still opens the preview. */
+  .rt-gal-wrap.show-left .rt-gallery, .rt-gal-wrap.show-right .rt-gallery,
+  .rt-gal-wrap.show-left .rt-gallery .rt-img, .rt-gal-wrap.show-right .rt-gallery .rt-img {
+    cursor: grab;
+  }
+  .rt-gallery.dragging, .rt-gallery.dragging .rt-img { cursor: grabbing !important; }
+  /* the fades live on a WRAPPER, not on the scroller. an absolutely positioned pseudo-element
+     inside an overflow container joins that container's scrollable content, so it drifts with
+     the images instead of staying pinned to the visible edge — which is why the right-hand
+     one only sometimes appeared to be in the right place. the wrapper doesn't scroll, so
+     these stay put. mask-image is what makes the BLUR fall off too; without it the
+     backdrop-filter would end on a hard vertical seam. */
+  .rt-gal-wrap { position: relative; }
+  .rt-gal-wrap::before, .rt-gal-wrap::after {
+    content: ""; position: absolute; top: 0; bottom: 0; width: 46px; z-index: 2;
+    pointer-events: none; opacity: 0; transition: opacity 0.22s ease;
+    /* frosted rather than painted out: the photo stays legible through it, just softened.
+       saturate keeps the colour alive the way iOS materials do instead of going chalky. */
+    -webkit-backdrop-filter: blur(16px) saturate(180%); backdrop-filter: blur(16px) saturate(180%);
+  }
+  .rt-gal-wrap::before {
+    left: 0;
+    background: linear-gradient(to left, rgba(255,255,255,0), rgba(255,255,255,0.5));
+    -webkit-mask-image: linear-gradient(to left, transparent, black);
+    mask-image: linear-gradient(to left, transparent, black);
+  }
+  .rt-gal-wrap::after {
+    right: 0;
+    background: linear-gradient(to right, rgba(255,255,255,0), rgba(255,255,255,0.5));
+    -webkit-mask-image: linear-gradient(to right, transparent, black);
+    mask-image: linear-gradient(to right, transparent, black);
+  }
+  .rt-gal-wrap.show-left::before, .rt-gal-wrap.show-right::after { opacity: 1; }
+  /* page buttons: desktop only, and only once the pointer is over the set. Touch has the drag
+     and the snap already, and a permanent pair of chevrons over someone's photos is chrome the
+     phone layout does not need. Hidden by default so the mobile build never has to opt out. */
+  .rt-gal-nav { display: none; }
+  @media (min-width: 1080px) and (hover: hover) {
+    .rt-gal-nav {
+      display: flex; align-items: center; justify-content: center;
+      position: absolute; top: 50%; transform: translateY(-50%) scale(0.94);
+      width: 34px; height: 34px; padding: 0; z-index: 3;
+      border: none; border-radius: 50%; color: var(--ink);
+      background: rgba(255,255,255,0.82);
+      -webkit-backdrop-filter: blur(14px) saturate(180%); backdrop-filter: blur(14px) saturate(180%);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.06), 0 6px 18px rgba(0,0,0,0.12);
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .rt-gal-nav svg { width: 17px; height: 17px; display: block; }
+    .gn-prev { left: 8px; }
+    .gn-next { right: 8px; }
+    /* each arrow rides its own side's fade: the same show-left/show-right the fades use, so an
+       arrow is only ever offered when that direction actually has somewhere to go. */
+    .rt-gal-wrap:hover.show-left .gn-prev,
+    .rt-gal-wrap:hover.show-right .gn-next {
+      opacity: 1; pointer-events: auto; transform: translateY(-50%) scale(1);
+    }
+    .rt-gal-nav:active { transform: translateY(-50%) scale(0.92); background: var(--card); }
+    /* a fanned deck isn't a scroller — nothing to page through */
+    .rt-gallery.stacked ~ .rt-gal-nav { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .rt-gal-nav { transition: opacity 0.18s ease; } }
+  .rt-gallery .rt-img {
+    flex: none; width: 62%; max-width: 220px; aspect-ratio: 4 / 5;
+    object-fit: cover; margin: 0; border-radius: 14px; scroll-snap-align: start;
+  }
+  /* two fit the width exactly; three or more spill into a scroll */
+  .rt-gallery:not(.stacked):has(> :nth-child(2):last-child) .rt-img { width: calc(50% - 4px); max-width: none; }
+  .rt-gallery .rt-img {
+    transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1), margin 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+                transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* pinched shut: a fanned deck. white ring so the cards still read as separate objects. */
+  .rt-gallery.stacked { overflow: visible; gap: 0; padding: 6px 0; }
+  .rt-gallery.stacked .rt-img {
+    width: 58%; max-width: 200px;
+    box-shadow: 0 0 0 3px var(--card), 0 6px 16px rgba(0,0,0,0.16);
+  }
+  .rt-gallery.stacked .rt-img + .rt-img { margin-left: -44%; }
+  .rt-gallery.stacked .rt-img:nth-child(1) { transform: rotate(-3deg); z-index: 4; }
+  .rt-gallery.stacked .rt-img:nth-child(2) { transform: rotate(2.2deg); z-index: 3; }
+  .rt-gallery.stacked .rt-img:nth-child(3) { transform: rotate(-1.4deg); z-index: 2; }
+  .rt-gallery.stacked .rt-img:nth-child(n+4) { transform: rotate(3deg); z-index: 1; }
+  @media (prefers-reduced-motion: reduce) { .rt-gallery .rt-img { transition: none; } }
+  /* display sizes chosen from the preview (3x = full width, the default above) */
+  .rt-img.sz-2x { max-width: 66%; }
+  .rt-img.sz-1x { max-width: 33%; }
+  .rt-img.sz-inline {
+    display: inline; height: 1.35em; width: auto; max-width: 100%;
+    margin: 0 3px; vertical-align: -0.28em; border-radius: 5px;
+  }
+
+
+  /* redacted text is still the real text, set in Redacted Script so every glyph is a scribble —
+     the line keeps its own length and rhythm instead of becoming a uniform block. display=block
+     on the font link means it never flashes as readable text while the font loads. tap swaps
+     back to the body face with a short fade so the reveal breathes rather than snaps. */
+  .redacted {
+    font-family: 'Redacted Script', cursive; font-weight: 400;
+    color: var(--subtle); cursor: pointer;
+    transition: color 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none; -webkit-user-select: none;
+  }
+  @media (hover: hover) { .redacted:not(.revealed):hover { color: #636366; } }
+  .redacted.revealed {
+    font-family: inherit; color: inherit; user-select: text; -webkit-user-select: text;
+    animation: unredact 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes unredact { from { opacity: 0.2; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .redacted.revealed { animation: none; } }
