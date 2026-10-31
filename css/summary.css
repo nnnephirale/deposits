@@ -1,0 +1,86 @@
+  /* day view: the topics ride on the entry's own first row, in line with the day badge —
+     [badge] [TOPIC] [TOPIC…] — and the text starts underneath at its FULL width. They used
+     to stand in a third column at the right, which was a clean edge bought at the cost of
+     94px off every line, so a day-view entry wrapped where the same text in topic view
+     didn't. The row costs one line's height once; the column cost width on every line. */
+  .entry-tags {
+    display: flex; gap: 5px; margin-bottom: 7px;
+    /* the badge sits at the top of the gutter, so matching its 22px box here puts pill and
+       badge on one axis with no per-element nudging */
+    min-height: 22px; align-items: center;
+  }
+  /* the fixed 78px is kept from the old side column: a short label like WORK measures the
+     same as a long one, so a run of pills reads as a row of equal marks rather than ragged
+     labels. Fixed height + matching line-height centres the text without flex, which would
+     break the ellipsis. */
+  .entry-tags .pill {
+    flex: none; width: 78px; height: var(--pill-h); line-height: var(--pill-h);
+    padding: 0 8px; text-align: center;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .entry-day { font-family: var(--mono); font-size: 11px; color: #A9A9AD; } /* 15% darker than #C7C7CC — readable on a phone */
+  .group.dense { margin-bottom: 12px; }
+
+  .empty {
+    text-align: center; color: var(--subtle); font-size: 14px;
+    padding: 64px 24px; line-height: 1.6;
+  }
+
+  /* weekly AI summary — a different voice, so a different face (serif italic) */
+  .wsum { position: relative; margin: 0 0 22px; padding: 2px 30px 0 4px; min-height: 18px; }
+  .wsum.collapsed { margin: 0; padding: 0; min-height: 0; } /* hidden: no reserved space — eye rides the next row down */
+  .wsum.collapsed .wsum-eye { top: -5px; } /* nudged to align with the group-head row's vertical center */
+  .wsum-text {
+    font-family: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+    font-style: normal; font-size: 22px; line-height: 1.4;
+    margin: 0; cursor: pointer;
+  }
+  .wsum-text.pending { color: var(--subtle); }
+  /* a reading that failed says why, where the reading would have been */
+  .wsum-text.recap-failed { color: #8A5A11; }
+  /* under the title card's "another name" — the count of names already rolled, or why one
+     didn't arrive. Quiet enough that a title with only one name shows nothing at all. */
+  .recap-title-note { margin: 6px 0 0; font-size: 11px; color: var(--subtle); }
+  /* provenance pill: MINE (hand-written) / V1 (first AI take) / V2… (re-summarized).
+     when a week holds several takes, all show — active one filled, tap another to switch. */
+  .wsum-pill {
+    position: relative; /* anchors the invisible hit-slop below */
+    display: inline-block; font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.6px; text-transform: uppercase; color: var(--subtle);
+    background: var(--field); border-radius: 5px; padding: 2px 6px;
+    line-height: 1; margin: 0 0 6px; cursor: pointer;
+  }
+  /* the visible pill stays tiny; this transparent overlay makes it a ~36px-tall thumb
+     target. horizontal slop is kept small so adjacent pills' zones don't overlap. */
+  .wsum-pill::after { content: ""; position: absolute; inset: -12px -2px -10px; }
+  .wsum-pill + .wsum-pill { margin-left: 6px; }
+  .wsum-pill.on { background: var(--ink); color: var(--on-ink); }
+  /* the two ways to start a summary, side by side */
+  .wsum-add {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
+    text-transform: uppercase; color: #C7C7CC; cursor: pointer;
+    background: none; border: none; padding: 0;
+  }
+  /* the AI one leads: it is the offer, and the hand-written invite is the alternative to it.
+     Still quiet — a filled chip in the app's own field grey, not a call to action. */
+  .wsum-ai {
+    color: var(--ink); background: var(--field);
+    border-radius: 7px; padding: 5px 9px; margin-right: 10px;
+  }
+  @media (hover: hover) {
+    .wsum-ai:hover { background: #E9E9EC; }
+    .wsum-add:not(.wsum-ai):hover { color: var(--subtle); }
+  }
+  .wsum-ai:active { transform: scale(0.98); }
+  /* the answer to "why is there no AI option" — quieter than either of the two real offers,
+     because it is an explanation first and a control second */
+  .wsum-nokey { margin-left: 10px; color: #D2D2D7; }
+  /* a take that survived in the back-catalogue — the app's restore rose, same as the tag undo */
+  .wsum-restore { margin-left: 10px; color: #C43C36; }
+  @media (hover: hover) { .wsum-nokey:hover { color: var(--subtle); } }
+  .wsum-eye {
+    position: absolute; top: 0; right: 0;
+    background: none; border: none; padding: 4px; line-height: 0;
+    color: #D6D6DB; /* barely there by design */
+  }
+  .wsum-eye svg { width: 15px; height: 15px; }

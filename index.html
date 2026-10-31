@@ -24,7 +24,21 @@
 <link href="https://fonts.googleapis.com/css2?family=Lexend+Exa:wght@500&display=swap" rel="stylesheet">
 <!-- Redacted Script: ||redact|| content drawn as scribbles until tapped. -->
 <link href="https://fonts.googleapis.com/css2?family=Redacted+Script&display=block" rel="stylesheet">
-<link rel="stylesheet" href="css/styles.css" />
+<!-- one stylesheet per part of the app. ORDER MATTERS: these are the old styles.css cut at
+     top-level boundaries, so the cascade is exactly what it was. A rule that overrides another
+     at equal specificity has to stay in a later file (desktop.css and dark.css depend on it). -->
+<link rel="stylesheet" href="css/base.css" />
+<link rel="stylesheet" href="css/bloom.css" />
+<link rel="stylesheet" href="css/tuner.css" />
+<link rel="stylesheet" href="css/settings.css" />
+<link rel="stylesheet" href="css/list.css" />
+<link rel="stylesheet" href="css/richtext.css" />
+<link rel="stylesheet" href="css/format-bar.css" />
+<link rel="stylesheet" href="css/summary.css" />
+<link rel="stylesheet" href="css/composer.css" />
+<link rel="stylesheet" href="css/recap.css" />
+<link rel="stylesheet" href="css/desktop.css" />
+<link rel="stylesheet" href="css/dark.css" />
 <!-- the theme is resolved here, before the stylesheet paints anything, so a dark-mode open never
      flashes the light canvas first. applyTheme() in the module keeps it current after that. -->
 <script>

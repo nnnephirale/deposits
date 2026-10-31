@@ -1,0 +1,220 @@
+  /* the period row: arrows flanking the tabs, all on one centred line. the tabs are both
+     the app's identity and its view switcher — tap the inactive one to switch view, tap the
+     active one to open the picker. */
+  .period-row {
+    display: flex; align-items: center; justify-content: center;
+    gap: 35px; /* ~1.1x a button's width, so the arrows sit well clear of the tabs */
+    margin-top: 10px;
+  }
+  .period-nav { display: flex; align-items: baseline; gap: 8px; }
+  .period-tab {
+    font-family: var(--mono); font-size: 30px; font-weight: 700; letter-spacing: -0.5px;
+    background: none; border: none; padding: 0; color: #C9C9CC;
+    line-height: 1.05; transition: color 0.18s ease;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    touch-action: manipulation;
+  }
+  .period-tab.on { color: var(--ink); }
+  .period-sep { font-family: var(--mono); font-size: 19px; color: #D8D8DB; user-select: none; }
+
+  .stepper-btn {
+    flex: none;
+    font-size: 15px; color: #BFBFC4; background: var(--card);
+    border: none; border-radius: 12px;
+    width: 32px; height: 32px; line-height: 1;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 3px 10px rgba(0,0,0,0.04);
+  }
+  .stepper-center {
+    text-align: center;
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  }
+  /* a flex row, not centred text, so the live dot below can opt out of the row's alignment
+     (`align-self`) and hang from the top of the line box. The dates keep normal baseline
+     alignment, and the row still centres as one unit under the stepper. */
+  .wk-range {
+    font-size: 13px; color: #A8A8AC;
+    display: flex; align-items: baseline; justify-content: center;
+  }
+  /* the live-week mark: the dates are the only thing on screen that can say "you're in this
+     one", since W31 looks the same whichever week you've stepped to. Same green and same
+     white ring as the sync dot in the rail — one meaning, one mark.
+     It rides like a DEGREE POINT, not on the baseline, and that position is measured rather
+     than eyeballed: a real "°" in this face at 13px has its ink from 4.70px to 8.94px above
+     the baseline, centred at 6.82px. Hung from the top of the 15px line box (whose baseline
+     sits 9.16px down) a 5.1px dot centres at 6.61px above the baseline — 0.21px off the real
+     glyph, so no nudge is worth carrying. `align-self` is flex-start, NOT baseline: an empty
+     flex item has no baseline of its own and the synthesised one put the dot BELOW the text
+     and stretched the row to 16.8px. If the label ever leaves 13px, re-measure. */
+  .wk-now {
+    flex: none; align-self: flex-start; margin-left: 7px;
+    width: 5.1px; height: 5.1px; border-radius: 50%;  /* 15% under the 6px sync dot */
+    background: #55A862; box-shadow: 0 0 0 2px var(--card);
+  }
+
+  /* groups — the topic label lives INSIDE the white block now, as its heading */
+  .group { margin-bottom: 18px; }
+  .group-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 18px 20px 2px;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    cursor: grab;
+  }
+  .group-dot { width: 8px; height: 8px; border-radius: 4px; display: inline-block; flex: none; }
+  /* a day bucket has no heading — its entries' badges name the day — so the card's first
+     entry needs the breathing room the heading used to provide */
+  .group-card > .entry:first-child { padding-top: 20px; }
+  .group-label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; font-weight: 600;
+  }
+  /* white block floating on the grey canvas: generous radius, soft layered shadow */
+  .group-card {
+    background: var(--card); border-radius: 24px; overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 6px 18px rgba(0,0,0,0.045);
+  }
+
+  /* an entry is a left gutter (the day badge, with a hairline threading between badges)
+     and a body. the divider between entries starts at the body, not the card edge. */
+  .entry {
+    position: relative; display: flex; gap: 16px;
+    padding: var(--entry-pad-y) 20px; cursor: pointer;
+    /* the measurements the badge / first line / first pill / elbow all key off.
+       --line-box is the body text's own line box: 15px × 1.5. */
+    --entry-pad-y: 15px;
+    --line-box: 22.5px;
+    --pill-h: 18px;
+    /* the breath between a mark and the thread leaving it. One number, so the badge→thread
+       gap and the elbow→dashes gap are the same by construction rather than by eye. */
+    --badge-gap: 5.75px;
+  }
+  /* the pinned block's heading: the pin where a topic group has its colour dot, so the two
+     read as the same kind of heading with a different name on it */
+  .group-pin { display: inline-flex; color: var(--subtle); line-height: 0; }
+  .group-pin svg { width: 13px; height: 13px; }
+  .pinned-group .group-label { color: var(--ink); }
+
+  .entry-gutter { position: relative; flex: none; width: 22px; }
+  /* the thread linking one day badge to the next — from under this badge to the next one.
+     suppressed on the last entry so it doesn't dangle into the card's bottom padding. */
+  .entry:not(:last-child) .entry-gutter::after {
+    content: ""; position: absolute; left: 50%; width: 1px;
+    /* badge bottom + the gap: (line-box + 22)/2 + 5.75 — the same 28px it always was, but
+       now stated as "below the badge" so the dashed variant can reuse the gap */
+    top: calc((var(--line-box) + 22px) / 2 + var(--badge-gap));
+    bottom: -32px; margin-left: -0.5px;
+    background: var(--hairline);
+  }
+
+  /* --- back-to-back repeats of the same day ---------------------------------------
+     A run of entries on one day states the day once. The thread then carries it forward:
+     where the next badge would have been it turns toward the text on a rounded elbow,
+     then continues dashed. Same hairline throughout, so it reads as the thread pausing
+     rather than as a second kind of rule. */
+  .entry:has(+ .entry.rep) .entry-gutter::after {
+    background: none;
+    width: 11px;      /* how far the elbow reaches toward the text */
+    /* The stub lands on the CENTRE OF THE REPEAT'S FIRST LINE — same axis as the badge it
+       stands in for. .entry-gutter is the entry's CONTENT box, so getting there means
+       clearing this row's padding-bottom AND the next row's padding-top before the half
+       line box; measuring from the border box instead leaves the elbow a full 30px high. */
+    bottom: calc(-1 * (var(--entry-pad-y) * 2 + var(--line-box) / 2));
+    border-left: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+    border-bottom-left-radius: 9px;
+  }
+  /* the repeat's own gutter: dashed through the space its badge would have occupied, and
+     on to the next entry. Replaces the solid thread rather than sitting on top of it. */
+  .entry.rep .entry-gutter::after { display: none; }
+  .entry.rep .entry-gutter::before {
+    content: ""; position: absolute; left: 50%; margin-left: -0.5px;
+    /* The dashes start the SAME distance below the elbow that a solid thread starts below
+       its badge (--badge-gap). The elbow's stub sits at half a line box into this gutter, so
+       that plus the gap is where the dashes begin — not the badge-relative 28px, which left
+       a gap twice the size because there is no 22px badge here to clear. */
+    top: calc(var(--line-box) / 2 + var(--badge-gap));
+    bottom: -32px;
+    border-left: 1px dashed var(--hairline);
+  }
+  /* ...and it keeps turning in. A run of three or more used to get exactly one elbow — the first
+     repeat's, drawn by the entry above it — and every repeat after that got a dashed line running
+     straight past, pointing at nothing. Each repeat that has another below it now draws the turn
+     into it as well.
+     Only the CORNER is drawn, not the whole vertical: the dashed thread above is already doing
+     that work, so this is a short solid lead-in plus the 9px curve, and the elbow reads as the
+     dashes turning solid to make the turn rather than as a second line beside them. The 14px is
+     that lead-in plus the radius; `top: auto` is required because an absolutely positioned box
+     with top, bottom AND height set ignores `bottom`, which would pin the corner to the top of
+     the gutter instead of the bottom. Beats `.entry.rep …::after { display: none }` above on
+     specificity (four classes to two), so order here is for reading, not for the cascade. */
+  .entry.rep:has(+ .entry.rep) .entry-gutter::after {
+    content: ""; display: block;
+    width: 11px;                /* the same reach toward the text as the solid elbow */
+    height: 14px; top: auto;
+    bottom: calc(-1 * (var(--entry-pad-y) * 2 + var(--line-box) / 2));
+    background: none;
+    border-left: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--hairline);
+    border-bottom-left-radius: 9px;
+  }
+  .entry.rep:last-child .entry-gutter::before { bottom: 16px; }
+  .day-badge {
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 7px;
+    background: #F1F1F3; color: #8E8E93;
+    font-family: var(--day); font-weight: 500; font-size: 9px; letter-spacing: 0;
+    user-select: none; -webkit-user-select: none;
+  }
+  .day-badge sup { font-size: 0.72em; vertical-align: super; line-height: 0; }
+  /* centre the 22px badge on the 22.5px first line box — and in day view that first box is
+     the 22px topic row, so badge and pills land on the same axis without a second rule.
+     Scoped to the gutter so day view's group heading keeps its own alignment. */
+  .entry-gutter .day-badge { margin-top: calc((var(--line-box) - 22px) / 2); }
+  .entry-body { flex: 1; min-width: 0; }
+  .entry + .entry::before {
+    content: ""; position: absolute; top: 0; left: 58px; right: 20px;
+    height: 1px; background: var(--hairline);
+  }
+  /* ---- swipe an entry open ---- */
+  /* pan-y is what makes this coexist with the list: the browser keeps vertical scrolling and
+     hands us everything horizontal, so nothing has to guess which gesture is starting.
+     The rail is parked just off the card's right edge and the CARD is what slides — .group-card
+     already clips, so the rail needs no measuring, no animating in, and no z-index games. */
+  .entry {
+    touch-action: pan-y;
+    /* iOS's own text gestures are the other thing that steals this drag: a horizontal pull
+       across a paragraph starts a selection, the pointer is cancelled, and the card springs
+       back half-open. Nothing in a card is selectable text as far as the app is concerned —
+       tapping it opens the editor, and the read-modal is where a long entry is actually read —
+       so the selection and the long-press callout both come off. */
+    user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+    transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* nothing eased while a finger is on it — the card tracks the finger, it doesn't chase it */
+  .entry.swiping { transition: none; }
+  .entry.swiped { transform: translateX(calc(-1 * var(--rail-w))); }
+  /* a photo row does its own sideways scrolling, so it takes its axis back */
+  .rt-gallery { touch-action: pan-x pan-y; }
+  .entry-rail {
+    --rail-w: 132px;
+    position: absolute; left: 100%; top: 0; bottom: 0; width: var(--rail-w);
+    display: flex; align-items: stretch;
+  }
+  .entry { --rail-w: 132px; }
+  .er-btn {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 0; border: none; background: var(--field); color: var(--subtle);
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .er-btn svg { width: 19px; height: 19px; }
+  .er-btn:active { background: #E9E9EC; }
+  /* on-state for the two toggles: they say what the entry IS, so a pinned entry's rail opens
+     with the pin already lit and the tap plainly reads as "turn this off" */
+  .er-pin.on, .er-lock.on { background: var(--ink); color: var(--on-ink); }
+  .er-del { background: #FBE3E1; color: #C43C36; }
+  .er-del:active { background: #F7D2CF; }
+  /* the lock means what it says: delete stands down rather than disappearing, so the rail is
+     the same three slots whatever state the entry is in */
+  .er-del:disabled { background: var(--field); color: #D8D8DE; }
+  @media (prefers-reduced-motion: reduce) { .entry { transition: none; } }
+
+  .entry p { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }

@@ -1,0 +1,145 @@
+  /* the line-ops popover: one vertical list of labelled rows, so related controls collapse
+     into a single button instead of a wall of glyphs. floats above the format row. */
+  /* Opens UPWARD, off the pill. Downward was wrong at BOTH breakpoints, for the same reason:
+     `position: absolute` resolves against the nearest POSITIONED ancestor, and the pill was not
+     one. On the phone that meant it resolved against .fmt-bar (position: fixed) and `top: 100%`
+     dropped it 8px below a bar that is already docked to the keyboard — i.e. behind the keyboard.
+     On desktop .fmt-bar is `position: static`, so it walked all the way up to .overlay and
+     `top: 100%` put it a full viewport height down, off-screen entirely — the "missing on
+     desktop" report. The pill is now the containing block at both sizes (see .fmt-bar-pill), and
+     the row it belongs to sits at the bottom of the screen, so up is the only direction with
+     anywhere to go. */
+  .line-pop {
+    position: absolute; left: 0; bottom: calc(100% + 8px); top: auto; z-index: 8;
+    min-width: 196px; padding: 6px;
+    background: var(--card); border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 12px 34px rgba(0,0,0,0.16);
+    animation: lpRise 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  /* each direction travels FROM the side it opens from, so the motion agrees with the placement */
+  @keyframes lpRise { from { opacity: 0; transform: translateY(6px) scale(0.98); } to { opacity: 1; transform: none; } }
+  @keyframes lpDrop { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .line-pop { animation: none; } }
+  .line-pop-row {
+    display: flex; align-items: center; gap: 11px; width: 100%;
+    padding: 10px 11px; border-radius: 11px;
+    background: none; border: none; text-align: left;
+    font-family: var(--font); font-size: 14px; color: var(--ink);
+  }
+  .line-pop-row:active { background: var(--field); }
+  .line-pop-row .lp-icon { flex: none; line-height: 0; color: #6B6B70; }
+  .line-pop-row .lp-icon svg { width: 19px; height: 19px; }
+  .line-pop-row .lp-label { flex: 1; min-width: 0; }
+
+  /* format bar — line ops (bullet/indent) while just typing, span ops (B I U…) once
+     text is selected. one slim row either way; the contents swap, the row never grows.
+     Floated free of the sheet's own flow and docked to the keyboard, not slotted between the
+     head and the field: a row that scrolls with the text is a row you lose the moment you type
+     past the first screen, and re-finding it costs a scroll every time you want to select
+     something. --kb / --kbr are the same live/predicted keyboard-band pair the sheet's own
+     padding uses (see reserveForKeyboard) — reusing them means the bar arrives already docked
+     to wherever the keyboard actually is, with no separate measurement to keep in sync. Distance
+     above the keyboard is fixed (12px gap) rather than tracking the tick accessory bar the way
+     the sheet's content does: the accessory bar's own iOS chrome sits between them either way,
+     so closing that last gap wouldn't remove a visible seam, just an amount of hidden padding. */
+  .fmt-bar {
+    position: fixed; left: 0; right: 0; z-index: 55;
+    /* max(), NOT a sum — this is the whole of "the bar sits way too high". These three are
+       alternative descriptions of the same floor (how far up the screen bottom is obstructed),
+       not things to stack: --vvb is the measured obstruction, --kbr the predicted one before the
+       keyboard has landed, and the safe-area inset the home indicator when nothing else is there.
+       Adding them double-counts: measured on her iPhone the pill's bottom sat 424px up, which is
+       exactly 34 (inset) + 378 (band) + 12 — the inset is already inside the keyboard's region,
+       so it bought 34px of nothing. max() picks whichever floor is real and lands it at 390.
+       --vvb rather than --kb on purpose: --kb is gated (see syncViewportVars) and reads 0 whenever
+       a measurement falls outside those gates, which drops the bar to the bottom of the screen and
+       leaves it stranded under the keyboard on the next focus. */
+    bottom: calc(max(var(--vvb), var(--kbr), env(safe-area-inset-bottom)) + 12px);
+    display: none; justify-content: center;
+    padding: 0 20px; pointer-events: none; /* only the pill itself should catch taps */
+    /* Do NOT put a transition on `bottom` here. Measured in Chrome (31 Jul): with
+       `transition: bottom …` on this rule, changing --kb on :root leaves the computed bottom
+       stuck at its old value forever — 12px with --kb at 336px — so the bar silently stops
+       tracking the keyboard altogether. Removing the transition, or setting --kb directly on
+       this element instead of an ancestor, both resolve it correctly to 348px. A transitioned
+       property whose value comes from calc(var(…)) does not get re-resolved when that var
+       changes on an ancestor. Nothing is lost: --kb and --kbr are built so exactly one is ever
+       non-zero and the sum is the same across the keyboard's arrival, so there is no jump here
+       to smooth over in the first place. */
+  }
+  .fmt-bar.show { display: flex; }
+  /* the styling row stands down while the tag popover is open. It is fixed at z-index 55 and the
+     popover is inside the sheet, so the bar would otherwise float across the chips — and there is
+     nothing to format while picking tags anyway. */
+  .fmt-bar.show.tag-open { display: none; }
+  /* full width of the sheet's own column rather than shrink-wrapping the buttons: a pill sized to
+     its contents changes width every time the row swaps (4 line ops vs 6 span ops), which reads as
+     the toolbar twitching rather than as its contents changing. Fixed width, contents distributed. */
+  /* position: relative so the line-ops popover has something to hang off that is the same box at
+     both breakpoints — without it the popover's containing block silently changes with the
+     .fmt-bar override below, which is what put it off-screen on desktop.
+     overflow is deliberately VISIBLE, not the auto it used to be: `overflow-x: auto` makes the
+     pill a scroll container, and per spec an `auto` on one axis forces the other off `visible`
+     too — so it clipped the popover on both axes. Six 38px buttons come to 228px inside a pill
+     that is never narrower than ~310px, so there was nothing to scroll anyway. */
+  .fmt-bar-pill {
+    position: relative;
+    display: flex; gap: 2px; pointer-events: auto;
+    flex: 1; max-width: 520px; justify-content: space-around;
+    background: var(--card); border-radius: 999px; padding: 6px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08), 0 10px 28px rgba(0,0,0,0.10);
+    border: 1px solid rgba(0,0,0,0.04);
+    overflow: visible;
+  }
+  /* the docked bar floats OVER the sheet rather than in it, so the sheet has to give back the
+     room it covers or the last line of text sits under the pill — reachable only by scrolling
+     it out from under, which is the thing a fixed bar is supposed to stop happening. --fmt-h is
+     the pill's own height plus its 12px gap, kept as one value used by both sides so the
+     clearance can't drift from the thing it is clearing. Only applied once the bar is actually
+     showing (.has-fmt), since before that there is nothing over the content. */
+  :root { --fmt-h: 60px; }
+  .sheet.expanse.has-fmt {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 28px + var(--kb) + var(--kbr) + var(--fmt-h));
+  }
+  .fmt-bar .sel-only, .fmt-bar .line-only { display: none; }
+  .fmt-bar.has-sel .sel-only { display: flex; }
+  .fmt-bar:not(.has-sel) .line-only { display: flex; }
+  /* No individual chip background any more — that was right for a row sitting loose on the
+     sheet, but this row now sits on ONE shared pill (.fmt-bar-pill), and a grey chip inside a
+     white pill reads as a second layer of chrome the screenshot doesn't have. Fixed width in
+     place of the old `flex: 1`: the row no longer spans full width to distribute evenly across,
+     and a single-glyph button ("I" is much narrower than "M") needs an explicit tap target or
+     the thin ones fall under the 40px-ish comfortable minimum. */
+  .fmt-btn {
+    flex: none; width: 38px; height: 36px;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
+    background: none; color: var(--ink); border: none; border-radius: 10px;
+    padding: 0; align-items: center; justify-content: center;
+    user-select: none; -webkit-user-select: none;
+  }
+  .fmt-btn svg { display: block; }
+  /* line ops (bullet/indent/outdent): the muted grey of the topic chips below, same as before */
+  .fmt-btn.line-only { color: #6B6B70; }
+  .fmt-btn.line-only:active { color: var(--on-ink); } /* keep the press invert (specificity beats the rest colour) */
+  .fmt-btn.line-only svg { width: 16.5px; height: 16.5px; }
+  .fmt-btn:active { background: var(--ink); color: var(--on-ink); }
+  .fmt-b { font-weight: 700; }
+  .fmt-i { font-style: italic; }
+  .fmt-u { text-decoration: underline; text-underline-offset: 2px; }
+  /* redact and link replace what used to be bare "R"/"L" letters (see LINK_ICON / REDACT_ICON) —
+     redact keeps the old letter's muted weight since a mask action reads as secondary next to
+     B/I/U; link stays full ink, matching how it reads in the screenshot. */
+  .fmt-btn.fmt-icon svg { width: 18px; height: 18px; }
+  .fmt-r { color: var(--subtle); }
+  .fmt-r:active { color: var(--on-ink); }
+  .entry-meta {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center;
+  }
+  .pill {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 3px 8px; border-radius: 999px; font-weight: 600;
+  }
+  .pill.mode {
+    border: 1px solid var(--hairline); color: var(--subtle); font-weight: 400;
+  }

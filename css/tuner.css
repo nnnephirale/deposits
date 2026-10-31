@@ -1,0 +1,79 @@
+  /* ---- the gradient tuner (TEMPORARY) ---- */
+  /* Scratch UI for dialling in the composer's fade — see the FADE_SPECS block in index.html.
+     Goes out with it once the numbers are settled.
+     z-index above the format pill (55) because it has to be usable while the composer is open
+     with the keyboard up, which is the only state where the thing it tunes is on screen.
+     Bottom-left on a phone so it clears the pill's own centred capsule; a fixed corner panel on
+     desktop. Width is capped either way — a control surface that spans the viewport is the one
+     thing her panels never do. */
+  .fade-tuner {
+    position: fixed; z-index: 70;
+    left: 12px; width: min(230px, calc(100vw - 24px));
+    bottom: calc(max(var(--vvb), var(--kbr), env(safe-area-inset-bottom)) + 84px);
+    padding: 10px 12px 8px;
+    background: rgba(255,255,255,0.92);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px);
+    border: 1px solid rgba(0,0,0,0.04); border-radius: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05), 0 12px 34px rgba(0,0,0,0.16);
+    user-select: none; -webkit-user-select: none;
+  }
+  /* the list's band lives at the bottom of the screen, so the dials for it move to the top */
+  .fade-tuner.at-top {
+    top: calc(env(safe-area-inset-top) + 12px); bottom: auto;
+  }
+  @media (min-width: 1080px) {
+    /* out of the composer's way entirely once there is room for it to stand aside */
+    .fade-tuner { left: 20px; bottom: 20px; width: 250px; }
+    .fade-tuner.at-top { top: 20px; bottom: auto; }
+  }
+  /* which of the two fades is being dialled — a segmented control, since these are modes of one
+     panel rather than two buttons, and the pair on screen is what says there ARE two */
+  .ft-seg { display: flex; gap: 4px; margin-bottom: 6px; }
+  .ft-seg button {
+    flex: 1; padding: 6px 0; border: none; border-radius: 8px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.5px;
+    background: var(--field); color: #6B6B70;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .ft-seg button.on { background: var(--ink); color: var(--on-ink); }
+  /* where to look — the answer to "I pulled the sliders and nothing changed" */
+  .ft-where {
+    margin: 0 0 8px; font-size: 10.5px; line-height: 1.4; color: var(--subtle);
+  }
+  .ft-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .ft-title {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.6px;
+    text-transform: uppercase; color: var(--subtle);
+  }
+  .ft-hide {
+    width: 22px; height: 22px; padding: 0; font-size: 15px; line-height: 1;
+    color: var(--subtle); background: none; border: none; border-radius: 7px;
+  }
+  /* the row IS the track — a filled background row, her slider idiom for a continuous value
+     worth scrubbing. No thumb: there is nothing to hit, so a press anywhere sets the value. */
+  .ft-row {
+    position: relative; display: flex; align-items: center; justify-content: space-between;
+    height: 30px; padding: 0 9px; margin-bottom: 4px;
+    border-radius: 9px; background: var(--field); overflow: hidden;
+    touch-action: none; cursor: ew-resize;
+  }
+  .ft-fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: #E4E4E9;
+  }
+  .ft-label, .ft-val {
+    position: relative; font-family: var(--mono); font-size: 11px; letter-spacing: 0.4px;
+    color: var(--subtle);
+  }
+  /* a value she has moved reads darker than one still sitting on its default, so the panel
+     says at a glance which of the five are actually doing anything */
+  .ft-row.moved .ft-label, .ft-row.moved .ft-val { color: var(--ink); }
+  .ft-foot { display: flex; gap: 6px; margin-top: 6px; }
+  .ft-copy, .ft-reset {
+    flex: 1; padding: 7px 0; border: none; border-radius: 9px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.4px;
+    background: var(--field); color: var(--ink);
+  }
+  /* reset is the destructive half of the pair, so it takes the app's faint-red treatment */
+  .ft-reset { flex: none; padding: 7px 12px; background: #FBE3E1; color: #C43C36; }
+  .ft-copy:active, .ft-reset:active { transform: scale(0.98); }
